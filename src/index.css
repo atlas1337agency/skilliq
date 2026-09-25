@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--bg-color);
+  --color-foreground: var(--text-color);
+  --color-primary: var(--primary-color);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted-color);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border-color);
+  --color-card: var(--card-color);
+}
+
+@layer base {
+  :root {
+    --bg-color: #F8F9FA;
+    --text-color: #1E293B;
+    --primary-color: #2563EB;
+    --primary-foreground: #FFFFFF;
+    --muted-color: #F1F5F9;
+    --muted-foreground: #64748B;
+    --border-color: #E2E8F0;
+    --card-color: #FFFFFF;
+    --accent-green: #10B981;
+    --accent-red: #EF4444;
+  }
+
+  .dark {
+    --bg-color: #0F172A;
+    --text-color: #F8FAFC;
+    --primary-color: #3B82F6;
+    --primary-foreground: #FFFFFF;
+    --muted-color: #1E293B;
+    --muted-foreground: #94A3B8;
+    --border-color: #334155;
+    --card-color: #1E293B;
+    --accent-green: #10B981;
+    --accent-red: #EF4444;
+  }
+
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: 'Inter', 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}
+
+@media (pointer: fine) {
+  body, a, button, p, div, span, h1, h2, h3, h4, h5, h6, li, ul, section, main, header, nav, footer, label {
+    cursor: none !important;
+  }
+  input, textarea, [contenteditable="true"] {
+    cursor: text !important;
+  }
+}

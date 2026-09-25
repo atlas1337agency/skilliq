@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the learning platform.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The unique identifier of the user."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The email address of the user."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The display name of the user."
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "The URL of the user's profile photo."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "description": "The role of the user."
+        }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "CourseProgress": {
+      "title": "CourseProgress",
+      "description": "A user's progress in a specific course.",
+      "type": "object",
+      "properties": {
+        "courseId": {
+          "type": "string",
+          "description": "The ID of the course."
+        },
+        "completedVideoIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of completed video IDs."
+        },
+        "currentVideoId": {
+          "type": "string",
+          "description": "The ID of the currently active video."
+        },
+        "isCompleted": {
+          "type": "boolean",
+          "description": "Whether the course is completed."
+        },
+        "completionDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The date the course was completed."
+        }
+      },
+      "required": ["courseId", "completedVideoIds", "isCompleted"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "A learning course or masterclass.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "instructor": { "type": "string" },
+        "instructorAvatar": { "type": "string" },
+        "instructorUrl": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "category": { "type": "string" },
+        "subCategory": { "type": "string" },
+        "isSingleVideo": { "type": "boolean" },
+        "language": { "type": "string" },
+        "videos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "duration": { "type": "string" },
+              "youtubeId": { "type": "string" },
+              "description": { "type": "string" },
+              "language": { "type": "string" },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": { "type": "string" },
+                    "url": { "type": "string" },
+                    "logoUrl": { "type": "string" }
+                  },
+                  "required": ["title", "url"]
+                }
+              }
+            },
+            "required": ["id", "title", "youtubeId"]
+          }
+        }
+      },
+      "required": ["id", "title", "description", "category", "isSingleVideo", "videos", "thumbnail"]
+    },
+    "LearningPath": {
+      "title": "LearningPath",
+      "description": "A path grouping multiple courses.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "courseIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "icon": { "type": "string" }
+      },
+      "required": ["id", "title", "description", "courseIds", "icon"]
+    },
+    "Banner": {
+      "title": "Banner",
+      "description": "An advertisement banner displayed on the platform.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "placement": { "type": "string" },
+        "desktopImageUrl": { "type": "string" },
+        "mobileImageUrl": { "type": "string" },
+        "targetUrl": { "type": "string" },
+        "language": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "placement", "desktopImageUrl", "mobileImageUrl", "isActive"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "A push notification displayed to users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "image": { "type": "string" },
+        "link": { "type": "string" },
+        "linkLogo": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "title", "message", "isActive"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "/users/{userId}/progress/{courseId}": {
+      "schema": { "$ref": "#/entities/CourseProgress" },
+      "description": "Stores user progress for specific courses."
+    },
+    "/courses/{courseId}": {
+      "schema": { "$ref": "#/entities/Course" },
+      "description": "Global catalog of courses."
+    },
+    "/learningPaths/{pathId}": {
+      "schema": { "$ref": "#/entities/LearningPath" },
+      "description": "Global catalog of learning paths."
+    },
+    "/banners/{bannerId}": {
+      "schema": { "$ref": "#/entities/Banner" },
+      "description": "Global catalog of banners."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Global catalog of notifications."
+    }
+  }
+}

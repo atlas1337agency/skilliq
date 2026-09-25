@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    
+    <!-- Primary Meta Tags -->
+    <title>Skilliq | Free Structured Learning Platform & Masterclasses</title>
+    <meta name="title" content="Skilliq | Free Structured Learning Platform & Masterclasses" />
+    <meta name="description" content="Discover Skilliq: A premium, distraction-free learning platform featuring curated YouTube courses, structured learning paths, and expert masterclasses in cybersecurity, programming, AI, and design. 100% Free." />
+    <meta name="keywords" content="Skilliq, NEXA 1337, free online courses, curated learning platform, youtube courses organized, cybersecurity roadmap, fullstack learning path, free masterclasses, learn programming free, web development course, ethical hacking tutorial, AI learning path" />
+    <meta name="author" content="N E X A 1337" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="language" content="English" />
+    <meta name="revisit-after" content="7 days" />
+    <meta name="theme-color" content="#09090b" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://nexa1337.github.io/" />
+    <meta property="og:site_name" content="Skilliq" />
+    <meta property="og:title" content="Skilliq | Free Structured Learning Platform & Masterclasses" />
+    <meta property="og:description" content="Discover Skilliq: A premium, distraction-free learning platform featuring curated YouTube courses, structured learning paths, and expert masterclasses. 100% Free." />
+    <meta property="og:image" content="https://nexa1337.github.io/banner.jpg" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://nexa1337.github.io/" />
+    <meta property="twitter:site" content="@Nexa1337" />
+    <meta property="twitter:title" content="Skilliq | Free Structured Learning Platform & Masterclasses" />
+    <meta property="twitter:description" content="Discover Skilliq: A premium, distraction-free learning platform featuring curated YouTube courses, structured learning paths, and expert masterclasses. 100% Free." />
+    <meta property="twitter:image" content="https://nexa1337.github.io/banner.jpg" />
+    
+    <script>
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = reason && reason.message ? reason.message : String(reason);
+        if (msg.toLowerCase().includes('websocket') || msg.toLowerCase().includes('vite')) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      });
+      window.addEventListener('error', function(event) {
+        var msg = event.message || String(event.error);
+        if (msg.toLowerCase().includes('websocket') || msg.toLowerCase().includes('vite')) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
