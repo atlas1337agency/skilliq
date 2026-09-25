@@ -3,6 +3,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firesto
 import { db } from '../firebase';
 import { Users, BookOpen, Award, Activity, Clock, ShieldAlert, ChevronLeft, ChevronRight, Globe, TrendingUp, Key } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { isSuperAdminEmail } from '../lib/admin';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 interface UserData {
@@ -417,7 +418,7 @@ export function AdminAnalytics() {
                         value={u.role || 'student'}
                         onChange={(e) => handleRoleChange(u.uid, e.target.value)}
                         className="bg-background border border-border text-foreground px-2 py-1 md:px-3 md:py-1.5 rounded focus:ring-primary focus:border-primary font-medium text-xs md:text-sm"
-                        disabled={u.email === 'marouananouar02@gmail.com'}
+                        disabled={isSuperAdminEmail(u.email)}
                       >
                         <option value="student">Student</option>
                         <option value="publisher">Publisher</option>
@@ -468,7 +469,7 @@ export function AdminAnalytics() {
                       <button
                         onClick={() => handleRemoveUser(u.uid)}
                         className="text-red-500 hover:text-red-700 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded text-xs md:text-sm font-bold transition-colors whitespace-nowrap"
-                        disabled={u.email === 'marouananouar02@gmail.com'}
+                        disabled={isSuperAdminEmail(u.email)}
                       >
                         Remove
                       </button>

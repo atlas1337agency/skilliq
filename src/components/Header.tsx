@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { isSuperAdminEmail } from '../lib/admin';
 import { useStore } from '../store/useStore';
 import { Moon, Sun, LogIn, LogOut, LayoutDashboard, Award, Home as HomeIcon, BookOpen, Menu, BadgeCheck, X, ShieldAlert, Flame, Trophy, Globe } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -53,7 +54,7 @@ export function Header() {
         let role = 'student';
         
         if (!userSnap.exists()) {
-          role = currentUser.email === 'marouananouar02@gmail.com' ? 'admin' : 'student';
+          role = isSuperAdminEmail(currentUser.email) ? 'admin' : 'student';
           await setDoc(userRef, {
             uid: currentUser.uid,
             email: currentUser.email,
@@ -72,7 +73,7 @@ export function Header() {
             return;
           }
           // Force fix for admin if their role got stuck as 'user' or 'student'
-          if (currentUser.email === 'marouananouar02@gmail.com' && role !== 'admin') {
+          if (isSuperAdminEmail(currentUser.email) && role !== 'admin') {
             role = 'admin';
             try {
               const { updateDoc } = await import('firebase/firestore');

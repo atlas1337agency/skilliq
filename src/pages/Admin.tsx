@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
 import { Navigate } from 'react-router-dom';
-import { ShieldAlert, Plus, Save, Database, Trash2, Edit, Download, Upload, Bell, AlertTriangle } from 'lucide-react';
+import { ShieldAlert, Plus, Save, Database, Trash2, Edit, Download, Upload, Bell, AlertTriangle, Loader2 } from 'lucide-react';
 import { 
   addOrUpdateCourse, 
   deleteCourseInFirestore, 
@@ -203,30 +203,119 @@ export function Admin() {
         setIsMigrating(true);
         const content = JSON.parse(evt.target?.result as string);
         
-        if (!content.courses || !content.learningPaths || content._metadata?.type !== "NEXA_FULL_BACKUP") {
-           throw new Error("Invalid format");
+        if (!content.courses && !content.learningPaths) {
+           throw new Error("Invalid backup format. Must contain courses or learningPaths.");
         }
         
+        let courseCount = 0;
+        let pathCount = 0;
+
         // Restore Courses
-        for (const c of content.courses) {
-           await setDoc(doc(db, 'courses', c.id), c);
+        if (Array.isArray(content.courses)) {
+          for (const c of content.courses) {
+             await setDoc(doc(db, 'courses', c.id), c);
+             courseCount++;
+          }
         }
         
         // Restore Learning Paths
-        for (const p of content.learningPaths) {
-           await setDoc(doc(db, 'learningPaths', p.id), p);
+        if (Array.isArray(content.learningPaths)) {
+          for (const p of content.learningPaths) {
+             await setDoc(doc(db, 'learningPaths', p.id), p);
+             pathCount++;
+          }
+        }
+
+        // Restore Notifications if present
+        if (Array.isArray(content.notifications)) {
+          for (const n of content.notifications) {
+            await setDoc(doc(db, 'notifications', n.id), n);
+          }
+        }
+
+        // Restore Banners if present
+        if (Array.isArray(content.banners)) {
+          for (const b of content.banners) {
+            await setDoc(doc(db, 'banners', b.id), b);
+          }
+        }
+
+        // Restore Public Profiles if present
+        if (Array.isArray(content.publicProfiles)) {
+          for (const prof of content.publicProfiles) {
+            await setDoc(doc(db, 'publicProfiles', prof.id || prof.uid), prof);
+          }
         }
 
         await loadContent();
+        alert(`Successfully imported ${courseCount} courses and ${pathCount} learning paths to your new Firebase database!`);
         setDeleteDialog(null);
       } catch (err: any) {
         console.error(err);
+        alert(`Import failed: ${err.message || 'Unknown error'}`);
       } finally {
         setIsMigrating(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleOneClickMigrateOldData = async () => {
+    try {
+      setIsMigrating(true);
+      const res = await fetch('/nexa-full-backup.json');
+      if (!res.ok) throw new Error("Could not load backup file.");
+      const content = await res.json();
+
+      let courseCount = 0;
+      let pathCount = 0;
+
+      // Restore Courses
+      if (Array.isArray(content.courses)) {
+        for (const c of content.courses) {
+          await setDoc(doc(db, 'courses', c.id), c);
+          courseCount++;
+        }
+      }
+      
+      // Restore Learning Paths
+      if (Array.isArray(content.learningPaths)) {
+        for (const p of content.learningPaths) {
+          await setDoc(doc(db, 'learningPaths', p.id), p);
+          pathCount++;
+        }
+      }
+
+      // Restore Notifications
+      if (Array.isArray(content.notifications)) {
+        for (const n of content.notifications) {
+          await setDoc(doc(db, 'notifications', n.id), n);
+        }
+      }
+
+      // Restore Banners
+      if (Array.isArray(content.banners)) {
+        for (const b of content.banners) {
+          await setDoc(doc(db, 'banners', b.id), b);
+        }
+      }
+
+      // Restore Public Profiles
+      if (Array.isArray(content.publicProfiles)) {
+        for (const prof of content.publicProfiles) {
+          await setDoc(doc(db, 'publicProfiles', prof.id || prof.uid), prof);
+        }
+      }
+
+      await loadContent();
+      alert(`🎉 Migration complete! Successfully transferred ${courseCount} courses and ${pathCount} learning paths into your new Firebase database!`);
+    } catch (err: any) {
+      console.error(err);
+      alert(`Migration error: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsMigrating(false);
+    }
   };
 
   const handleDeleteCourse = async (id: string) => {
@@ -754,6 +843,28 @@ export function Admin() {
           {/* Backup & Restore Section */}
           <div className="pt-8 border-t border-border">
             <h2 className="text-2xl font-bold mb-4 text-emerald-600 dark:text-emerald-400 flex items-center gap-2">Disaster Recovery & Backup <span className="bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">Cloud Synchronized</span></h2>
+            
+            {/* Quick 1-Click Migration Card */}
+            <div className="mb-6 p-5 bg-primary/10 border border-primary/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h4 className="font-bold text-foreground text-base flex items-center gap-2">
+                  <Database className="w-5 h-5 text-primary" />
+                  One-Click Import Old Database into skilliq-1337
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  Transfers 83 courses, 2 learning paths, banners, and announcements directly into your new Firestore project using your admin permissions.
+                </p>
+              </div>
+              <button
+                onClick={handleOneClickMigrateOldData}
+                disabled={isMigrating}
+                className="shrink-0 px-5 py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                <span>{isMigrating ? 'Transferring 83 Courses...' : '🚀 1-Click Migrate All Data'}</span>
+              </button>
+            </div>
+
             <p className="text-muted-foreground mb-6 text-sm">
               <strong className="text-foreground">Automatic shadow backups active.</strong> Every time you modify a course or learning path, the system automatically writes a shadow backup file securely out to the cloud database. Download this complete, exact synchronized replica of your active content database (Paths, Playlists, and Masterclasses). If data is ever lost, you can upload this generated JSON backup file to restore the entire system instantly without missing a beat.
             </p>

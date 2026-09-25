@@ -4,6 +4,7 @@ import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Loader2, Search } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { isSuperAdminEmail } from '../lib/admin';
 
 export function AdminUsers() {
   const { t } = useTranslation();
@@ -101,7 +102,7 @@ export function AdminUsers() {
                            value={u.role || 'student'}
                            onChange={(e) => handleRoleChange(u.uid, e.target.value)}
                            className="bg-background border border-border text-foreground px-3 py-1.5 rounded focus:ring-primary focus:border-primary font-medium"
-                           disabled={u.email === 'marouananouar02@gmail.com'}
+                           disabled={isSuperAdminEmail(u.email)}
                         >
                           <option value="student">Student</option>
                           <option value="publisher">Publisher</option>
@@ -123,7 +124,7 @@ export function AdminUsers() {
                             }
                           }}
                           className="text-red-500 hover:text-red-700 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded text-sm font-bold transition-colors"
-                          disabled={u.email === 'marouananouar02@gmail.com'}
+                          disabled={isSuperAdminEmail(u.email)}
                         >
                           Remove
                         </button>

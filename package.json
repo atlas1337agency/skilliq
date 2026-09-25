@@ -9,7 +9,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "db:export-old": "tsx scripts/export-old-db.ts",
+    "db:import-new": "tsx scripts/import-to-new-db.ts"
   },
   "dependencies": {
     "@google-analytics/data": "^5.2.1",

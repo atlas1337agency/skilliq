@@ -108,7 +108,7 @@ async function startServer() {
       const authClient = new OAuth2Client(clientId, clientSecret);
       authClient.setCredentials({ refresh_token: refreshToken });
 
-      const analyticsDataClient = new BetaAnalyticsDataClient({ authClient });
+      const analyticsDataClient = new BetaAnalyticsDataClient({ authClient: authClient as any });
 
       // Fetch Traffic over last 7 days
       const [trafficResponse] = await analyticsDataClient.runReport({
@@ -166,7 +166,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: { 
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR === 'true' ? false : undefined 
+        hmr: false 
       },
       appType: "spa",
     });
