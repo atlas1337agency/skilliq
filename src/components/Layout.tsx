@@ -3,6 +3,7 @@ import { Header } from './Header';
 import { BottomNav } from './BottomNav';
 import { cn } from '../lib/utils';
 import { Footer } from './Footer';
+import { ScrollToTopButton } from './ScrollToTopButton';
 
 export function Layout() {
   const location = useLocation();
@@ -20,6 +21,7 @@ export function Layout() {
         </main>
       </div>
       {!isCoursePage && <BottomNav />}
+      <ScrollToTopButton />
     </div>
   );
 }

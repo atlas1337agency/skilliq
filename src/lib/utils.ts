@@ -33,7 +33,7 @@ export function filterByLanguage<T extends { language?: string; title?: string; 
 export function filterPathsByLanguage(paths: any[], courses: any[], currentAppLanguage: 'en' | 'ar'): any[] {
   return paths.filter(path => {
     // A path is visible if it has AT LEAST ONE course that matches the current language
-    const pathCourses = path.courseIds.map((id: string) => courses.find((c: any) => c.id === id)).filter(Boolean);
+    const pathCourses = (path.courseIds || []).map((id: string) => courses.find((c: any) => c.id === id)).filter(Boolean);
     const filteredPathCourses = filterByLanguage(pathCourses, currentAppLanguage);
     return filteredPathCourses.length > 0;
   });

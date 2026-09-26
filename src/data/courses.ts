@@ -140,6 +140,27 @@ export interface LearningPath {
     description: "Master the fundamentals of networking, programming, and ethical hacking to become a Cyber Security Expert.",
     courseIds: ["network-basics", "comptia-a-plus", "python-for-security", "ceh-prep"],
     icon: "Shield"
+  },
+  {
+    id: "web-mobile-ar",
+    title: "مسار تطوير الويب وتطبيقات الموبايل",
+    description: "تعلم بناء المواقع وتطبيقات الهواتف الذكية من الصفر باستخدام ووردبريس وفلاتر ودارت باحترافية.",
+    courseIds: ["ipkxu", "l02pbl"],
+    icon: "Code"
+  },
+  {
+    id: "ai-marketing-ar",
+    title: "مسار الذكاء الاصطناعي والتسويق الرقمي",
+    description: "احترف أتمتة الأعمال باستخدام N8N وإدارة الحملات الإعلانية الممولة والميديا باينج مع الذكاء الاصطناعي.",
+    courseIds: ["4ptzav", "312ar"],
+    icon: "Zap"
+  },
+  {
+    id: "design-3d-ar",
+    title: "مسار التصميم الإبداعي والنمذجة ثلاثية الأبعاد",
+    description: "إتقان تصميم واجهات المستخدم والأنظمة المرئية بالذكاء الاصطناعي والتصميم المعماري مع سكتش آب.",
+    courseIds: ["m1pdcj", "glpr5t"],
+    icon: "Layout"
   }
 ];
 
