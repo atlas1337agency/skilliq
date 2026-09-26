@@ -5,13 +5,28 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function filterByLanguage<T extends { language?: string }>(items: T[], currentAppLanguage: 'en' | 'ar'): T[] {
-  const targetLang = currentAppLanguage === 'en' ? 'English' : 'Arabic';
+export function filterByLanguage<T extends { language?: string; title?: string; instructor?: string; description?: string }>(items: T[], currentAppLanguage: 'en' | 'ar'): T[] {
+  const isArabicTarget = currentAppLanguage === 'ar';
   return items.filter(item => {
-    if (!item.language) return true;
-    if (item.language === targetLang) return true;
-    if (item.language === 'Both') return true;
-    return false;
+    const rawLang = (item.language || '').toLowerCase().trim();
+    if (rawLang === 'both' || rawLang === 'all') return true;
+
+    if (rawLang === 'arabic' || rawLang === 'ar') {
+      return isArabicTarget;
+    }
+    if (rawLang === 'english' || rawLang === 'en') {
+      return !isArabicTarget;
+    }
+
+    // If language is not explicitly specified, detect based on Arabic characters
+    const textToCheck = `${item.title || ''} ${item.instructor || ''} ${item.description || ''}`;
+    const hasArabicScript = /[\u0600-\u06FF]/.test(textToCheck);
+
+    if (isArabicTarget) {
+      return hasArabicScript;
+    } else {
+      return !hasArabicScript;
+    }
   });
 }
 

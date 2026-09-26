@@ -49,7 +49,7 @@ export function Certificate() {
   const course = courseRaw || (isPreview ? { 
     title: t('demo_course_title', 'Full-Stack Web Development'), 
     id: 'demo',
-    instructor: 'NEXA 1337 Admin'
+    instructor: 'ATLAS 1337 Agency Admin'
   } : null);
   const courseProgress = progress[courseId || ''];
 

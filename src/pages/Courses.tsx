@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PlayCircle, BookOpen, ChevronLeft, ChevronRight, Search, X, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { cn, filterByLanguage } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
@@ -10,12 +10,26 @@ import { ScrollingText } from '../components/ScrollingText';
 export function Courses() {
   const { t } = useTranslation();
   const { user, courses, setIsAuthModalOpen, language } = useStore();
-  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [searchParams] = useSearchParams();
+  const initialSearch = searchParams.get('search') || searchParams.get('q') || "";
+  const initialCategory = searchParams.get('category') || "All";
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [selectedSubCategory, setSelectedSubCategory] = useState("All");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 9;
+
+  useEffect(() => {
+    const queryFromUrl = searchParams.get('search') || searchParams.get('q');
+    if (queryFromUrl !== null && queryFromUrl !== undefined) {
+      setSearchQuery(queryFromUrl);
+    }
+    const catFromUrl = searchParams.get('category');
+    if (catFromUrl) {
+      setSelectedCategory(catFromUrl);
+    }
+  }, [searchParams]);
 
   const categories = useMemo(() => {
     const categoriesMap: Record<string, Set<string>> = {};

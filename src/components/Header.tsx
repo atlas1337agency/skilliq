@@ -1,14 +1,13 @@
 import { useTranslation } from 'react-i18next';
 import { isSuperAdminEmail } from '../lib/admin';
 import { useStore } from '../store/useStore';
-import { Moon, Sun, LogIn, LogOut, LayoutDashboard, Award, Home as HomeIcon, BookOpen, Menu, BadgeCheck, X, ShieldAlert, Flame, Trophy, Globe } from 'lucide-react';
+import { Moon, Sun, LogIn, LogOut, LayoutDashboard, Award, Home as HomeIcon, BookOpen, Menu, X, ShieldAlert, Flame, Trophy, Globe } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState, useRef } from 'react';
 import { auth, googleProvider, db } from '../firebase';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { Link } from 'react-router-dom';
-import { WolfLogo } from './WolfLogo';
 import { motion } from 'motion/react';
 import { AuthModal } from './AuthModal';
 
@@ -114,30 +113,28 @@ export function Header() {
     }
   };
 
+  const isDark = theme === 'dark';
+
   return (
     <>
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
       <header className="sticky top-0 z-40 w-full border-b border-border bg-card">
-        <div className="flex h-16 items-center justify-between px-4 sm:px-6 relative">
+        <div className="flex h-16 sm:h-20 items-center justify-between px-4 sm:px-6 relative">
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 sm:gap-3 group shrink-0">
-              <Link to="/" className="flex items-center gap-2 sm:gap-3">
-                <div className="w-5 h-5 sm:w-6 sm:h-6">
-                  <WolfLogo className="group-hover:scale-110 transition-transform" />
-                </div>
-                <div className="flex flex-col leading-none">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-foreground font-black text-sm sm:text-xl md:text-xl tracking-wider">Skilliq</span>
-                    <span className="text-blue-500">
-                      <BadgeCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                    </span>
-                  </div>
-                  <div className="flex items-center mt-0.5">
-                    <span className="text-[8px] sm:text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
-                      Internet For Everyone
-                    </span>
-                  </div>
-                </div>
+            <div className="flex items-center group shrink-0">
+              <Link to="/" className="flex items-center py-1">
+                <img
+                  key={isDark ? 'dark' : 'light'}
+                  src={isDark ? '/images/logo_dark.png' : '/images/logo_light.png'}
+                  alt="Skilliq"
+                  className="h-10 sm:h-12 md:h-14 w-auto max-w-[180px] sm:max-w-[240px] md:max-w-[280px] object-contain transition-all duration-150 group-hover:scale-105"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (!target.src.includes('/public/images/')) {
+                      target.src = isDark ? '/public/images/logo_dark.png' : '/public/images/logo_light.png';
+                    }
+                  }}
+                />
               </Link>
             </div>
           </div>

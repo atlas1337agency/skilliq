@@ -86,8 +86,9 @@ export const useStore = create<StoreState>()(
             const approvedCourses = courses.filter(c => c.isApproved !== false);
             set({ allCourses: courses, courses: approvedCourses, learningPaths, categories, notifications: notifications || [], banners: loadedBanners, isContentLoading: false });
           } else {
-            // Only set to empty if it genuinely returned zero courses from DB
-            set({ courses: [], allCourses: [], learningPaths: [], categories: [], notifications: [], banners: defaultBanners, isContentLoading: false });
+            // Retain defaultCourses if DB returns empty
+            const currentCourses = get().courses.length > 0 ? get().courses : defaultCourses;
+            set({ courses: currentCourses, allCourses: currentCourses, learningPaths: defaultPaths, categories: defaultCategories, notifications: [], banners: defaultBanners, isContentLoading: false });
           }
         } catch (error: any) {
           console.error("Firestore loading error:", error);

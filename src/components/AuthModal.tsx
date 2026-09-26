@@ -70,7 +70,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
       <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-75">
         <div className="flex justify-between items-center p-6 border-b border-border">
           <h2 className="text-2xl font-bold text-foreground">
-            {t('login_to_start', 'Sign In to N E X A 1337')}
+            {t('login_to_start', 'Sign In to ATLAS 1337 Agency')}
           </h2>
           <button 
             onClick={onClose}

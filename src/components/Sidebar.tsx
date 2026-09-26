@@ -14,7 +14,7 @@ export function Sidebar() {
   ];
 
   return (
-    <aside className="hidden md:flex w-64 flex-col border-e border-border bg-card h-[calc(100vh-4rem)] sticky top-16">
+    <aside className="hidden md:flex w-64 flex-col border-e border-border bg-card h-[calc(100vh-5rem)] sticky top-20">
       <nav className="flex-1 space-y-2 p-4">
         {links.map((link) => (
           <NavLink

@@ -3,6 +3,7 @@ import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { OAuth2Client } from 'google-auth-library';
+import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 
 async function startServer() {
@@ -11,6 +12,150 @@ async function startServer() {
 
   app.use(cors());
   app.use(express.json());
+
+  // AI Smart Learning Path Advisor endpoint
+  app.post('/api/ai/smart-path', async (req, res) => {
+    const { goal = '', language = 'en', currentLevel = 'beginner' } = req.body;
+    const isAr = language === 'ar';
+
+    const fallbackPlans: Record<string, any> = {
+      security: {
+        title: isAr ? 'مسار خبير الأمن السيبراني واختبار الاختراق' : 'Cyber Security & Ethical Hacking Master Path',
+        summary: isAr 
+          ? 'خريطة طريق مكثفة تأخذك من فهم بنية الشبكات وأنظمة Linux إلى اختبار اختراق تطبيقات الويب وحماية الأنظمة.' 
+          : 'A battle-tested roadmap from core networking & Linux internals to offensive web penetration testing.',
+        estimatedWeeks: 8,
+        weeklyHours: isAr ? '٥-٧ ساعات / أسبوع' : '5-7 hrs/week',
+        difficulty: isAr ? 'من الصفر إلى المتقدم' : 'Beginner to Advanced',
+        matchedCourseId: 'network-basics',
+        steps: [
+          {
+            step: 1,
+            title: isAr ? 'أساسيات بروتوكولات الشبكات ونظام Linux' : 'Computer Networking Protocols & Linux Fundamentals',
+            duration: isAr ? 'أسبوعان' : '2 weeks',
+            description: isAr ? 'فهم طبقات TCP/IP وDNS والتوجيه والتعامل العملي مع موجه الأوامر.' : 'Master TCP/IP, subnets, packet flow with Wireshark and core shell commands.',
+            courseId: 'network-basics'
+          },
+          {
+            step: 2,
+            title: isAr ? 'لغة Python المتقدمة لأمن المعلومات والأتمتة' : 'Python Scripting for Security & Network Tools',
+            duration: isAr ? '٣ أسابيع' : '3 weeks',
+            description: isAr ? 'برمجة أدوات فحص المنافذ واستكشاف الثغرات وأتمتة المهام الأمنية.' : 'Build port scanners, exploit payloads, and automated vulnerability checkers.',
+            courseId: 'python-for-security'
+          },
+          {
+            step: 3,
+            title: isAr ? 'اختبار اختراق تطبيقات الويب وشهادات الاعتماد' : 'Web Application Pentesting & Ethical Defense',
+            duration: isAr ? '٣ أسابيع' : '3 weeks',
+            description: isAr ? 'اكتشاف ثغرات OWASP Top 10 مثل SQL Injection وXSS وتطبيق أساليب الحماية.' : 'Hands-on exploitation of SQLi, XSS, CSRF, and securing distributed production workloads.',
+            courseId: 'ceh-prep'
+          }
+        ],
+        proTip: isAr 
+          ? 'نصيحة ذكية: لا تكتفِ بالمشاهدة، قم بإنشاء بيئة معملية افتراضية على جهازك وجرب كل هجوم بنفسك.'
+          : 'Pro Tip: Setup an isolated virtual lab and practice each attack vector on vulnerable targets.'
+      },
+      web: {
+        title: isAr ? 'مسار مهندس الويب الشامل (Full-Stack)' : 'Full-Stack Web Engineering Career Path',
+        summary: isAr 
+          ? 'خطة تعلم تفاعلية متكاملة تبدأ من واجهات الويب وتصل بك إلى بناء تطبيقات متكاملة مع React وقواعد البيانات.' 
+          : 'An end-to-end curriculum to build modern responsive UIs, server architectures, and verified credentials.',
+        estimatedWeeks: 6,
+        weeklyHours: isAr ? '٤-٦ ساعات / أسبوع' : '4-6 hrs/week',
+        difficulty: isAr ? 'مبتدئ إلى احترافي' : 'Zero to Production',
+        matchedCourseId: 'react-basics',
+        steps: [
+          {
+            step: 1,
+            title: isAr ? 'بنية HTML5 الدلالية وتنسيقات CSS الحديثة' : 'Semantic HTML5, CSS Grid & Responsive Architecture',
+            duration: isAr ? 'أسبوع' : '1 week',
+            description: isAr ? 'بناء صفحات ويب نظيفة ومتجاوبة مع كافة الشاشات دون تشتت.' : 'Master flexbox, modern grid layouts, typography, and accessibility foundations.',
+            courseId: 'html-crash-course'
+          },
+          {
+            step: 2,
+            title: isAr ? 'لغة JavaScript والتعامل مع البيانات والواجهات' : 'Core JavaScript ES6+, Asynchronous & DOM Engineering',
+            duration: isAr ? 'أسبوعان' : '2 weeks',
+            description: isAr ? 'إتقان الدوال غير المتزامنة والمصفوفات وربط الـ APIs الحقيقية.' : 'Deep dive into closures, async/await, REST fetch calls, and event mechanics.',
+            courseId: 'javascript-basics'
+          },
+          {
+            step: 3,
+            title: isAr ? 'مكتبة React وتطوير التطبيقات التفاعلية' : 'Modern React Components, State Machines & Hooks',
+            duration: isAr ? '٣ أسابيع' : '3 weeks',
+            description: isAr ? 'تطوير تطبيقات أحادية الصفحة (SPA) قابلة للتوسع ونشرها على السحابة.' : 'State lifecycle, component hierarchies, router navigation, and production deployment.',
+            courseId: 'react-basics'
+          }
+        ],
+        proTip: isAr 
+          ? 'نصيحة ذكية: ركز على إنهاء كل درس وممارسة الكود بيدك قبل الانتقال للمرحلة التالية.'
+          : 'Pro Tip: Code along with every lesson in a distraction-free window to maximize retention.'
+      }
+    };
+
+    const isSecurityQuery = /security|cyber|hack|pen|linux|network|أمن|اختراق|شبكات/i.test(goal);
+    const defaultPlan = isSecurityQuery ? fallbackPlans.security : fallbackPlans.web;
+
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey) {
+        const ai = new GoogleGenAI({ apiKey });
+        const systemPrompt = `You are the AI Learning Advisor for Skilliq, a distraction-free learning platform.
+Given a user's learning goal, return a JSON object with a tailored 3-step learning roadmap.
+Available catalog courses in Skilliq:
+- 'html-crash-course' (HTML Crash Course)
+- 'css-grid' (CSS Grid Layout)
+- 'javascript-basics' (JavaScript Crash Course)
+- 'react-basics' (React JS Crash Course)
+- 'network-basics' (Networking Basics for Security)
+- 'comptia-a-plus' (CompTIA A+ Core)
+- 'python-for-security' (Python for Security)
+- 'ceh-prep' (Certified Ethical Hacker Prep)
+
+Respond ONLY with valid JSON (no markdown ticks, no preamble) matching this schema:
+{
+  "title": string,
+  "summary": string,
+  "estimatedWeeks": number,
+  "weeklyHours": string,
+  "difficulty": string,
+  "matchedCourseId": string (one of the course IDs above),
+  "steps": [
+    {
+      "step": number (1, 2, or 3),
+      "title": string,
+      "duration": string,
+      "description": string,
+      "courseId": string
+    }
+  ],
+  "proTip": string
+}
+Language of response must be: ${isAr ? 'Arabic' : 'English'}.
+User goal: "${goal}"
+Level: "${currentLevel}"`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: systemPrompt,
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+
+        const text = response.text?.trim() || '';
+        if (text) {
+          const parsed = JSON.parse(text);
+          return res.json({ success: true, plan: parsed, isAiGenerated: true });
+        }
+      }
+    } catch (err: any) {
+      console.warn('Gemini AI Smart Path fallback used:', err?.message || err);
+    }
+
+    // High quality deterministic fallback
+    return res.json({ success: true, plan: defaultPlan, isAiGenerated: false });
+  });
 
   // OAuth Setup Helper
   const getOAuthClient = (req: any) => {
@@ -160,6 +305,9 @@ async function startServer() {
       });
     }
   });
+
+  // Serve public folder directly as fallback for /public/* requests
+  app.use('/public', express.static(path.join(process.cwd(), 'public')));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

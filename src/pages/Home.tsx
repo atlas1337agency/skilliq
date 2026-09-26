@@ -6,6 +6,7 @@ import { PlayCircle, BookOpen, Code, Terminal, Layout, Database, Shield, ArrowRi
 import { motion, useScroll, useTransform, useMotionValue, useSpring, useMotionTemplate } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { filterByLanguage, filterPathsByLanguage } from '../lib/utils';
+import { HeroSection } from '../components/HeroSection';
 
 const iconMap: Record<string, any> = {
   Code,
@@ -55,192 +56,6 @@ function PartnersSection() {
         }
       `}</style>
     </div>
-  );
-}
-
-function ModernHero() {
-  const { t } = useTranslation();
-  const { language } = useStore();
-  
-  const mouseX = useMotionValue(0);
-  const mouseY = useMotionValue(0);
-
-  function handleMouseMove({ currentTarget, clientX, clientY }: React.MouseEvent) {
-    const { left, top } = currentTarget.getBoundingClientRect();
-    mouseX.set(clientX - left);
-    mouseY.set(clientY - top);
-  }
-
-  return (
-    <section 
-      className="relative w-full overflow-hidden bg-background pt-12 pb-20 lg:pt-16 lg:pb-32 min-h-[80vh] group"
-      onMouseMove={handleMouseMove}
-    >
-      {/* Background Effects */}
-      <div className="absolute inset-0 z-0">
-        <div className="absolute inset-0 bg-grid-white/[0.02] bg-[length:32px_32px] [mask-image:radial-gradient(ellipse_70%_70%_at_50%_50%,#000_20%,transparent_100%)]"></div>
-        <div className="absolute -top-[40%] -left-[10%] w-[70%] h-[70%] rounded-full bg-primary/20 blur-[120px] mix-blend-screen pointer-events-none animate-pulse duration-10000"></div>
-        <div className="absolute -bottom-[20%] -right-[10%] w-[60%] h-[60%] rounded-full bg-fuchsia-500/10 blur-[120px] mix-blend-screen pointer-events-none animate-pulse duration-7000"></div>
-      </div>
-      
-      <motion.div
-        className="pointer-events-none absolute -inset-px rounded-xl opacity-0 transition duration-300 group-hover:opacity-100 z-0 hidden md:block"
-        style={{
-          background: useMotionTemplate`
-            radial-gradient(
-              800px circle at ${mouseX}px ${mouseY}px,
-              rgba(var(--primary-rgb), 0.08),
-              transparent 80%
-            )
-          `,
-        }}
-      />
-
-      <div className="max-w-7xl mx-auto px-4 md:px-8 relative z-10 w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
-          
-          {/* Left Content Area */}
-          <motion.div 
-            className="flex flex-col text-center lg:text-start lg:col-span-7 z-10"
-            initial="hidden"
-            animate="visible"
-            variants={{
-              hidden: { opacity: 0 },
-              visible: { opacity: 1, transition: { staggerChildren: 0.15 } }
-            }}
-          >
-            <motion.div 
-              variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-border bg-card/40 backdrop-blur-md mb-8 hover:bg-card/60 transition-colors mx-auto lg:mx-0 w-fit shadow-sm"
-            >
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-              </span>
-              <span className="text-xs sm:text-sm font-semibold tracking-wider uppercase text-muted-foreground">{t('hero_trust', '100% Free • Curated Content • No Distractions')}</span>
-            </motion.div>
-            
-            <motion.h1 
-              variants={{ hidden: { opacity: 0, y: 30 }, visible: { opacity: 1, y: 0 } }}
-              className="text-4xl sm:text-6xl md:text-7xl lg:text-[5.5rem] font-black tracking-tight mb-6 leading-[1.05]"
-            >
-              <span className="text-foreground inline-block">{t('hero_title_1', 'Learn Without')}</span><br />
-              <span className="text-foreground inline-block">Distractions.</span><br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-fuchsia-500 to-cyan-500 inline-block mt-1">{t('hero_title_2', 'Build Real Skills.')}</span>
-            </motion.h1>
-            
-            <motion.p 
-              variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}
-              className="text-base sm:text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto lg:mx-0 mb-10 leading-relaxed font-medium"
-            >
-              {t('hero_subtitle', 'Skilliq is a structured learning platform that organizes the best free YouTube courses into clear paths. Stay focused, save time, and actually finish what you start.')}
-            </motion.p>
-            
-            <motion.div 
-              variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}
-              className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto justify-center lg:justify-start"
-            >
-              <Link 
-                to="/courses" 
-                className="group relative px-8 py-4 bg-foreground text-background rounded-full font-bold text-lg hover:scale-105 transition-all shadow-xl flex items-center justify-center gap-3 w-full sm:w-auto overflow-hidden"
-                dir={language === 'ar' ? 'rtl' : 'ltr'}
-              >
-                <span className="absolute inset-0 w-full h-full -mt-1 rounded-lg opacity-20 bg-gradient-to-b from-transparent via-transparent to-black"></span>
-                <span className="relative flex items-center gap-2">{t('start_learning')} <ArrowRight className="w-5 h-5 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" /></span>
-              </Link>
-              
-              <Link 
-                to="/paths"
-                className="px-8 py-4 bg-card border border-border text-foreground hover:bg-muted rounded-full font-bold text-lg transition-all flex items-center justify-center gap-3 w-full sm:w-auto shadow-sm hover:shadow-md"
-                dir={language === 'ar' ? 'rtl' : 'ltr'}
-              >
-                <Layers className="w-5 h-5 text-fuchsia-500" /> {t('explore_paths')}
-              </Link>
-            </motion.div>
-
-            <motion.div
-              variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }}
-              className="mt-12 text-center lg:text-start"
-            >
-              <p className="font-serif select-none italic text-2xl sm:text-3xl text-muted-foreground" style={{ fontFamily: 'var(--font-serif), Georgia, serif', letterSpacing: '-0.02em' }}>
-                "Internet For Everyone"
-              </p>
-              <p className="font-mono text-xs text-primary/80 mt-2 tracking-[0.2em]">— N E X A 1 3 3 7</p>
-            </motion.div>
-          </motion.div>
-
-          {/* Right Visual Area - Interactive Bento/Cards */}
-          <motion.div 
-            className="lg:col-span-5 relative hidden md:block"
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8, delay: 0.4, type: "spring" }}
-          >
-            <div className="relative w-full aspect-square">
-              {/* Center Element */}
-              <motion.div 
-                animate={{ y: [-8, 8, -8] }}
-                transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-card/80 backdrop-blur-2xl border border-border/80 rounded-full shadow-2xl flex items-center justify-center z-20"
-              >
-                <div className="absolute inset-0 rounded-full border border-primary/20 animate-[spin_10s_linear_infinite]"></div>
-                <div className="w-24 h-24 bg-gradient-to-tr from-primary to-fuchsia-500 rounded-full blur-xl opacity-40 absolute"></div>
-                <PlayCircle className="w-16 h-16 text-foreground relative z-10" />
-              </motion.div>
-
-              {/* Floating Card 1 */}
-              <motion.div 
-                animate={{ y: [10, -10, 10], rotate: [-2, 2, -2] }}
-                transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
-                className="absolute top-[10%] right-[10%] w-44 bg-card border border-border shadow-xl rounded-2xl p-4 z-30 backdrop-blur-xl"
-              >
-                <div className="flex gap-3 items-center mb-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-500">
-                    <Code className="w-4 h-4" />
-                  </div>
-                  <div className="text-xs font-bold">Web Dev</div>
-                </div>
-                <div className="w-full h-1.5 bg-muted rounded-full mb-2">
-                  <div className="w-[75%] h-full bg-blue-500 rounded-full"></div>
-                </div>
-                <div className="text-[10px] text-muted-foreground text-right">75% Complete</div>
-              </motion.div>
-
-              {/* Floating Card 2 */}
-              <motion.div 
-                animate={{ y: [-15, 15, -15], rotate: [2, -2, 2] }}
-                transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-                className="absolute bottom-[20%] left-[5%] w-48 bg-card border border-border shadow-xl rounded-2xl p-4 z-30 backdrop-blur-xl"
-              >
-                <div className="flex gap-3 items-center mb-3">
-                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500">
-                    <Shield className="w-4 h-4" />
-                  </div>
-                  <div className="text-xs font-bold leading-tight">Cybersecurity Masterclass</div>
-                </div>
-                <div className="flex items-center gap-1 text-[10px] font-medium text-emerald-500 bg-emerald-500/10 w-fit px-2 py-1 rounded">
-                  <CheckCircle2 className="w-3 h-3" /> Certified
-                </div>
-              </motion.div>
-
-              {/* Floating Card 3 */}
-              <motion.div 
-                animate={{ y: [12, -12, 12], x: [-5, 5, -5] }}
-                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-                className="absolute bottom-[10%] right-[5%] w-32 h-32 bg-card border border-border shadow-xl rounded-2xl p-4 z-10 backdrop-blur-xl flex flex-col items-center justify-center text-center gap-2"
-              >
-                <div className="w-10 h-10 rounded-full bg-fuchsia-500/20 flex items-center justify-center text-fuchsia-500">
-                  <Terminal className="w-5 h-5" />
-                </div>
-                <div className="text-xs font-bold text-muted-foreground">AI & ML Path</div>
-              </motion.div>
-
-            </div>
-          </motion.div>
-
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -511,7 +326,7 @@ export function Home() {
         <title>Skilliq | Free Structured Learning Platform & Masterclasses</title>
         <meta name="description" content="Skilliq offers a premium, distraction-free learning environment. Access curated courses, masterclasses, and guided paths in tech, design, and cybersecurity entirely for free." />
       </Helmet>
-      <ModernHero />
+      <HeroSection />
       <PartnersSection />
 
       <ContinueLearningSection />

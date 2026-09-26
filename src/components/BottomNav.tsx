@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { Home, PlayCircle, Map, BookOpen } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
-import { WolfLogo } from './WolfLogo';
 
 export function BottomNav() {
   const { t } = useTranslation();
@@ -12,7 +11,7 @@ export function BottomNav() {
   const links = [
     { to: '/', icon: Home, label: t('home') },
     { to: '/paths', icon: Map, label: t('paths') },
-    { to: '/central', isCentral: true },
+    { to: '/', isCentral: true },
     { to: '/courses', icon: PlayCircle, label: t('courses') },
     { to: '/masterclasses', icon: BookOpen, label: t('masterclasses') || 'Masterclasses' },
   ];
@@ -25,9 +24,16 @@ export function BottomNav() {
             return (
               <div key="central" className="relative -top-5 flex-shrink-0 mx-1 sm:mx-2">
                 <div className="absolute inset-0 bg-primary/30 blur-2xl rounded-full animate-pulse z-0" />
-                <div className="relative z-10 w-12 h-12 bg-gradient-to-tr from-card to-background border-[3px] border-border rounded-full p-2 shadow-xl flex items-center justify-center group overflow-hidden">
-                  <WolfLogo />
-                </div>
+                <NavLink
+                  to="/"
+                  className="relative z-10 w-12 h-12 bg-gradient-to-tr from-card to-background border-[3px] border-border rounded-full p-2 shadow-xl flex items-center justify-center group overflow-hidden active:scale-95 transition-transform"
+                >
+                  <img
+                    src="/images/favicon.png"
+                    alt="Skilliq"
+                    className="w-full h-full object-contain rounded-full group-hover:scale-110 transition-transform"
+                  />
+                </NavLink>
               </div>
             );
           }

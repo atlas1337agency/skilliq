@@ -433,7 +433,7 @@ export function AdminForms({ type, itemToEdit, onClose }: { type: 'course' | 'pa
             </div>
 
             <div className="mt-8">
-              <div className="flex flex-col mb-4 sticky top-16 bg-card z-10 py-3 border-b border-border shadow-sm gap-3">
+              <div className="flex flex-col mb-4 sticky top-16 sm:top-20 bg-card z-10 py-3 border-b border-border shadow-sm gap-3">
                 <div className="flex items-center justify-between w-full">
                   <h3 className="font-bold">Videos</h3>
                   <div className="flex items-center gap-2">

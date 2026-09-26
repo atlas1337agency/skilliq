@@ -127,7 +127,7 @@ export function Admin() {
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
       link.setAttribute("href", url);
-      link.setAttribute("download", `NEXA1337_Users_Backup_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute("download", `ATLAS1337_Users_Backup_${new Date().toISOString().split('T')[0]}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -166,7 +166,7 @@ export function Admin() {
       const wsPaths = XLSX.utils.json_to_sheet(pathData.length > 0 ? pathData : [{ id: "No Paths Found" }]);
       XLSX.utils.book_append_sheet(wb, wsPaths, "Learning Paths");
 
-      XLSX.writeFile(wb, `NEXA1337_Content_Backup_${new Date().toISOString().split('T')[0]}.xlsx`);
+      XLSX.writeFile(wb, `ATLAS1337_Content_Backup_${new Date().toISOString().split('T')[0]}.xlsx`);
     } catch (error) {
        console.error(error);
        alert("Failed to export Excel file.");
@@ -176,14 +176,14 @@ export function Admin() {
   const handleDownloadBackup = () => {
     try {
       const backup = {
-         _metadata: { timestamp: new Date().toISOString(), type: "NEXA_FULL_BACKUP" },
+         _metadata: { timestamp: new Date().toISOString(), type: "ATLAS_FULL_BACKUP" },
          courses: allCourses,
          learningPaths: learningPaths
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = `NEXA1337_System_Backup_${new Date().toISOString().split('T')[0]}.json`;
+      link.download = `ATLAS1337_System_Backup_${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

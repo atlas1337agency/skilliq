@@ -375,6 +375,7 @@ export const courses: Course[] = [
     instructor: "Edureka",
     thumbnail: "https://img.youtube.com/vi/U_P23SqJaDc/maxresdefault.jpg",
     category: "Cyber Security",
+    language: "English",
     isSingleVideo: true,
     videos: [
       {
@@ -382,6 +383,151 @@ export const courses: Course[] = [
         title: "Cyber Security Full Course",
         duration: "12:00:00",
         youtubeId: "U_P23SqJaDc",
+      }
+    ]
+  },
+  {
+    id: "ipkxu",
+    title: "Mastering WordPress",
+    description: "كورس احتراف ووردبريس الشامل باللغة العربية لبناء وإدارة وتخصيص مواقع الويب الاحترافية والمتاجر الإلكترونية.",
+    instructor: "Elzero Web School",
+    instructorAvatar: "https://yt3.googleusercontent.com/ytc/AIdro_kX44Y3P6I3k4m48D1t2G4E_b4-r4q1Zz_i1R8v8A=s176-c-k-c0x00ffffff-no-rj",
+    instructorUrl: "https://www.youtube.com/@ElzeroWebSchool",
+    thumbnail: "https://img.youtube.com/vi/ctEAYHFcbHk/maxresdefault.jpg",
+    category: "Web Development",
+    subCategory: "WordPress",
+    isSingleVideo: false,
+    language: "Arabic",
+    videos: [
+      {
+        id: "ipkxu_v1",
+        title: "WordPress - Introduction and What Is CMS",
+        duration: "14:20",
+        youtubeId: "ctEAYHFcbHk"
+      },
+      {
+        id: "ipkxu_v2",
+        title: "WordPress - Install Local Server & WordPress",
+        duration: "18:45",
+        youtubeId: "eO23K1vA68E"
+      },
+      {
+        id: "ipkxu_v3",
+        title: "WordPress - Dashboard & General Settings",
+        duration: "12:15",
+        youtubeId: "8c45R0oU92Q"
+      }
+    ]
+  },
+  {
+    id: "l02pbl",
+    title: "Flutter & Dart Full Course",
+    description: "دورة كاملة وشاملة في فلاتر ودارت لبناء تطبيقات الموبايل لنظامي أندرويد وآيفون من الصفر حتى الاحتراف.",
+    instructor: "Wael abo hamza",
+    instructorAvatar: "https://yt3.googleusercontent.com/ytc/AIdro_kX44Y3P6I3k4m48D1t2G4E_b4-r4q1Zz_i1R8v8A=s176-c-k-c0x00ffffff-no-rj",
+    thumbnail: "https://img.youtube.com/vi/6bSP4vazmyw/maxresdefault.jpg",
+    category: "Programming",
+    subCategory: "Mobile",
+    isSingleVideo: false,
+    language: "Arabic",
+    videos: [
+      {
+        id: "fl_v1",
+        title: "1 - Flutter Course Introduction | مقدمة كورس فلاتر",
+        duration: "09:30",
+        youtubeId: "6bSP4vazmyw"
+      },
+      {
+        id: "fl_v2",
+        title: "2 - Flutter Setup & Android Studio | تثبيت بيئة العمل",
+        duration: "15:20",
+        youtubeId: "Kj_x7c9V5fM"
+      }
+    ]
+  },
+  {
+    id: "312ar",
+    title: "Media Buyer & Digital Ads",
+    description: "كورس احتراف الميديا باينج والإعلانات الممولة وتحليل الحملات التسويقية مع سكوب.",
+    instructor: "سكوب",
+    instructorAvatar: "https://yt3.ggpht.com/-lEZ8TF7A7Ui_znwiJS4nJjQp6gSVuMvJ4NFMOgfpmj6jq_KxnAzlloJ8oWiayyqxVI2nCU8vdg=s800-c-k-c0x00ffffff-no-rj",
+    thumbnail: "https://img.youtube.com/vi/ZeLtBaN86G8/maxresdefault.jpg",
+    category: "digital marketing",
+    subCategory: "Marketing",
+    isSingleVideo: false,
+    language: "Arabic",
+    videos: [
+      {
+        id: "v1778437317088_7y7vr",
+        title: "مقدمة لـ كورس الـ Media Buying | ابدأ طريقك كميديا باير",
+        duration: "31:10",
+        youtubeId: "ZeLtBaN86G8"
+      },
+      {
+        id: "v1778437317088_7aqvm",
+        title: "#1 يعني اي ميديا باينج؟ | معلومات مذهلة عن الميديا باينج",
+        duration: "21:56",
+        youtubeId: "z2bee3EDHKo"
+      }
+    ]
+  },
+  {
+    id: "4ptzav",
+    title: "N8N & AI Automation",
+    description: "دورة بناء أنظمة الذكاء الاصطناعي والأتمتة الذكية بدون كود وباحترافية عالية.",
+    instructor: "Ai bdarija | الذكاء الاصطناعي",
+    instructorAvatar: "https://yt3.ggpht.com/5WWzeEVoN066innvlC3jDr_4c8RPjG9okQiIg9poOC4iiWkuyVa45T0B-QtMklQUKeVKYU9L=s176-c-k-c0x00ffffff-no-rj",
+    thumbnail: "https://img.youtube.com/vi/EwfCLtjscTE/maxresdefault.jpg",
+    category: "AI",
+    subCategory: "Automation",
+    isSingleVideo: true,
+    language: "Arabic",
+    videos: [
+      {
+        id: "v1776872772460",
+        title: "N8N FULL COURSE (Build & Sell AI Automation, No code)",
+        duration: "10:55:05",
+        youtubeId: "EwfCLtjscTE"
+      }
+    ]
+  },
+  {
+    id: "m1pdcj",
+    title: "Claude Design & UI System",
+    description: "دورة تصميم واجهات المستخدم والأنظمة المرئية باستخدام أحدث أدوات الذكاء الاصطناعي.",
+    instructor: "Nid Academy",
+    instructorAvatar: "https://yt3.googleusercontent.com/ytc/AIdro_kX44Y3P6I3k4m48D1t2G4E_b4-r4q1Zz_i1R8v8A=s176-c-k-c0x00ffffff-no-rj",
+    thumbnail: "https://img.youtube.com/vi/8tT-1i_EixQ/maxresdefault.jpg",
+    category: "Design",
+    subCategory: "AI Design",
+    isSingleVideo: true,
+    language: "Arabic",
+    videos: [
+      {
+        id: "ai_v1",
+        title: "Claude AI & Modern Design Masterclass",
+        duration: "1:15:00",
+        youtubeId: "8tT-1i_EixQ"
+      }
+    ]
+  },
+  {
+    id: "glpr5t",
+    title: "SketchUp Pro 3D Design",
+    description: "دورة النمذجة ثلاثية الأبعاد والتصميم المعماري الاحترافي ببرنامج سكتش آب.",
+    instructor: "Almuhandis",
+    instructorAvatar: "https://yt3.ggpht.com/cLnodcoRCWI0NZKmdINNLntulV1lmYqKbF_t4Qt5o0gCav-DAsZJq913COiLbw50xBmSGDrZRA=s800-c-k-c0x00ffffff-no-rj",
+    thumbnail: "https://img.youtube.com/vi/oaye0GKPJIg/maxresdefault.jpg",
+    category: "Design",
+    subCategory: "3D",
+    isSingleVideo: false,
+    language: "Arabic",
+    videos: [
+      {
+        id: "v1783278954632_cfsm1",
+        title: "الدرس (1): مقدمة عن برنامج سكتش آب SketchUp",
+        duration: "17:16",
+        youtubeId: "oaye0GKPJIg"
       }
     ]
   }
