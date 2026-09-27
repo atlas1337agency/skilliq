@@ -5,6 +5,7 @@ import { auth, googleProvider, db } from '../firebase';
 import { signInWithPopup } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { isSuperAdminEmail } from '../lib/admin';
+import { initializeOrUpdateProfile } from '../lib/gamification';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -48,6 +49,19 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
           role: role
         });
       }
+
+      // Immediately write/sync real Google user profile to publicProfiles
+      try {
+        await initializeOrUpdateProfile({
+          uid: result.user.uid,
+          displayName: result.user.displayName,
+          photoURL: result.user.photoURL,
+          email: result.user.email
+        });
+      } catch (profErr) {
+        console.error("Failed to sync public profile on login", profErr);
+      }
+
       onClose();
     } catch (err: any) {
       if (err?.code !== 'auth/popup-closed-by-user') {

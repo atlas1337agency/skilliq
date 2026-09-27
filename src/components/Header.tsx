@@ -7,6 +7,7 @@ import { useEffect, useState, useRef } from 'react';
 import { auth, googleProvider, db } from '../firebase';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { initializeOrUpdateProfile } from '../lib/gamification';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { AuthModal } from './AuthModal';
@@ -87,6 +88,21 @@ export function Header() {
         const enhancedUser = { ...currentUser, role };
         setUser(enhancedUser);
         loadProgress();
+
+        // Ensure public profile is immediately updated in Firestore with real Google data
+        try {
+          const prof = await initializeOrUpdateProfile({
+            uid: currentUser.uid,
+            displayName: currentUser.displayName,
+            photoURL: currentUser.photoURL,
+            email: currentUser.email
+          });
+          if (prof) {
+            useStore.setState({ publicProfile: prof });
+          }
+        } catch (profErr) {
+          console.error("Error syncing public profile", profErr);
+        }
       } else {
         setUser(null);
         useStore.setState({ progress: {} });

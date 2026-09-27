@@ -1,104 +1,151 @@
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
-import { ArrowLeft, Download, Award, ShieldCheck, BadgeCheck, FileImage, FileText, Share2 } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  Download, 
+  Award, 
+  ShieldCheck, 
+  BadgeCheck, 
+  FileImage, 
+  FileText, 
+  Share2, 
+  Copy, 
+  Check, 
+  Printer, 
+  Sparkles,
+  Lock,
+  ArrowRight,
+  QrCode
+} from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
 import * as htmlToImage from 'html-to-image';
 import { jsPDF } from 'jspdf';
+import { CertificateDocument, CertificateData } from '../components/CertificateDocument';
+import { ResponsiveCertificateViewer } from '../components/ResponsiveCertificateViewer';
 
 export function Certificate() {
   const { courseId } = useParams<{ courseId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const isPreview = searchParams.get('preview') === 'true';
-  const { t } = useTranslation();
-  const { progress, userName, user, courses } = useStore();
+  const isPreview = searchParams.get('preview') === 'true' || courseId === 'demo';
+  const { t, i18n } = useTranslation();
+  const { progress, userName, user, courses, language } = useStore();
+  const isRtl = language === 'ar' || i18n.language === 'ar';
+
   const certRef = useRef<HTMLDivElement>(null);
   const [certId, setCertId] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
+  // Calculate certificate ID
   useEffect(() => {
-    // Generate a pseudo-random looking but deterministic ID
-    const userIdPrefix = user?.uid ? user.uid.substring(0, 6) : 'DEMO';
-    const cIdPrefix = courseId ? courseId.substring(0, 4) : 'XXXX';
-    const timestamp = progress[courseId || '']?.completionDate 
-      ? new Date(progress[courseId || ''].completionDate!).getTime().toString().slice(-6)
-      : '000000';
-      
-    setCertId(`NX-${userIdPrefix}-${cIdPrefix}-${timestamp}`.toUpperCase());
-  }, [user, courseId, progress]);
+    if (isPreview) {
+      setCertId('NX-SKILLIQ-DEMO-VERIFIED');
+    } else {
+      const userIdPrefix = user?.uid ? user.uid.substring(0, 6) : 'DEMO';
+      const cIdPrefix = courseId ? courseId.substring(0, 4) : 'DEMO';
+      const timestamp = progress[courseId || '']?.completionDate 
+        ? new Date(progress[courseId || ''].completionDate!).getTime().toString().slice(-6)
+        : '889120';
+        
+      setCertId(`NX-${userIdPrefix}-${cIdPrefix}-${timestamp}`.toUpperCase());
+    }
+  }, [user, courseId, progress, isPreview]);
 
+  // If not logged in and not preview
   if (!user && !isPreview) {
     return (
-      <div className="w-full px-4 md:px-8 py-16 text-center">
-        <h2 className="text-2xl font-bold mb-4">{t('please_log_in')}</h2>
-        <p className="text-muted-foreground mb-6">{t('need_to_be_logged_in')}</p>
-      </div>
-    );
-  }
-
-  if (courses.length === 0 && !isPreview) {
-    return (
-      <div className="w-full px-4 md:px-8 py-16 text-center">
-        <h2 className="text-2xl font-bold mb-4">{t('loading')}</h2>
+      <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full px-4 md:px-8 py-20 text-center max-w-md mx-auto">
+        <div className="w-16 h-16 rounded-3xl bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
+          <Award className="w-8 h-8" />
+        </div>
+        <h2 className="text-2xl font-black mb-2 text-foreground">{t('please_log_in', 'Please Log In')}</h2>
+        <p className="text-muted-foreground text-sm mb-6">{t('need_to_be_logged_in', 'You need to be logged in to view your certificates.')}</p>
+        <Link 
+          to="/certificates?preview=true"
+          className="px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs sm:text-sm shadow-xs inline-block"
+        >
+          {t('preview_demo_certificate', 'Preview Demo Certificate')}
+        </Link>
       </div>
     );
   }
 
   const courseRaw = courses.find(c => c.id === courseId);
   const course = courseRaw || (isPreview ? { 
-    title: t('demo_course_title', 'Full-Stack Web Development'), 
+    title: isRtl 
+      ? 'تطوير تطبيقات الويب المتكاملة وهندسة البرمجيات الحديثة' 
+      : 'Full-Stack Web Development & Modern Software Architecture', 
     id: 'demo',
-    instructor: 'ATLAS 1337 Agency Admin'
+    instructor: 'Mr. Marouan Anouar'
   } : null);
   const courseProgress = progress[courseId || ''];
 
   if (!course) {
     return (
-      <div className="w-full px-4 md:px-8 py-16 text-center">
-        <h2 className="text-2xl font-bold mb-4">{t('certificate_not_available')}</h2>
-        <p className="text-muted-foreground mb-6">{t('course_not_found')}</p>
-        <Link to="/" className="text-primary hover:underline">{t('return_to_courses')}</Link>
+      <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full px-4 md:px-8 py-20 text-center max-w-md mx-auto">
+        <h2 className="text-2xl font-black mb-2 text-foreground">{t('certificate_not_available', 'Certificate Not Available')}</h2>
+        <p className="text-muted-foreground text-sm mb-6">{t('course_not_found', 'Course could not be found.')}</p>
+        <Link to="/courses" className="px-5 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs sm:text-sm">
+          {t('return_to_courses', 'Return to Courses')}
+        </Link>
       </div>
     );
   }
 
   if (!isPreview && (!courseProgress || !courseProgress.isCompleted)) {
     return (
-      <div className="w-full px-4 md:px-8 py-16 text-center">
-        <h2 className="text-2xl font-bold mb-4">{t('certificate_not_available')}</h2>
-        <p className="text-muted-foreground mb-6">{t('complete_course_to_view', 'You need to complete the course to view your certificate.')}</p>
-        <Link to="/" className="text-primary hover:underline">{t('return_to_courses')}</Link>
+      <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full px-4 md:px-8 py-20 text-center max-w-md mx-auto">
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-3">
+          <Award className="w-7 h-7" />
+        </div>
+        <h2 className="text-2xl font-black mb-2 text-foreground">{t('certificate_not_available', 'Certificate Incomplete')}</h2>
+        <p className="text-muted-foreground text-sm mb-6 leading-relaxed">
+          {t('complete_course_to_view', 'You need to complete all lessons in this course to view and download your official certificate.')}
+        </p>
+        <div className="flex justify-center gap-3">
+          <Link to={`/course/${course.id}`} className="px-5 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs sm:text-sm">
+            {t('continue_watching', 'Continue Lessons')}
+          </Link>
+          <Link to={`/certificate/${course.id}?preview=true`} className="px-5 py-2.5 bg-card border border-border text-foreground font-bold rounded-xl text-xs sm:text-sm">
+            {t('preview_demo_certificate', 'Preview Demo')}
+          </Link>
+        </div>
       </div>
     );
   }
 
   const dateRaw = courseProgress?.completionDate ? new Date(courseProgress.completionDate) : new Date();
-  const date = dateRaw.toLocaleDateString(undefined, {
+  const dateFormatted = dateRaw.toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
   });
 
+  const studentDisplayName = user?.displayName || userName || (isRtl ? 'اسم الطالب' : 'Student Name');
+
+  const certificateData: CertificateData = {
+    certId,
+    studentName: studentDisplayName,
+    courseTitle: course.title,
+    instructorName: 'Mr. Marouan Anouar',
+    issueDate: dateFormatted,
+    verificationUrl: `${window.location.origin}/verify?id=${certId}`,
+    isDemo: isPreview
+  };
+
   const handleDownloadPDF = async () => {
-    if (!certRef.current) return;
+    if (isPreview || !certRef.current) return;
     setIsDownloading(true);
-    // Wait for the state to propagate and the DOM to update (stamp hidden)
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise(resolve => setTimeout(resolve, 60));
     
     try {
-      // Force dimensions to avoid scale cropping issues
       const dataUrl = await htmlToImage.toJpeg(certRef.current, { 
         quality: 1.0, 
         pixelRatio: 2,
         canvasWidth: 1000 * 2,
-        canvasHeight: 707 * 2,
-        filter: (node) => {
-          if (node.classList?.contains('hide-on-download') || node.classList?.contains('invisible')) {
-            return false;
-          }
-          return true;
-        }
+        canvasHeight: 707 * 2
       });
       
       const pdf = new jsPDF({
@@ -117,23 +164,16 @@ export function Certificate() {
   };
 
   const handleDownloadJPG = async () => {
-    if (!certRef.current) return;
+    if (isPreview || !certRef.current) return;
     setIsDownloading(true);
-    // Wait for the state to propagate and the DOM to update (stamp hidden)
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise(resolve => setTimeout(resolve, 60));
     
     try {
       const dataUrl = await htmlToImage.toJpeg(certRef.current, { 
         quality: 1.0, 
         pixelRatio: 2,
         canvasWidth: 1000 * 2,
-        canvasHeight: 707 * 2,
-        filter: (node) => {
-          if (node.classList?.contains('hide-on-download') || node.classList?.contains('invisible')) {
-            return false;
-          }
-          return true;
-        }
+        canvasHeight: 707 * 2
       });
       
       const link = document.createElement('a');
@@ -147,14 +187,21 @@ export function Certificate() {
     }
   };
 
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/verify?id=${certId}`;
+    navigator.clipboard.writeText(url);
+    setCopyFeedback(true);
+    setTimeout(() => setCopyFeedback(false), 2500);
+  };
+
   const handleShare = async () => {
     const url = `${window.location.origin}/verify?id=${certId}`;
-    const text = `I just earned a certificate in ${course.title} from Skilliq! 🚀`;
+    const text = `I just earned an official verified certificate in "${course.title}" from Skilliq Academy! 🚀`;
     
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'My Skilliq Certificate',
+          title: 'My Skilliq Verified Certificate',
           text,
           url,
         });
@@ -166,165 +213,201 @@ export function Certificate() {
     }
   };
 
+  const handlePrint = () => {
+    if (!isPreview) {
+      window.print();
+    }
+  };
+
   return (
-    <div className="w-full px-4 md:px-8 py-8 min-h-screen bg-muted/30">
-      <div className="flex items-center justify-between mb-8 max-w-5xl mx-auto print:hidden">
-        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit group">
-          <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
-          <span className="font-medium group-hover:underline">{t('back', 'Back')}</span>
-        </button>
-        <div className="flex items-center gap-3 flex-wrap justify-end">
-          {isPreview ? (
-            <div className="px-4 py-2 bg-primary/10 text-primary font-medium rounded-full text-sm flex items-center gap-2">
-              <Award className="w-4 h-4" />
-              {t('complete_course_to_download', 'Complete a course to download')}
-            </div>
-          ) : (
-            <>
-              <button 
-                onClick={handleShare}
-                className="flex items-center gap-2 px-4 py-2.5 outline outline-1 outline-border bg-card text-foreground rounded-full font-bold hover:bg-muted transition-all active:scale-95 shadow-sm"
-              >
-                <Share2 className="w-4 h-4" />
-                <span className="hidden sm:inline">Share</span>
-              </button>
+    <div 
+      dir={isRtl ? 'rtl' : 'ltr'} 
+      className="w-full min-h-screen bg-muted/20 pb-16 text-start"
+    >
+      
+      {/* 1. TOP FLOATING TOOLBAR */}
+      <div className="sticky top-16 z-30 bg-background/90 backdrop-blur-md border-b border-border/80 px-4 sm:px-6 lg:px-8 py-3.5 print:hidden">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
+          
+          {/* Left: Back Link & Status Badge */}
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => navigate(-1)} 
+              className="p-2 rounded-xl bg-card border border-border/70 hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer shadow-xs"
+              title={t('back', 'Back')}
+            >
+              <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
+            </button>
 
-              <button 
-                onClick={handleDownloadPDF}
-                className="flex items-center gap-2 px-4 py-2.5 bg-primary/10 text-primary rounded-full font-bold hover:bg-primary/20 transition-all active:scale-95 shadow-sm"
-              >
-                <FileText className="w-4 h-4" />
-                <span className="hidden sm:inline">Download PDF</span>
-                <span className="sm:hidden">PDF</span>
-              </button>
-              
-              <button 
-                onClick={handleDownloadJPG}
-                className="flex items-center gap-2 px-4 py-2.5 bg-primary/10 text-primary rounded-full font-bold hover:bg-primary/20 transition-all active:scale-95 shadow-sm"
-              >
-                <FileImage className="w-4 h-4" />
-                <span className="hidden sm:inline">Download JPG</span>
-                <span className="sm:hidden">JPG</span>
-              </button>
-              
-              <Link 
-                to={`/verify?id=${certId}`}
-                className="flex items-center gap-2 px-6 py-2.5 bg-foreground text-background rounded-full font-bold hover:bg-foreground/90 transition-all active:scale-95 shadow-sm hover:shadow"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                <span className="hidden sm:inline">{t('verify_certificate') || 'Verify Certificate'}</span>
-                <span className="sm:hidden">Verify</span>
-              </Link>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="flex justify-center w-full max-w-5xl mx-auto overflow-hidden pb-8 print:p-0">
-        <div className="w-full relative flex justify-center origin-top scale-[0.30] min-[380px]:scale-[0.35] sm:scale-50 md:scale-75 lg:scale-100 h-[220px] min-[380px]:h-[250px] sm:h-[360px] md:h-[530px] lg:h-[707px] print:scale-100 print:h-[707px]">
-          {/* Certificate Outermost Wrapper */}
-          <div 
-            ref={certRef}
-            className="w-[1000px] h-[707px] min-w-[1000px] bg-white text-slate-900 absolute top-0 shadow-2xl print:shadow-none print:w-[1000px] print:h-[707px] print:m-0 flex items-center justify-center p-8 shrink-0 overflow-hidden"
-          >
-          {/* Decorative Border & Background Pattern */}
-          <div className="absolute inset-0 pointer-events-none opacity-[0.03]" 
-               style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, black 1px, transparent 0)', backgroundSize: '32px 32px' }}>
-          </div>
-          <div className="absolute top-0 end-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl -me-48 -mt-48 pointer-events-none" />
-          <div className="absolute bottom-0 start-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl -ms-48 -mb-48 pointer-events-none" />
-
-          {/* Inner Frame */}
-          <div className="relative w-full h-full border-[12px] border-double border-slate-200 p-12 flex flex-col items-center text-center z-10 bg-white/80 backdrop-blur-sm">
-            
-            {/* School Header */}
-            <div className="absolute top-10 start-0 end-0 flex justify-center items-center gap-3">
-              <span className="text-slate-800 font-black text-2xl tracking-[0.3em] uppercase whitespace-nowrap">
-                Skilliq
-              </span>
-              <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
-                <span className="text-[10px] font-bold text-primary tracking-widest uppercase">Learn</span>
-                <span className="text-blue-500">
-                  <BadgeCheck className="w-3 h-3" />
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-bold text-foreground truncate max-w-[200px] sm:max-w-xs md:max-w-md">
+                  {course.title}
                 </span>
+                {isPreview ? (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                    {isRtl ? 'معاينة النموذج' : 'Demo Preview'}
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <BadgeCheck className="w-3 h-3" />
+                    <span>Verified</span>
+                  </span>
+                )}
               </div>
+              <span className="text-[10px] font-mono text-muted-foreground">ID: {certId}</span>
             </div>
+          </div>
 
-            {/* Main Content Area */}
-            <div className="mt-16 flex flex-col items-center w-full grow">
-              
-              <h1 className="text-5xl font-serif font-black text-slate-900 mb-6 tracking-tight uppercase">
-                {t('certificate_of_completion')}
-              </h1>
-              
-              <p className="text-lg text-slate-500 mb-10 uppercase tracking-[0.25em] font-medium">
-                {t('this_certifies_that')}
-              </p>
-              
-              {/* Student Name */}
-              <h2 className="text-5xl font-serif font-bold text-primary mb-8 border-b border-dashed border-slate-300 pb-4 inline-block px-16 italic">
-                {user?.displayName || userName || t('demo_student', 'Demo Student')}
-              </h2>
-              
-              <p className="text-lg text-slate-600 mb-6">
-                {t('has_successfully_completed')}
-              </p>
-              
-              {/* Course Title */}
-              <h3 className="text-3xl font-bold text-slate-800 mb-auto max-w-3xl leading-snug">
-                {course.title}
-              </h3>
-
-              {/* Bottom Info Grid */}
-              <div className="grid grid-cols-3 w-full mt-auto mb-4 items-end gap-6 px-4">
-                
-                {/* Date */}
-                <div className="col-start-1 text-start font-serif">
-                  <div className="border-b-2 border-slate-400 pb-2 mb-3">
-                    <span className="font-semibold text-xl text-slate-800">{date}</span>
-                  </div>
-                  <p className="text-[11px] font-sans text-slate-500 uppercase tracking-[0.15em] font-bold">{t('date')}</p>
+          {/* Right: Actions Row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            
+            {/* If in Preview: User cannot download; show locked state or CTA */}
+            {isPreview ? (
+              <div className="flex items-center gap-2">
+                <div className="px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-amber-600" />
+                  <span>{isRtl ? 'التحميل متاح فور إكمال الدورة' : 'Downloads unlock upon course completion'}</span>
                 </div>
 
-                {/* Secure Stamp (Hidden During Download) */}
-                <div className={`col-start-2 flex justify-center items-center min-h-[120px] hide-on-download ${isDownloading ? 'invisible' : 'visible'}`}>
-                  <div className="relative w-28 h-28 flex items-center justify-center opacity-90 hover:scale-105 transition-transform duration-150">
-                    <div className="absolute inset-0 rounded-full border-4 border-amber-500 border-dashed animate-[spin_60s_linear_infinite]" />
-                    <div className="absolute inset-2 rounded-full border bg-amber-50 flex flex-col items-center justify-center text-amber-600 shadow-inner">
-                      <ShieldCheck className="w-8 h-8 mb-0.5 text-amber-500" />
-                      <span className="text-[8px] font-black uppercase tracking-tight leading-none text-amber-700">Skilliq</span>
-                      <span className="text-[7.5px] font-bold uppercase tracking-tighter leading-none mt-1 opacity-80">{t('officially_verified')}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Instructor */}
-                <div className="col-start-3 text-end font-serif">
-                  <div className="border-b-2 border-slate-400 pb-2 mb-3">
-                    <span className="font-semibold text-xl text-slate-800 italic">{course.instructor}</span>
-                  </div>
-                  <p className="text-[11px] font-sans text-slate-500 uppercase tracking-[0.15em] font-bold">{t('instructor')}</p>
-                </div>
-
+                <Link
+                  to="/courses"
+                  className="px-4 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>{isRtl ? 'تصفح الدورات' : 'Explore Courses'}</span>
+                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                </Link>
               </div>
-            </div>
+            ) : (
+              /* Real Earned Certificate Actions */
+              <>
+                {/* Copy Verify Link */}
+                <button
+                  onClick={handleCopyLink}
+                  className="px-3.5 py-2 rounded-xl bg-card border border-border/80 hover:bg-muted text-foreground text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-98"
+                >
+                  {copyFeedback ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                      <span className="text-emerald-500">{t('cert_hub_link_copied', 'Copied!')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-primary" />
+                      <span>{t('cert_hub_copy_link', 'Copy Link')}</span>
+                    </>
+                  )}
+                </button>
 
-            {/* Certificate Verify Footer */}
-            <div className="absolute bottom-6 w-full px-12 flex justify-between items-end text-[10px] items-center text-slate-400 font-mono">
-              <div className="text-start">
-                <span className="uppercase font-bold tracking-wider">{t('certificate_id')}</span><br/>
-                <span className="text-slate-600">{certId}</span>
-              </div>
-              <div className="text-end">
-                <span className="uppercase font-bold tracking-wider">{t('verify_at')}</span><br/>
-                <span className="text-slate-600 font-bold">skilliq.com/verify</span>
-              </div>
-            </div>
+                {/* Share */}
+                <button
+                  onClick={handleShare}
+                  className="px-3.5 py-2 rounded-xl bg-card border border-border/80 hover:bg-muted text-foreground text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-98"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-primary" />
+                  <span className="hidden sm:inline">{t('cert_hub_share', 'Share')}</span>
+                </button>
+
+                {/* Print */}
+                <button
+                  onClick={handlePrint}
+                  className="hidden lg:flex px-3.5 py-2 rounded-xl bg-card border border-border/80 hover:bg-muted text-foreground text-xs font-bold transition-all shadow-xs items-center gap-1.5 cursor-pointer active:scale-98"
+                >
+                  <Printer className="w-3.5 h-3.5 text-primary" />
+                  <span>{t('cert_hub_print', 'Print')}</span>
+                </button>
+
+                {/* Download JPG */}
+                <button
+                  onClick={handleDownloadJPG}
+                  disabled={isDownloading}
+                  className="px-3.5 py-2 rounded-xl bg-card border border-border/80 hover:bg-muted text-foreground text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-98 disabled:opacity-50"
+                >
+                  <FileImage className="w-3.5 h-3.5 text-primary" />
+                  <span>JPG</span>
+                </button>
+
+                {/* Download PDF */}
+                <button
+                  onClick={handleDownloadPDF}
+                  disabled={isDownloading}
+                  className="px-4 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-98 disabled:opacity-50"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>PDF</span>
+                </button>
+
+                {/* Verify Page Link */}
+                <Link
+                  to={`/verify?id=${certId}`}
+                  className="px-3.5 py-2 rounded-xl bg-foreground text-background hover:bg-foreground/90 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="hidden sm:inline">{t('verify_certificate', 'Verify')}</span>
+                </Link>
+              </>
+            )}
 
           </div>
-        </div>
+
         </div>
       </div>
+
+      {/* 2. DEMO NOTICE BANNER (Only in preview mode) */}
+      {isPreview && (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 print:hidden">
+          <div className="p-4 sm:p-5 rounded-2xl bg-card border border-border/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold text-foreground">
+                  {isRtl ? 'معاينة رسمية دقيقة لشهادات SkilliQ' : 'Official SkilliQ Credential Preview'}
+                </h4>
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
+                  {isRtl 
+                    ? 'الشهادة موقعة ومعتمدة من قبل: Mr. Marouan Anouar - Global Director of ATLAS 1337 Certificates'
+                    : 'Certified & Signed by: Mr. Marouan Anouar — Global Director of ATLAS 1337 Certificates'}
+                </p>
+              </div>
+            </div>
+
+            <Link
+              to="/courses"
+              className="w-full sm:w-auto px-5 py-2.5 bg-primary text-primary-foreground hover:bg-primary/90 rounded-xl text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-2"
+            >
+              <span>{isRtl ? 'ابدأ دورة للحصول على الشهادة' : 'Start a Course to Earn Yours'}</span>
+              <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* 3. CERTIFICATE CANVAS PRESENTATION VIEWPORT */}
+      <div className="w-full max-w-5xl mx-auto px-2 sm:px-4 md:px-6 pt-6 pb-12 flex flex-col items-center justify-center print:p-0 print:m-0">
+        
+        {/* Responsive Certificate Viewer: 100% full view on mobile, tablet, and laptop */}
+        <div className="w-full flex items-center justify-center overflow-visible py-2">
+          <ResponsiveCertificateViewer
+            data={certificateData}
+            certRef={certRef}
+            isDownloading={isDownloading}
+            maxScale={1}
+            fitMode="contain"
+          />
+        </div>
+
+        {/* Footer tip */}
+        <div className="mt-4 text-center print:hidden">
+          <p className="text-xs text-muted-foreground flex items-center justify-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <span>{t('cert_hub_qr_scan', 'Scan QR to verify authenticity instantly on Skilliq')}</span>
+          </p>
+        </div>
+
+      </div>
+
     </div>
   );
 }
