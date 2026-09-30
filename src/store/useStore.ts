@@ -56,7 +56,7 @@ export const useStore = create<StoreState>()(
       learningPaths: defaultPaths,
       categories: defaultCategories,
       notifications: [],
-      banners: defaultBanners,
+      banners: [],
       isContentLoading: true,
       isAuthModalOpen: false,
       setTheme: (theme) => set({ theme }),
@@ -79,16 +79,30 @@ export const useStore = create<StoreState>()(
       loadContent: async (retryCount = 0) => {
         try {
           const { courses, learningPaths, categories, notifications, banners } = await fetchFirestoreContent();
-          
-          const loadedBanners = banners && banners.length > 0 ? banners : defaultBanners;
 
           if (courses.length > 0 || learningPaths.length > 0) {
             const approvedCourses = courses.filter(c => c.isApproved !== false);
-            set({ allCourses: courses, courses: approvedCourses, learningPaths, categories, notifications: notifications || [], banners: loadedBanners, isContentLoading: false });
+            set({ 
+              allCourses: courses, 
+              courses: approvedCourses, 
+              learningPaths, 
+              categories, 
+              notifications: notifications || [], 
+              banners: banners || [], 
+              isContentLoading: false 
+            });
           } else {
             // Retain defaultCourses if DB returns empty
             const currentCourses = get().courses.length > 0 ? get().courses : defaultCourses;
-            set({ courses: currentCourses, allCourses: currentCourses, learningPaths: defaultPaths, categories: defaultCategories, notifications: [], banners: defaultBanners, isContentLoading: false });
+            set({ 
+              courses: currentCourses, 
+              allCourses: currentCourses, 
+              learningPaths: defaultPaths, 
+              categories: defaultCategories, 
+              notifications: notifications || [], 
+              banners: banners || [], 
+              isContentLoading: false 
+            });
           }
         } catch (error: any) {
           console.error("Firestore loading error:", error);

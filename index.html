@@ -40,21 +40,43 @@
     <meta property="twitter:image" content="https://nexa1337.github.io/banner.jpg" />
     
     <script>
-      window.addEventListener('unhandledrejection', function(event) {
-        var reason = event.reason;
-        var msg = reason && reason.message ? reason.message : String(reason);
-        if (msg.toLowerCase().includes('websocket') || msg.toLowerCase().includes('vite')) {
-          event.preventDefault();
-          event.stopPropagation();
+      (function() {
+        var origWarn = console.warn;
+        console.warn = function() {
+          var str = Array.prototype.slice.call(arguments).map(String).join(' ');
+          if (str.includes('BloomFilter') || str.includes('WebSocket') || str.includes('[vite]') || str.includes('closed without opened')) return;
+          origWarn.apply(console, arguments);
+        };
+
+        var origErr = console.error;
+        console.error = function() {
+          var str = Array.prototype.slice.call(arguments).map(String).join(' ');
+          if (str.includes('BloomFilter') || str.includes('WebSocket') || str.includes('closed without opened') || str.includes('[vite]')) return;
+          origErr.apply(console, arguments);
+        };
+
+        function isIgnorable(msg) {
+          var s = String(msg || '').toLowerCase();
+          return s.includes('websocket') || s.includes('closed without opened') || s.includes('bloomfilter') || s.includes('vite');
         }
-      });
-      window.addEventListener('error', function(event) {
-        var msg = event.message || String(event.error);
-        if (msg.toLowerCase().includes('websocket') || msg.toLowerCase().includes('vite')) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-      });
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event.reason;
+          var msg = reason && (reason.message || reason.name) ? (reason.message + ' ' + (reason.name || '')) : String(reason);
+          if (isIgnorable(msg)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, { capture: true });
+
+        window.addEventListener('error', function(event) {
+          var msg = event.message || (event.error && event.error.message) || String(event);
+          if (isIgnorable(msg)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, { capture: true });
+      })();
     </script>
   </head>
   <body>

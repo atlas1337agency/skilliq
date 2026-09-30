@@ -4,7 +4,8 @@ import {
   BookOpen, 
   Layers, 
   Award, 
-  ArrowUpRight
+  ArrowUpRight,
+  Sparkles
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -125,6 +126,15 @@ export function Footer() {
                 >
                   {t('footer_verify_title', 'Verify Certificates')}
                 </Link>
+              </li>
+              <li>
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-whats-new'))}
+                  className="text-primary font-bold hover:underline transition-colors inline-flex items-center gap-1.5 py-0.5 cursor-pointer text-start"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{language === 'ar' ? 'ما الجديد! (أحدث الدورات)' : "What's New! (Latest Releases)"}</span>
+                </button>
               </li>
             </ul>
           </div>

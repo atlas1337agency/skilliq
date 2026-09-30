@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { isSuperAdminEmail } from '../lib/admin';
 import { useStore } from '../store/useStore';
-import { Moon, Sun, LogIn, LogOut, LayoutDashboard, Award, Home as HomeIcon, BookOpen, Menu, X, ShieldAlert, Flame, Trophy, Globe } from 'lucide-react';
+import { Moon, Sun, LogIn, LogOut, LayoutDashboard, Award, Home as HomeIcon, BookOpen, Menu, X, ShieldAlert, Flame, Trophy, Globe, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState, useRef } from 'react';
 import { auth, googleProvider, db } from '../firebase';
@@ -182,10 +182,19 @@ export function Header() {
             </button>
             <button
               onClick={toggleTheme}
-              className="w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-border transition-colors text-muted-foreground hover:text-foreground shrink-0"
+              className="w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-border transition-colors text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
               title={theme === 'light' ? t('dark_mode') : t('light_mode')}
             >
               {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            </button>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('open-whats-new'))}
+              className="w-8 h-8 rounded-full bg-primary/10 hover:bg-primary/20 flex items-center justify-center transition-colors text-primary shrink-0 relative cursor-pointer"
+              title={language === 'ar' ? 'ما الجديد؟' : "What's New!"}
+              aria-label="What's New"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span className="absolute -top-0.5 -end-0.5 w-2 h-2 bg-primary rounded-full animate-ping" />
             </button>
           </div>
           
@@ -326,6 +335,16 @@ export function Header() {
               <Link to="/paths" onClick={() => setIsMobileMenuOpen(false)} className="px-3 py-2 rounded-md hover:bg-muted text-foreground/80 hover:text-foreground font-medium text-sm">{t('paths')}</Link>
               <Link to="/courses" onClick={() => setIsMobileMenuOpen(false)} className="px-3 py-2 rounded-md hover:bg-muted text-foreground/80 hover:text-foreground font-medium text-sm">{t('courses')}</Link>
               <Link to="/masterclasses" onClick={() => setIsMobileMenuOpen(false)} className="px-3 py-2 rounded-md hover:bg-muted text-foreground/80 hover:text-foreground font-medium text-sm">{t('masterclasses') || 'Masterclasses'}</Link>
+              <button 
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  window.dispatchEvent(new CustomEvent('open-whats-new'));
+                }}
+                className="px-3 py-2 rounded-md hover:bg-muted text-primary font-bold text-sm text-start flex items-center gap-2 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>{language === 'ar' ? 'ما الجديد! 🎉' : "What's New! 🎉"}</span>
+              </button>
             </nav>
 
             {!user && (

@@ -76,7 +76,7 @@ export interface LearningPath {
   
   export interface CourseReport {
     id: string;
-    type: 'broken_video';
+    type: 'broken_video' | 'content_issue' | 'general_bug';
     courseId: string;
     courseTitle: string;
     videoId: string;
@@ -88,6 +88,11 @@ export interface LearningPath {
     status: 'pending' | 'resolved';
     createdAt: number;
     categoryId?: string;
+    issue?: string;
+    details?: string;
+    resolvedAt?: number;
+    resolvedBy?: string;
+    resolutionNotes?: string;
   }
   
   export type BannerPlacement = 'home-hero' | 'home-middle' | 'home-bottom' | 'course-sidebar' | 'course-bottom';

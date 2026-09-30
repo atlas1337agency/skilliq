@@ -17,7 +17,9 @@ import {
   Link as LinkIcon, 
   ExternalLink, 
   Check, 
-  Play 
+  Play,
+  Bell,
+  ArrowRight
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { fetchPlaylistVideos, extractPlaylistId, fetchChannelDetailsFromVideoOrPlaylist, fetchVideoDetails } from '../lib/youtube';
@@ -1105,6 +1107,52 @@ export function AdminForms({
                     />
                     <span>Active (Display this alert live to students)</span>
                   </label>
+                </div>
+
+                {/* Real-time Notification Design Preview */}
+                <div className="col-span-1 sm:col-span-2 pt-4 border-t border-border/70">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-primary" />
+                      <span>Live Design Preview (What students will see):</span>
+                    </span>
+                    <span className="text-[10px] text-primary font-mono font-bold bg-primary/10 px-2 py-0.5 rounded">
+                      Modern Floating Alert
+                    </span>
+                  </div>
+
+                  <div className="max-w-md mx-auto p-4 rounded-2xl bg-card/95 border border-primary/40 shadow-xl relative overflow-hidden space-y-3">
+                    <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-600" />
+                    
+                    {notification.image && (
+                      <div className="w-full h-32 rounded-xl overflow-hidden bg-muted relative">
+                        <img src={notification.image} alt="" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                        <Bell className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="text-[10px] font-black uppercase text-primary tracking-wider">Live Broadcast</span>
+                    </div>
+
+                    <h4 className="text-sm font-black text-foreground">
+                      {notification.title || "Your Announcement Title Here"}
+                    </h4>
+                    <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">
+                      {notification.message || "Your announcement message will appear here with modern styling..."}
+                    </p>
+
+                    {notification.link && (
+                      <div className="pt-1">
+                        <div className="w-full py-2 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-bold text-center flex items-center justify-center gap-1.5 shadow-xs">
+                          <span>Explore Now</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 

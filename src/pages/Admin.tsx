@@ -20,7 +20,8 @@ import {
   ChevronRight,
   Sparkles,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  Eye
 } from 'lucide-react';
 import { 
   deleteCourseInFirestore, 
@@ -33,7 +34,8 @@ import {
 import { AdminForms } from '../components/AdminForms';
 import { AdminAnalytics } from '../components/AdminAnalytics';
 import { AdminUsers } from '../components/AdminUsers';
-import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, writeBatch } from 'firebase/firestore';
+import { AdminReports } from '../components/AdminReports';
+import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CourseReport, AppNotification, AdBannerData } from '../data/courses';
 import { cn } from '../lib/utils';
@@ -61,25 +63,19 @@ export function Admin() {
   const [courseSearch, setCourseSearch] = useState('');
   const [coursePage, setCoursePage] = useState(1);
 
-  // Fetch reports from Firestore
-  const fetchReports = async () => {
-    setReportsLoading(true);
-    try {
-      const snap = await getDocs(collection(db, 'reports'));
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as CourseReport));
-      setReports(data.sort((a, b) => b.createdAt - a.createdAt));
-    } catch (err) {
-      console.error("Error fetching reports", err);
-    } finally {
-      setReportsLoading(false);
-    }
-  };
-
+  // Realtime reports listener for notification badge
   useEffect(() => {
-    if (activeTab === 'reports' && user && ['admin', 'publisher'].includes(user.role)) {
-      fetchReports();
-    }
-  }, [activeTab, user]);
+    if (!user || !['admin', 'publisher'].includes(user.role)) return;
+    const unsub = onSnapshot(collection(db, 'reports'), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as CourseReport));
+      setReports(data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+      setReportsLoading(false);
+    }, (err) => {
+      console.error("Error fetching reports", err);
+      setReportsLoading(false);
+    });
+    return () => unsub();
+  }, [user]);
 
   // Auth gate: Admin or Publisher only
   if (!user || !['admin', 'publisher'].includes(user.role)) {
@@ -160,6 +156,9 @@ export function Admin() {
         await deleteNotificationInFirestore(deleteDialog.id);
       } else if (deleteDialog.type === 'banner') {
         await deleteBannerInFirestore(deleteDialog.id);
+        useStore.setState(prev => ({
+          banners: prev.banners.filter(b => b.id !== deleteDialog.id)
+        }));
       } else if (deleteDialog.type === 'report') {
         await deleteDoc(doc(db, 'reports', deleteDialog.id));
         setReports(prev => prev.filter(r => r.id !== deleteDialog.id));
@@ -275,6 +274,7 @@ export function Admin() {
             >
               <TrendingUp className="w-3.5 h-3.5 text-primary" />
               <span>{t('analytics', 'Analytics')}</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Live Telemetry" />
             </button>
           )}
 
@@ -578,6 +578,17 @@ export function Admin() {
 
                 <div className="mt-4 flex items-center justify-end gap-1.5 pt-3 border-t border-border/60">
                   <button 
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('preview-push-notification', {
+                        detail: { notification: notif }
+                      }));
+                    }}
+                    className="p-1.5 text-emerald-500 hover:bg-emerald-500/10 rounded-lg cursor-pointer"
+                    title={isRtl ? "معاينة الإشعار الفورية" : "Live Preview Notification"}
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button 
                     onClick={() => setEditingItem({ type: 'notification', item: notif })}
                     className="p-1.5 text-primary hover:bg-primary/10 rounded-lg cursor-pointer"
                     title="Edit Notification"
@@ -620,13 +631,33 @@ export function Admin() {
               </p>
             </div>
 
-            <button 
-              onClick={() => setEditingItem({ type: 'banner' })}
-              className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
-            >
-              <Plus className="w-4 h-4" /> 
-              <span>New Banner</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={async () => {
+                  try {
+                    const { defaultBanners } = await import('../data/courses');
+                    for (const b of defaultBanners) {
+                      await addOrUpdateBanner(b);
+                    }
+                    await loadContent();
+                  } catch (e: any) {
+                    console.error("Error loading defaults:", e);
+                    alert("Failed to load default banners: " + (e?.message || 'Unknown error'));
+                  }
+                }}
+                className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-secondary/80 shadow-xs cursor-pointer active:scale-98"
+                title="Populate initial demo banners into Firestore"
+              >
+                <span>Load Defaults</span>
+              </button>
+              <button 
+                onClick={() => setEditingItem({ type: 'banner' })}
+                className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
+              >
+                <Plus className="w-4 h-4" /> 
+                <span>New Banner</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -703,114 +734,7 @@ export function Admin() {
 
       {/* TAB CONTENT 6: REPORTS (Broken Video Reports) */}
       {activeTab === 'reports' && isAdmin && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-foreground flex items-center gap-2">
-                <AlertTriangle className="w-6 h-6 text-amber-500" />
-                <span>Broken Video Student Reports</span>
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Review issues submitted by learners. Resolving automatically sends a notification to the reporting student.
-              </p>
-            </div>
-
-            {/* Filter Tabs */}
-            <div className="flex items-center gap-1 bg-muted p-1 rounded-xl text-xs font-bold">
-              {(['all', 'pending', 'resolved'] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setReportFilter(tab)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg capitalize transition-all cursor-pointer",
-                    reportFilter === tab ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {reportsLoading ? (
-            <div className="p-16 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              <p className="text-xs font-semibold">Loading student reports from Firestore...</p>
-            </div>
-          ) : reports.length === 0 ? (
-            <div className="p-12 text-center bg-muted/20 border border-dashed border-border/80 rounded-2xl">
-              <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500 mb-2" />
-              <p className="text-sm font-bold text-foreground">Zero broken video reports</p>
-              <p className="text-xs text-muted-foreground mt-0.5">All course videos are healthy and functioning normally.</p>
-            </div>
-          ) : (() => {
-            const filteredReports = reports.filter(r => {
-              if (reportFilter === 'all') return true;
-              return r.status === reportFilter;
-            });
-
-            return (
-              <div className="space-y-3">
-                {filteredReports.map(rep => (
-                  <div key={rep.id} className="p-4 rounded-2xl bg-card border border-border/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={cn(
-                          "text-[9px] font-black uppercase px-2 py-0.5 rounded-md",
-                          rep.status === 'resolved' ? "bg-emerald-500/15 text-emerald-600" : "bg-amber-500/15 text-amber-600"
-                        )}>
-                          {rep.status.toUpperCase()}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {new Date(rep.createdAt).toLocaleString()}
-                        </span>
-                      </div>
-
-                      <h4 className="font-bold text-sm text-foreground truncate">{rep.courseTitle}</h4>
-                      <p className="text-xs text-foreground/80">
-                        Lesson: <span className="font-semibold">{rep.videoTitle}</span> (ID: <code className="bg-muted px-1 rounded font-mono text-[11px]">{rep.youtubeId}</code>)
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Reported by: {rep.userName} {rep.userEmail ? `(${rep.userEmail})` : ''}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                      <button
-                        onClick={() => {
-                          const targetCourse = allCourses.find(c => c.id === rep.courseId);
-                          if (targetCourse) {
-                            setEditingItem({ type: 'course', item: targetCourse });
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-card border border-border/80 hover:bg-muted text-foreground text-xs font-bold rounded-xl transition-all cursor-pointer"
-                      >
-                        Edit Course
-                      </button>
-
-                      {rep.status === 'pending' && (
-                        <button
-                          onClick={() => handleResolveReport(rep)}
-                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
-                        >
-                          Mark Fixed & Notify
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setDeleteDialog({ type: 'report', id: rep.id, title: rep.videoTitle })}
-                        className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer"
-                        title="Delete Report"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>
+        <AdminReports onEditCourse={(c) => setEditingItem({ type: 'course', item: c })} />
       )}
 
       {/* TAB CONTENT 7: PATHS */}
