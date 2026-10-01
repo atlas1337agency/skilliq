@@ -151,7 +151,7 @@ export function Footer() {
                   to="/courses?category=Web%20Development" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('category_Web_Development', 'Web Development')}
+                  {isRtl ? 'تطوير الويب (Web Development)' : 'Web Development'}
                 </Link>
               </li>
               <li>
@@ -159,7 +159,7 @@ export function Footer() {
                   to="/courses?category=Cyber%20Security" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('category_Cyber_Security', 'Cyber Security')}
+                  {isRtl ? 'الأمن السيبراني (Cyber Security)' : 'Cyber Security'}
                 </Link>
               </li>
               <li>
@@ -167,7 +167,7 @@ export function Footer() {
                   to="/courses?category=Programming" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('category_Programming', 'Programming & Python')}
+                  {isRtl ? 'البرمجة وبايثون (Programming & Python)' : 'Programming & Python'}
                 </Link>
               </li>
               <li>
@@ -175,7 +175,7 @@ export function Footer() {
                   to="/courses?category=Design" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('category_Design', 'UI/UX & 3D Design')}
+                  {isRtl ? 'تصميم الواجهات (UI/UX & 3D Design)' : 'UI/UX & 3D Design'}
                 </Link>
               </li>
               <li>
@@ -183,7 +183,15 @@ export function Footer() {
                   to="/courses?category=digital%20marketing" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('category_digital_marketing', 'Digital Marketing')}
+                  {isRtl ? 'التسويق الرقمي (Digital Marketing)' : 'Digital Marketing'}
+                </Link>
+              </li>
+              <li>
+                <Link 
+                  to="/paths" 
+                  className="text-primary font-bold hover:underline transition-colors inline-flex items-center gap-1 py-0.5"
+                >
+                  <span>{isRtl ? 'جميع المسارات المتسلسلة ←' : 'All Curated Paths →'}</span>
                 </Link>
               </li>
             </ul>
@@ -202,7 +210,7 @@ export function Footer() {
                   to="/about" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('about_us', 'About Us')}
+                  {isRtl ? 'عن المنصة (About Us)' : 'About Us'}
                 </Link>
               </li>
               <li>
@@ -210,7 +218,7 @@ export function Footer() {
                   to="/copyright" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('copyright_disclaimer', 'Copyright & Disclaimer')}
+                  {isRtl ? 'حقوق الملكية وإخلاء المسؤولية' : 'Copyright & Disclaimer'}
                 </Link>
               </li>
               <li>
@@ -218,7 +226,7 @@ export function Footer() {
                   to="/contact" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('contact_us', 'Contact Us')}
+                  {isRtl ? 'تواصل معنا (Contact Us)' : 'Contact Us'}
                 </Link>
               </li>
               <li>
@@ -226,7 +234,7 @@ export function Footer() {
                   to="/creator" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >
-                  {t('original_creator', 'Creator Program')}
+                  {isRtl ? 'برنامج صناع المحتوى (Creator Program)' : 'Original Creator Program'}
                 </Link>
               </li>
             </ul>

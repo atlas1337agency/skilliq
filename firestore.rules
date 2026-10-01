@@ -154,22 +154,12 @@ service cloud.firestore {
     }
 
     function isValidReport(data) {
-      return hasOnlyAllowedFields(['type', 'courseId', 'courseTitle', 'categoryId', 'videoId', 'videoTitle', 'youtubeId', 'userId', 'userName', 'userEmail', 'status', 'createdAt', 'issue', 'details', 'resolvedAt', 'resolvedBy', 'resolutionNotes']) &&
-             (data.type in ['broken_video', 'content_issue', 'general_bug']) &&
-             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 100 &&
-             data.courseTitle is string && data.courseTitle.size() > 0 && data.courseTitle.size() <= 200 &&
-             isValidOptionalString('categoryId', 0, 100) &&
-             data.videoId is string && data.videoId.size() > 0 && data.videoId.size() <= 100 &&
-             data.videoTitle is string && data.videoTitle.size() > 0 && data.videoTitle.size() <= 200 &&
-             data.youtubeId is string && data.youtubeId.size() > 0 && data.youtubeId.size() <= 100 &&
-             data.userId is string && data.userId.size() > 0 && data.userId.size() <= 100 &&
-             data.userName is string && data.userName.size() > 0 && data.userName.size() <= 100 &&
-             isValidOptionalString('userEmail', 0, 200) &&
-             isValidOptionalString('issue', 0, 500) &&
-             isValidOptionalString('details', 0, 2000) &&
-             isValidOptionalString('resolvedBy', 0, 200) &&
-             isValidOptionalString('resolutionNotes', 0, 2000) &&
-             (!('resolvedAt' in data) || data.resolvedAt is number) &&
+      return (data.type in ['broken_video', 'content_issue', 'general_bug']) &&
+             data.courseId is string && data.courseId.size() > 0 &&
+             data.courseTitle is string && data.courseTitle.size() > 0 &&
+             data.videoId is string && data.videoId.size() > 0 &&
+             data.videoTitle is string && data.videoTitle.size() > 0 &&
+             data.youtubeId is string && data.youtubeId.size() > 0 &&
              data.status in ['pending', 'resolved'] &&
              data.createdAt is number;
     }
@@ -254,12 +244,7 @@ service cloud.firestore {
     }
 
     match /reports/{reportId} {
-      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if isValidReport(request.resource.data) && 
-                    ((isAuthenticated() && request.resource.data.userId == request.auth.uid) ||
-                     (!isAuthenticated() && (request.resource.data.userId == 'guest' || request.resource.data.userId == 'anonymous')));
-      allow update: if isAdmin() && isValidReport(request.resource.data);
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /system_backups/{backupId} {

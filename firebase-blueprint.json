@@ -153,6 +153,31 @@
         "createdAt": { "type": "number" }
       },
       "required": ["id", "title", "message", "isActive"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "A user-submitted broken video or content issue report.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "courseId": { "type": "string" },
+        "courseTitle": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "videoTitle": { "type": "string" },
+        "youtubeId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "issue": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "resolvedAt": { "type": "number" },
+        "resolvedBy": { "type": "string" }
+      },
+      "required": ["type", "courseId", "courseTitle", "videoId", "videoTitle", "youtubeId", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -179,6 +204,10 @@
     "/notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/Notification" },
       "description": "Global catalog of notifications."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/Report" },
+      "description": "User submitted issue and broken video reports."
     }
   }
 }

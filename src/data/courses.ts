@@ -64,14 +64,22 @@ export interface LearningPath {
   export interface AppNotification {
     id: string;
     title: string;
+    titleAr?: string;
     message: string;
+    messageAr?: string;
+    type?: string;
     image?: string;
     link?: string;
     linkLogo?: string;
+    actionLabel?: string;
+    actionLabelAr?: string;
     links?: AppNotificationLink[];
     createdAt: number;
     isActive: boolean;
     targetUserId?: string;
+    targetEmail?: string;
+    videoId?: string;
+    courseId?: string;
   }
   
   export interface CourseReport {

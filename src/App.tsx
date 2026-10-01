@@ -66,6 +66,7 @@ export default function App() {
             <Route path="about" element={<About />} />
             <Route path="copyright" element={<Copyright />} />
             <Route path="contact" element={<Contact />} />
+            <Route path="creator" element={<Creator />} />
             <Route path="creator/:creatorId" element={<Creator />} />
           </Route>
           <Route path="/course/:courseId" element={<Course />} />

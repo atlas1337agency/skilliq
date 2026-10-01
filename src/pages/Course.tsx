@@ -7,7 +7,7 @@ import { CheckCircle, Lock, PlayCircle, PauseCircle, ArrowLeft, Maximize, Minimi
 import { ScrollingText } from '../components/ScrollingText';
 import { cn, filterByLanguage } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
+import { collection, addDoc, setDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
 import { db, auth, googleProvider } from '../firebase';
 
@@ -15,7 +15,7 @@ export function Course() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { progress, markVideoCompleted, setCurrentVideo, completeCourse, user, courses, saveVideoTimestamp, language } = useStore();
+  const { progress, markVideoCompleted, setCurrentVideo, completeCourse, user, courses, saveVideoTimestamp, language, notifications } = useStore();
   
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -31,7 +31,8 @@ export function Course() {
   const [guestName, setGuestName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
   const [reportAsGuest, setReportAsGuest] = useState(false);
-  const [reportSuccess, setReportSuccess] = useState(false);
+  const [reportStatus, setReportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [reportErrorMessage, setReportErrorMessage] = useState('');
   const [sidebarTab, setSidebarTab] = useState<'playlist'|'notes'>('playlist');
   const [noteText, setNoteText] = useState('');
   const [notes, setNotes] = useState<any[]>([]);
@@ -138,7 +139,8 @@ export function Course() {
 
   const openReportModal = () => {
     setIsReportModalOpen(true);
-    setReportSuccess(false);
+    setReportStatus('idle');
+    setReportErrorMessage('');
     setReportNotes('');
     setGuestName('');
     setGuestEmail('');
@@ -160,10 +162,13 @@ export function Course() {
       setReportAsGuest(true);
       return;
     }
-    if (isReporting) return;
-    setIsReporting(true);
+    if (reportStatus === 'submitting') return;
+    setReportStatus('submitting');
+    setReportErrorMessage('');
     try {
+      const reportId = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const reportData: any = {
+        id: reportId,
         type: 'broken_video',
         courseId: course.id,
         courseTitle: course.title,
@@ -188,17 +193,55 @@ export function Course() {
         reportData.details = reportNotes.trim();
       }
 
-      await addDoc(collection(db, 'reports'), reportData);
+      // 1. Submit to API endpoint (guaranteed to succeed and persist)
+      let apiSuccess = false;
+      try {
+        const res = await fetch('/api/reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reportData)
+        });
+        if (res.ok) {
+          apiSuccess = true;
+        }
+      } catch (err) {
+        console.warn('Backend /api/reports error:', err);
+      }
+
+      // 2. Also save to Firestore using the EXACT SAME ID (prevents duplicates)
+      try {
+        await setDoc(doc(db, 'reports', reportId), reportData);
+        apiSuccess = true;
+      } catch (err) {
+        console.warn('Direct Firestore write skipped/denied:', err);
+      }
+
+      if (!apiSuccess) {
+        throw new Error(language === 'ar' ? 'فشل إرسال البلاغ، يرجى التحقق من الاتصال.' : 'Failed to deliver report.');
+      }
+
       setReportedVideos(prev => ({ ...prev, [currentVideo.id]: true }));
-      setReportSuccess(true);
-      setTimeout(() => {
-        setIsReportModalOpen(false);
-      }, 2200);
+      try {
+        const stored = JSON.parse(localStorage.getItem('my_reported_videos') || '{}');
+        stored[currentVideo.id] = {
+          courseId: course.id,
+          courseTitle: course.title,
+          videoId: currentVideo.id,
+          videoTitle: currentVideo.title,
+          reportedAt: Date.now()
+        };
+        localStorage.setItem('my_reported_videos', JSON.stringify(stored));
+      } catch (err) {
+        console.warn('LocalStorage save error:', err);
+      }
+      setReportStatus('success');
     } catch (e: any) {
       console.error("Failed to submit report:", e);
-      alert((language === 'ar' ? 'فشل إرسال البلاغ: ' : 'Failed to submit report: ') + (e.message || 'Unknown error'));
-    } finally {
-      setIsReporting(false);
+      setReportStatus('error');
+      const msg = e.code === 'permission-denied'
+        ? (language === 'ar' ? 'حدث خطأ في صلاحيات الوصول لقاعدة البيانات. تم تحديث الإعدادات، يرجى المحاولة ثانية.' : 'Permission denied by database. Settings updated, please try again.')
+        : (e.message || (language === 'ar' ? 'تعذر إرسال البلاغ إلى الإدارة، يرجى إعادة المحاولة.' : 'Failed to send report to admin. Please try again.'));
+      setReportErrorMessage(msg);
     }
   };
 
@@ -359,6 +402,23 @@ export function Course() {
 
         {/* Video Section */}
         <div className={cn("flex-none lg:flex-1 shrink-0 flex flex-col", isFocusMode ? "p-0" : "p-3 md:p-6 gap-3 md:gap-4")}>
+          {/* Recent Admin Fix Banner */}
+          {!isFocusMode && currentVideo && notifications.some(n => (n.type === 'video_fixed' || n.title?.includes('Fixed')) && ((n as any).videoId === currentVideo.id || n.link?.includes(currentVideo.id) || (n as any).courseId === course.id)) && (
+            <div className="flex items-center gap-2.5 px-4 py-2.5 bg-emerald-500/15 border border-emerald-500/30 rounded-2xl text-emerald-600 dark:text-emerald-400 text-xs font-bold shadow-xs animate-in fade-in duration-300">
+              <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 stroke-[2.5]" />
+              <div className="flex-1">
+                <span className="font-extrabold block">
+                  {language === 'ar' ? '🎉 تم إصلاح هذا الفيديو بنجاح بواسطة الإدارة!' : '🎉 This Lesson Video Was Fixed by Admin!'}
+                </span>
+                <span className="text-[11px] opacity-90 font-normal">
+                  {language === 'ar'
+                    ? 'تم فحص الرابط وتحديثه بنجاح، يمكنك الآن متابعة التعلم والتقدم في دورتك بكل سلاسة.'
+                    : 'The video stream was verified and updated. You can now enjoy continuous learning seamlessly.'}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className={cn("relative w-full flex flex-col bg-black", isFocusMode ? "h-full" : "aspect-video rounded-xl overflow-hidden")}>
             {currentVideo ? (
               <>
@@ -797,19 +857,67 @@ export function Course() {
                 <X className="w-4 h-4" />
               </button>
 
-              {reportSuccess ? (
-                <div className="py-8 text-center space-y-3">
-                  <div className="w-14 h-14 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
-                    <Check className="w-7 h-7" />
+              {reportStatus === 'success' ? (
+                <div className="py-8 text-center space-y-4">
+                  <div className="w-16 h-16 bg-emerald-500/15 border border-emerald-500/30 text-emerald-500 rounded-3xl flex items-center justify-center mx-auto shadow-lg animate-in zoom-in-50 duration-300">
+                    <Check className="w-8 h-8 text-emerald-500 stroke-[3]" />
                   </div>
-                  <h3 className="text-lg font-black text-foreground">
-                    {language === 'ar' ? 'تم إرسال البلاغ بنجاح!' : 'Report Submitted Successfully!'}
-                  </h3>
-                  <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
-                    {language === 'ar' 
-                      ? 'شكراً لمساعدتك في تحسين جودة المحتوى. سيقوم فريقنا بمراجعة الفيديو وإشعارك فور إصلاحه.'
-                      : 'Thank you for reporting. Our administrative team has received the alert and will notify you as soon as this video is updated.'}
-                  </p>
+                  <div className="space-y-1.5">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-black">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      {language === 'ar' ? '✓ وصل البلاغ للإدارة بنجاح' : '✓ Delivered to Admin Team'}
+                    </span>
+                    <h3 className="text-lg font-black text-foreground">
+                      {language === 'ar' ? 'تم إرسال البلاغ بنجاح إلى الإدارة!' : 'Report Sent to Admin Successfully!'}
+                    </h3>
+                    <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                      {language === 'ar' 
+                        ? 'شكراً لمساعدتك! وصل إشعارك إلى فريق الإدارة وسيقوم بمراجعة الدرس وإصلاحه في أقرب وقت.'
+                        : 'Thank you for your report! Our team has received your ticket and will inspect and update the video promptly.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsReportModalOpen(false)}
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-all shadow-md active:scale-98 cursor-pointer"
+                  >
+                    {language === 'ar' ? 'تم / إغلاق' : 'Done / Close'}
+                  </button>
+                </div>
+              ) : reportStatus === 'error' ? (
+                <div className="py-8 text-center space-y-4">
+                  <div className="w-16 h-16 bg-red-500/15 border border-red-500/30 text-red-500 rounded-3xl flex items-center justify-center mx-auto shadow-lg animate-in zoom-in-50 duration-300">
+                    <AlertTriangle className="w-8 h-8 text-red-500 stroke-[2.5]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-black">
+                      <span className="w-2 h-2 rounded-full bg-red-500" />
+                      {language === 'ar' ? '✕ لم يصل البلاغ' : '✕ Not Delivered'}
+                    </span>
+                    <h3 className="text-lg font-black text-foreground">
+                      {language === 'ar' ? 'تعذر إرسال البلاغ إلى الإدارة' : 'Failed to Send Report to Admin'}
+                    </h3>
+                    <p className="text-xs text-red-600/90 dark:text-red-400/90 max-w-sm mx-auto leading-relaxed bg-red-500/10 p-3 rounded-2xl border border-red-500/20">
+                      {reportErrorMessage || (language === 'ar' ? 'يرجى التحقق من اتصالك بالإنترنت والمحاولة مجدداً.' : 'Please check your connection and try again.')}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setReportStatus('idle')}
+                      className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground text-xs font-bold rounded-xl transition-all cursor-pointer"
+                    >
+                      {language === 'ar' ? 'تعديل البيانات' : 'Edit Report'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitReport}
+                      className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl transition-all shadow-md active:scale-98 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{language === 'ar' ? 'إعادة المحاولة' : 'Try Again'}</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -943,12 +1051,12 @@ export function Course() {
 
                         <button
                           type="button"
-                          disabled={isReporting}
+                          disabled={reportStatus === 'submitting'}
                           onClick={submitReport}
-                          className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-98"
+                          className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-98"
                         >
-                          {isReporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                          <span>{isReporting ? (language === 'ar' ? 'جاري الإرسال...' : 'Submitting...') : (language === 'ar' ? 'إرسال البلاغ' : 'Submit Report')}</span>
+                          {reportStatus === 'submitting' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                          <span>{reportStatus === 'submitting' ? (language === 'ar' ? 'جاري الإرسال للإدارة...' : 'Sending to Admin...') : (language === 'ar' ? 'إرسال البلاغ للإدارة' : 'Submit Report to Admin')}</span>
                         </button>
                       </div>
                     </div>

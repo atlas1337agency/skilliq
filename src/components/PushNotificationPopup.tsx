@@ -8,6 +8,8 @@ import {
   Sparkles, 
   ArrowRight, 
   Check, 
+  CheckCircle2,
+  PlayCircle,
   Volume2, 
   VolumeX, 
   EyeOff,
@@ -32,8 +34,18 @@ export function PushNotificationPopup() {
 
   // Listen to live notifications from store
   useEffect(() => {
-    // Get active notifications matching user or broadcast
-    const active = notifications.filter(n => n.isActive && (!n.targetUserId || (user && n.targetUserId === user.uid)));
+    // Check local storage for videos reported by this user (including guest sessions)
+    const myReported = JSON.parse(localStorage.getItem('my_reported_videos') || '{}');
+
+    // Get active notifications matching user, broadcast, or learner reported video
+    const active = notifications.filter(n => {
+      if (!n.isActive) return false;
+      if (!n.targetUserId) return true; // broadcast to all
+      if (user && n.targetUserId === user.uid) return true; // targeted to logged in user
+      if ((n as any).videoId && myReported[(n as any).videoId]) return true; // targeted to learner who reported it
+      return false;
+    });
+
     if (active.length === 0) {
       setActiveNotif(null);
       return;
@@ -153,13 +165,27 @@ export function PushNotificationPopup() {
             {/* Header row: Bell pulse, tag, close button */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0 shadow-xs relative">
-                  <Bell className="w-4 h-4 animate-bounce" />
-                  <span className="absolute -top-1 -end-1 w-2.5 h-2.5 bg-primary rounded-full animate-ping" />
-                </div>
+                {activeNotif.type === 'video_fixed' || activeNotif.title?.includes('Fixed') || activeNotif.title?.includes('إصلاح') ? (
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0 shadow-xs relative">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span className="absolute -top-1 -end-1 w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping" />
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0 shadow-xs relative">
+                    <Bell className="w-4 h-4 animate-bounce" />
+                    <span className="absolute -top-1 -end-1 w-2.5 h-2.5 bg-primary rounded-full animate-ping" />
+                  </div>
+                )}
                 <div>
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-primary">
-                    {isRtl ? 'إشعار جديد' : 'Live Broadcast'}
+                  <span className={cn(
+                    "text-[10px] font-extrabold uppercase tracking-wider",
+                    activeNotif.type === 'video_fixed' || activeNotif.title?.includes('Fixed') || activeNotif.title?.includes('إصلاح')
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-primary"
+                  )}>
+                    {activeNotif.type === 'video_fixed' || activeNotif.title?.includes('Fixed') || activeNotif.title?.includes('إصلاح')
+                      ? (isRtl ? '✓ تم إصلاح الفيديو' : '✓ Video Repaired & Ready')
+                      : (isRtl ? 'إشعار جديد' : 'Live Broadcast')}
                   </span>
                   <p className="text-[10px] text-muted-foreground font-mono">
                     {isRtl ? 'الآن على SkilliQ' : 'Just now on SkilliQ'}
@@ -188,7 +214,7 @@ export function PushNotificationPopup() {
 
             {/* Title */}
             <h3 className="text-sm sm:text-base font-black text-foreground tracking-tight line-clamp-2">
-              {activeNotif.title}
+              {isRtl && activeNotif.titleAr ? activeNotif.titleAr : activeNotif.title}
             </h3>
 
             {/* Message Body */}
@@ -196,7 +222,7 @@ export function PushNotificationPopup() {
               "text-xs text-muted-foreground leading-relaxed whitespace-pre-line",
               isExpandedModal ? "max-h-60 overflow-y-auto" : "line-clamp-3"
             )}>
-              {activeNotif.message}
+              {isRtl && activeNotif.messageAr ? activeNotif.messageAr : activeNotif.message}
             </p>
 
             {/* ACTIONS FOOTER */}
@@ -205,10 +231,24 @@ export function PushNotificationPopup() {
               {activeNotif.link && (
                 <button
                   onClick={() => handleActionClick(activeNotif.link)}
-                  className="w-full py-2.5 px-4 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-xs shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                  className={cn(
+                    "w-full py-2.5 px-4 rounded-xl font-bold text-xs shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98",
+                    activeNotif.type === 'video_fixed' || activeNotif.title?.includes('Fixed') || activeNotif.title?.includes('إصلاح')
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  )}
                 >
-                  <span>{isRtl ? 'استكشف الآن' : 'Explore Now'}</span>
-                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                  {activeNotif.type === 'video_fixed' || activeNotif.title?.includes('Fixed') || activeNotif.title?.includes('إصلاح') ? (
+                    <>
+                      <PlayCircle className="w-4 h-4" />
+                      <span>{isRtl ? (activeNotif.actionLabelAr || 'مواصلة التعلم الآن') : (activeNotif.actionLabel || 'Keep Learning Now')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{isRtl ? 'استكشف الآن' : 'Explore Now'}</span>
+                      <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                    </>
+                  )}
                 </button>
               )}
 

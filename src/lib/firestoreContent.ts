@@ -17,11 +17,30 @@ export async function fetchFirestoreContent() {
       pathsData.push(doc.data() as LearningPath);
     });
 
-    const notificationsSnapshot = await getDocs(collection(db, 'notifications'));
     let notificationsData: AppNotification[] = [];
-    notificationsSnapshot.forEach((doc) => {
-      notificationsData.push(doc.data() as AppNotification);
-    });
+    try {
+      const notificationsSnapshot = await getDocs(collection(db, 'notifications'));
+      notificationsSnapshot.forEach((doc) => {
+        notificationsData.push(doc.data() as AppNotification);
+      });
+    } catch (e) {
+      console.warn("Firestore notifications read error:", e);
+    }
+
+    try {
+      const apiRes = await fetch('/api/notifications');
+      if (apiRes.ok) {
+        const apiJson = await apiRes.json();
+        if (Array.isArray(apiJson.notifications)) {
+          const map = new Map<string, AppNotification>();
+          apiJson.notifications.forEach((n: AppNotification) => map.set(n.id, n));
+          notificationsData.forEach((n: AppNotification) => map.set(n.id, { ...map.get(n.id), ...n }));
+          notificationsData = Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        }
+      }
+    } catch (e) {
+      console.warn("API notifications fetch error:", e);
+    }
 
     const bannersSnapshot = await getDocs(collection(db, 'banners'));
     let bannersData: AdBannerData[] = [];

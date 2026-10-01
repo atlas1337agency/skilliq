@@ -5,6 +5,7 @@ import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { OAuth2Client } from 'google-auth-library';
 import { GoogleGenAI } from '@google/genai';
 import path from 'path';
+import fs from 'fs';
 
 async function startServer() {
   const app = express();
@@ -304,6 +305,154 @@ Level: "${currentLevel}"`;
         needsAuth: isInvalidGrant
       });
     }
+  });
+
+  // Reports API Endpoints (Persistence for broken video and content reports)
+  const reportsFilePath = path.join(process.cwd(), 'src', 'data', 'reports.json');
+  const getStoredReports = (): any[] => {
+    try {
+      if (fs.existsSync(reportsFilePath)) {
+        const raw = fs.readFileSync(reportsFilePath, 'utf-8');
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error('Error reading reports.json:', e);
+    }
+    return [];
+  };
+
+  const saveStoredReports = (reports: any[]) => {
+    try {
+      fs.writeFileSync(reportsFilePath, JSON.stringify(reports, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing reports.json:', e);
+    }
+  };
+
+  app.get('/api/reports', (req, res) => {
+    const list = getStoredReports();
+    res.json({ reports: list });
+  });
+
+  app.post('/api/reports', (req, res) => {
+    const data = req.body;
+    const reportId = data.id || `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const current = getStoredReports();
+
+    // Check if an identical report was submitted in the last 60 seconds (anti-duplicate guard)
+    const existingIndex = current.findIndex(r => 
+      r.id === reportId || 
+      (r.videoId === data.videoId && r.userId === data.userId && Math.abs((r.createdAt || 0) - (data.createdAt || Date.now())) < 60000)
+    );
+
+    if (existingIndex !== -1) {
+      console.log(`[Reports] Debounced duplicate report for video "${data.videoId}"`);
+      return res.status(200).json({ success: true, id: current[existingIndex].id, report: current[existingIndex] });
+    }
+
+    const newReport = {
+      id: reportId,
+      type: data.type || 'broken_video',
+      courseId: data.courseId || '',
+      courseTitle: data.courseTitle || '',
+      videoId: data.videoId || '',
+      videoTitle: data.videoTitle || '',
+      youtubeId: data.youtubeId || '',
+      userId: data.userId || 'guest',
+      userName: data.userName || 'Learner',
+      userEmail: data.userEmail || '',
+      issue: data.issue || 'Video unavailable',
+      details: data.details || '',
+      status: 'pending',
+      createdAt: data.createdAt || Date.now(),
+      categoryId: data.categoryId || ''
+    };
+
+    current.unshift(newReport);
+    saveStoredReports(current);
+
+    console.log(`[Reports] New report saved: ${newReport.id} for course "${newReport.courseTitle}"`);
+    res.status(201).json({ success: true, id: newReport.id, report: newReport });
+  });
+
+  // Notifications API Endpoints
+  const notificationsFilePath = path.join(process.cwd(), 'src', 'data', 'notifications.json');
+  const getStoredNotifications = (): any[] => {
+    try {
+      if (fs.existsSync(notificationsFilePath)) {
+        const raw = fs.readFileSync(notificationsFilePath, 'utf-8');
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error('Error reading notifications.json:', e);
+    }
+    return [];
+  };
+
+  const saveStoredNotifications = (notifications: any[]) => {
+    try {
+      fs.writeFileSync(notificationsFilePath, JSON.stringify(notifications, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing notifications.json:', e);
+    }
+  };
+
+  app.get('/api/notifications', (req, res) => {
+    const list = getStoredNotifications();
+    res.json({ notifications: list });
+  });
+
+  app.post('/api/reports/:id/resolve', (req, res) => {
+    const { id } = req.params;
+    const { resolvedBy } = req.body;
+    const current = getStoredReports();
+    const targetReport = current.find(r => r.id === id);
+
+    const updated = current.map(r => r.id === id ? { ...r, status: 'resolved', resolvedAt: Date.now(), resolvedBy: resolvedBy || 'admin' } : r);
+    saveStoredReports(updated);
+
+    // If report found, automatically create a "Video Fixed" notification
+    if (targetReport) {
+      const videoName = targetReport.videoTitle || 'Lesson Video';
+      const courseName = targetReport.courseTitle || 'Course';
+
+      const newNotification = {
+        id: `notif_fixed_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        type: 'video_fixed',
+        title: `🎉 Video Fixed: "${videoName}"`,
+        titleAr: `🎉 تم إصلاح درس: "${videoName}"`,
+        message: `Good news! The video issue reported in "${courseName}" has been inspected and updated by the admin team. You can keep learning now!`,
+        messageAr: `خبر سار! تم فحص وتحديث درس "${videoName}" في دورة "${courseName}" بواسطة فريق الإدارة. يمكنك الآن مواصلة التعلم والتقدم!`,
+        link: `/course/${targetReport.courseId}`,
+        actionLabel: 'Keep Learning Now',
+        actionLabelAr: 'مواصلة التعلم الآن',
+        courseId: targetReport.courseId,
+        videoId: targetReport.videoId,
+        targetUserId: targetReport.userId && targetReport.userId !== 'guest' && targetReport.userId !== 'anonymous' ? targetReport.userId : undefined,
+        targetEmail: targetReport.userEmail || undefined,
+        createdAt: Date.now(),
+        isActive: true
+      };
+
+      const notifs = getStoredNotifications();
+      // Remove any previous notif for same video to avoid clutter
+      const filteredNotifs = notifs.filter(n => n.videoId !== targetReport.videoId);
+      filteredNotifs.unshift(newNotification);
+      saveStoredNotifications(filteredNotifs);
+
+      console.log(`[Reports] Generated Video Fixed notification for video "${videoName}" in course "${courseName}"`);
+      return res.json({ success: true, notification: newNotification });
+    }
+
+    res.json({ success: true });
+  });
+
+  app.delete('/api/reports/:id', (req, res) => {
+    const { id } = req.params;
+    const current = getStoredReports();
+    const filtered = current.filter(r => r.id !== id);
+    saveStoredReports(filtered);
+    res.json({ success: true });
   });
 
   // Serve public folder directly as fallback for /public/* requests

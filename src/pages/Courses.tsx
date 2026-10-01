@@ -50,11 +50,19 @@ export function Courses() {
     const queryFromUrl = searchParams.get('search') || searchParams.get('q');
     if (queryFromUrl !== null && queryFromUrl !== undefined) {
       setSearchQuery(queryFromUrl);
+    } else {
+      setSearchQuery("");
     }
     const catFromUrl = searchParams.get('category');
     if (catFromUrl) {
       setSelectedCategory(catFromUrl);
+      setSelectedSubCategory("All");
+      setCurrentPage(1);
+    } else {
+      setSelectedCategory("All");
     }
+    // Scroll smoothly to top on searchParams change
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [searchParams]);
 
   // Base playlists (exclude single-video masterclasses)
@@ -108,7 +116,12 @@ export function Courses() {
   const filteredCourses = useMemo(() => {
     let result = basePlaylists.filter(c => {
       // Category
-      const matchCat = selectedCategory === "All" || c.category === selectedCategory;
+      const matchCat = selectedCategory === "All" || 
+        c.category?.trim().toLowerCase() === selectedCategory.trim().toLowerCase() ||
+        c.category === selectedCategory ||
+        (selectedCategory.toLowerCase().includes('marketing') && c.category?.toLowerCase().includes('marketing')) ||
+        (selectedCategory.toLowerCase().includes('programming') && (c.category?.toLowerCase().includes('programming') || c.category?.toLowerCase().includes('python'))) ||
+        (selectedCategory.toLowerCase().includes('design') && (c.category?.toLowerCase().includes('design') || c.category?.toLowerCase().includes('ui')));
       // SubCategory
       const matchSub = selectedSubCategory === "All" || c.subCategory === selectedSubCategory;
       // Search

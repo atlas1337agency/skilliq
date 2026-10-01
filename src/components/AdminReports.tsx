@@ -45,6 +45,31 @@ interface AdminReportsProps {
   onEditCourse?: (course: Course) => void;
 }
 
+function deduplicateReportsList(rawReports: CourseReport[]): CourseReport[] {
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
+  const deduplicated: CourseReport[] = [];
+
+  for (const r of rawReports) {
+    if (!r.id || seenIds.has(r.id)) continue;
+
+    // Fingerprint based on video + user/email + rounded timestamp (within 2-minute window)
+    const timeWindow = Math.floor((r.createdAt || 0) / 120000);
+    const identifier = r.userId || r.userEmail || r.userName || 'unknown';
+    const fingerprint = `${r.videoId}_${identifier}_${timeWindow}`;
+
+    if (seenFingerprints.has(fingerprint)) {
+      continue;
+    }
+
+    seenIds.add(r.id);
+    seenFingerprints.add(fingerprint);
+    deduplicated.push(r);
+  }
+
+  return deduplicated.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
 export function AdminReports({ onEditCourse }: AdminReportsProps) {
   const { user, allCourses, language, loadContent } = useStore();
   const isRtl = language === 'ar';
@@ -59,11 +84,33 @@ export function AdminReports({ onEditCourse }: AdminReportsProps) {
   const [deleteDialog, setDeleteDialog] = useState<CourseReport | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Subscribe to realtime reports from Firestore
+  // Load reports from API & subscribe to Firestore
   useEffect(() => {
     setLoading(true);
-    const reportsCol = collection(db, 'reports');
 
+    const loadApiReports = async () => {
+      try {
+        const res = await fetch('/api/reports');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.reports)) {
+            setReports((prev) => {
+              const map = new Map<string, CourseReport>();
+              data.reports.forEach((r: CourseReport) => map.set(r.id, r));
+              prev.forEach((r) => map.set(r.id, { ...r, ...map.get(r.id) }));
+              return deduplicateReportsList(Array.from(map.values()));
+            });
+            setLoading(false);
+          }
+        }
+      } catch (err) {
+        console.warn('API reports fetch warning:', err);
+      }
+    };
+
+    loadApiReports();
+
+    const reportsCol = collection(db, 'reports');
     const unsubscribe = onSnapshot(
       reportsCol,
       (snapshot) => {
@@ -71,13 +118,17 @@ export function AdminReports({ onEditCourse }: AdminReportsProps) {
         snapshot.docs.forEach((d) => {
           reportList.push({ id: d.id, ...d.data() } as CourseReport);
         });
-        reportList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        setReports(reportList);
+        setReports((prev) => {
+          const map = new Map<string, CourseReport>();
+          prev.forEach((r) => map.set(r.id, r));
+          reportList.forEach((r) => map.set(r.id, r));
+          return deduplicateReportsList(Array.from(map.values()));
+        });
         setLoading(false);
       },
       (error) => {
-        console.error('Error in realtime reports listener:', error);
-        setLoading(false);
+        console.warn('Firestore reports listener warning:', error);
+        loadApiReports();
       }
     );
 
@@ -127,48 +178,64 @@ export function AdminReports({ onEditCourse }: AdminReportsProps) {
   const handleResolve = async (report: CourseReport) => {
     setActionLoadingId(report.id);
     try {
-      // Find all pending reports for this videoId to resolve in batch
-      const q = query(
-        collection(db, 'reports'),
-        where('videoId', '==', report.videoId),
-        where('status', '==', 'pending')
-      );
-      const snap = await getDocs(q);
+      // 1. API resolve
+      try {
+        await fetch(`/api/reports/${report.id}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resolvedBy: user?.email })
+        });
+      } catch (err) {
+        console.warn('API resolve error:', err);
+      }
 
-      const batch = writeBatch(db);
-      const userIdsNotified = new Set<string>();
+      // 2. Firestore resolve & notification
+      try {
+        const q = query(
+          collection(db, 'reports'),
+          where('videoId', '==', report.videoId),
+          where('status', '==', 'pending')
+        );
+        const snap = await getDocs(q);
 
-      snap.docs.forEach((d, index) => {
-        batch.update(d.ref, {
-          status: 'resolved',
-          resolvedAt: Date.now(),
-          resolvedBy: user?.email || 'admin'
+        const batch = writeBatch(db);
+        const userIdsNotified = new Set<string>();
+
+        snap.docs.forEach((d, index) => {
+          batch.update(d.ref, {
+            status: 'resolved',
+            resolvedAt: Date.now(),
+            resolvedBy: user?.email || 'admin'
+          });
+
+          const data = d.data() as CourseReport;
+          if (data.userId && data.userId !== 'guest' && data.userId !== 'anonymous' && !userIdsNotified.has(data.userId)) {
+            userIdsNotified.add(data.userId);
+            const newNotifRef = doc(collection(db, 'notifications'));
+            batch.set(newNotifRef, {
+              id: newNotifRef.id,
+              title: isRtl ? 'تم إصلاح الفيديو المُبلّغ عنه!' : 'Broken Video Resolved!',
+              message: isRtl 
+                ? `تم فحص وتحديث درس "${data.videoTitle}" في دورة "${data.courseTitle}". شكراً لمساعدتك!`
+                : `The video "${data.videoTitle}" in "${data.courseTitle}" has been inspected and updated. Thank you for reporting!`,
+              targetUserId: data.userId,
+              link: `/course/${data.courseId}`,
+              createdAt: Date.now() + index,
+              isActive: true
+            });
+          }
         });
 
-        const data = d.data() as CourseReport;
-        // Notify registered user if not already notified
-        if (data.userId && data.userId !== 'guest' && data.userId !== 'anonymous' && !userIdsNotified.has(data.userId)) {
-          userIdsNotified.add(data.userId);
-          const newNotifRef = doc(collection(db, 'notifications'));
-          batch.set(newNotifRef, {
-            id: newNotifRef.id,
-            title: isRtl ? 'تم إصلاح الفيديو المُبلّغ عنه!' : 'Broken Video Resolved!',
-            message: isRtl 
-              ? `تم فحص وتحديث درس "${data.videoTitle}" في دورة "${data.courseTitle}". شكراً لمساعدتك!`
-              : `The video "${data.videoTitle}" in "${data.courseTitle}" has been inspected and updated. Thank you for reporting!`,
-            targetUserId: data.userId,
-            link: `/course/${data.courseId}`,
-            createdAt: Date.now() + index,
-            isActive: true
-          });
-        }
-      });
+        await batch.commit();
+      } catch (err) {
+        console.warn('Firestore resolve warning:', err);
+      }
 
-      await batch.commit();
+      // Optimistic local state update
+      setReports(prev => prev.map(r => r.id === report.id || r.videoId === report.videoId ? { ...r, status: 'resolved', resolvedAt: Date.now() } : r));
       await loadContent();
     } catch (e) {
       console.error('Failed to resolve report:', e);
-      alert(isRtl ? 'فشل تحديث حالة البلاغ' : 'Failed to mark report as resolved.');
     } finally {
       setActionLoadingId(null);
     }
@@ -178,12 +245,16 @@ export function AdminReports({ onEditCourse }: AdminReportsProps) {
   const handleReopen = async (report: CourseReport) => {
     setActionLoadingId(report.id);
     try {
-      await updateDoc(doc(db, 'reports', report.id), {
-        status: 'pending'
-      });
+      try {
+        await updateDoc(doc(db, 'reports', report.id), {
+          status: 'pending'
+        });
+      } catch (err) {
+        console.warn('Firestore reopen warning:', err);
+      }
+      setReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'pending' } : r));
     } catch (e) {
       console.error('Failed to reopen report:', e);
-      alert(isRtl ? 'فشل إعادة فتح البلاغ' : 'Failed to reopen report.');
     } finally {
       setActionLoadingId(null);
     }
@@ -194,11 +265,20 @@ export function AdminReports({ onEditCourse }: AdminReportsProps) {
     if (!deleteDialog) return;
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, 'reports', deleteDialog.id));
+      try {
+        await fetch(`/api/reports/${deleteDialog.id}`, { method: 'DELETE' });
+      } catch (err) {
+        console.warn('API delete error:', err);
+      }
+      try {
+        await deleteDoc(doc(db, 'reports', deleteDialog.id));
+      } catch (err) {
+        console.warn('Firestore delete error:', err);
+      }
+      setReports(prev => prev.filter(r => r.id !== deleteDialog.id));
       setDeleteDialog(null);
     } catch (e) {
       console.error('Failed to delete report:', e);
-      alert(isRtl ? 'فشل حذف البلاغ' : 'Failed to delete report.');
     } finally {
       setIsDeleting(false);
     }

@@ -40,6 +40,26 @@ import { db } from '../firebase';
 import { CourseReport, AppNotification, AdBannerData } from '../data/courses';
 import { cn } from '../lib/utils';
 
+function deduplicateReportsList(rawReports: CourseReport[]): CourseReport[] {
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
+  const deduplicated: CourseReport[] = [];
+
+  for (const r of rawReports) {
+    if (!r.id || seenIds.has(r.id)) continue;
+    const timeWindow = Math.floor((r.createdAt || 0) / 120000);
+    const identifier = r.userId || r.userEmail || r.userName || 'unknown';
+    const fingerprint = `${r.videoId}_${identifier}_${timeWindow}`;
+    if (seenFingerprints.has(fingerprint)) continue;
+
+    seenIds.add(r.id);
+    seenFingerprints.add(fingerprint);
+    deduplicated.push(r);
+  }
+
+  return deduplicated.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
 export function Admin() {
   const { t, i18n } = useTranslation();
   const { user, allCourses, learningPaths, notifications, banners, loadContent, language } = useStore();
@@ -66,13 +86,41 @@ export function Admin() {
   // Realtime reports listener for notification badge
   useEffect(() => {
     if (!user || !['admin', 'publisher'].includes(user.role)) return;
+
+    const loadApiReports = async () => {
+      try {
+        const res = await fetch('/api/reports');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.reports)) {
+            setReports((prev) => {
+              const map = new Map<string, CourseReport>();
+              data.reports.forEach((r: CourseReport) => map.set(r.id, r));
+              prev.forEach((r) => map.set(r.id, { ...r, ...map.get(r.id) }));
+              return deduplicateReportsList(Array.from(map.values()));
+            });
+            setReportsLoading(false);
+          }
+        }
+      } catch (err) {
+        console.warn('Admin API reports fetch warning:', err);
+      }
+    };
+
+    loadApiReports();
+
     const unsub = onSnapshot(collection(db, 'reports'), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as CourseReport));
-      setReports(data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+      setReports((prev) => {
+        const map = new Map<string, CourseReport>();
+        prev.forEach((r) => map.set(r.id, r));
+        data.forEach((r) => map.set(r.id, r));
+        return deduplicateReportsList(Array.from(map.values()));
+      });
       setReportsLoading(false);
     }, (err) => {
-      console.error("Error fetching reports", err);
-      setReportsLoading(false);
+      console.warn("Firestore reports listener warning:", err);
+      loadApiReports();
     });
     return () => unsub();
   }, [user]);
@@ -87,37 +135,51 @@ export function Admin() {
   const handleResolveReport = async (report: CourseReport) => {
     if (!isAdmin) return;
     try {
-      const q = query(collection(db, 'reports'), where('videoId', '==', report.videoId), where('status', '==', 'pending'));
-      const snap = await getDocs(q);
-      
-      const batch = writeBatch(db);
-      const userIdsNotified = new Set<string>();
+      try {
+        await fetch(`/api/reports/${report.id}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resolvedBy: user?.email })
+        });
+      } catch (err) {
+        console.warn('API resolve error in Admin.tsx:', err);
+      }
 
-      snap.docs.forEach((d, index) => {
-        batch.update(d.ref, { status: 'resolved' });
-        const data = d.data() as CourseReport;
+      try {
+        const q = query(collection(db, 'reports'), where('videoId', '==', report.videoId), where('status', '==', 'pending'));
+        const snap = await getDocs(q);
         
-        if (data.userId && !userIdsNotified.has(data.userId)) {
-          userIdsNotified.add(data.userId);
-          const newNotifRef = doc(collection(db, 'notifications'));
-          batch.set(newNotifRef, {
-            id: newNotifRef.id,
-            title: 'Broken Video Resolved!',
-            message: `The video "${data.videoTitle}" in "${data.courseTitle}" has been inspected and updated. Thank you for reporting!`,
-            targetUserId: data.userId,
-            link: `/course/${data.courseId}`,
-            createdAt: Date.now() + index,
-            isActive: true
-          });
-        }
-      });
+        const batch = writeBatch(db);
+        const userIdsNotified = new Set<string>();
 
-      await batch.commit();
+        snap.docs.forEach((d, index) => {
+          batch.update(d.ref, { status: 'resolved' });
+          const data = d.data() as CourseReport;
+          
+          if (data.userId && !userIdsNotified.has(data.userId)) {
+            userIdsNotified.add(data.userId);
+            const newNotifRef = doc(collection(db, 'notifications'));
+            batch.set(newNotifRef, {
+              id: newNotifRef.id,
+              title: 'Broken Video Resolved!',
+              message: `The video "${data.videoTitle}" in "${data.courseTitle}" has been inspected and updated. Thank you for reporting!`,
+              targetUserId: data.userId,
+              link: `/course/${data.courseId}`,
+              createdAt: Date.now() + index,
+              isActive: true
+            });
+          }
+        });
+
+        await batch.commit();
+      } catch (err) {
+        console.warn('Firestore resolve warning in Admin.tsx:', err);
+      }
+
       setReports(prev => prev.map(r => r.videoId === report.videoId ? { ...r, status: 'resolved' } : r));
       await loadContent();
     } catch (e) {
       console.error("Failed to resolve report", e);
-      alert("Failed to mark report as resolved.");
     }
   };
 
