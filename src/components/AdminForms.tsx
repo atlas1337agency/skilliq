@@ -593,17 +593,7 @@ export function AdminForms({
                           1-Click YouTube Playlist Importer
                         </span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowApiKeySetting(prev => !prev)}
-                          className="text-[11px] font-bold text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors cursor-pointer px-2 py-0.5 rounded-lg hover:bg-muted"
-                        >
-                          <Key className="w-3.5 h-3.5 text-amber-500" />
-                          <span>{hasApiKey ? 'API Key: Set' : 'Add API Key'}</span>
-                        </button>
-                        <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline">Auto-detects IDs & Durations</span>
-                      </div>
+                      <span className="text-[10px] text-muted-foreground font-mono">Auto-detects IDs & Durations</span>
                     </div>
 
                     <p className="text-xs text-muted-foreground">
@@ -628,91 +618,13 @@ export function AdminForms({
                       </button>
                     </div>
 
-                    {/* Expandable YouTube Data API Key configuration */}
-                    {(showApiKeySetting || !hasApiKey) && (
-                      <div className="p-3.5 bg-card/90 rounded-xl border border-border/80 shadow-xs space-y-2.5 animate-in fade-in duration-200">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Key className="w-4 h-4 text-amber-500" />
-                            <span className="text-xs font-black text-foreground">
-                              YouTube Data API Key (v3)
-                            </span>
-                            {hasApiKey ? (
-                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                                Active in Browser
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                                Required for Vercel Importer
-                              </span>
-                            )}
-                          </div>
-                          {apiKeySavedStatus && (
-                            <span className="text-[11px] font-bold text-emerald-600 animate-in fade-in">
-                              ✓ {apiKeySavedStatus}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                          For Vercel deployments, enter your Google Cloud YouTube Data API Key below. It is saved in your browser and automatically used for 1-click importing.
-                        </p>
-                        <div className="flex gap-2">
-                          <input 
-                            type="password"
-                            value={apiKeyInput}
-                            onChange={e => setApiKeyInput(e.target.value)}
-                            placeholder="AIzaSy..."
-                            className="flex-1 bg-background border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const saved = handleSaveApiKey();
-                              if (playlistUrlInput.trim() && saved) {
-                                handleImportPlaylist(saved);
-                              }
-                            }}
-                            className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 transition-all cursor-pointer shrink-0"
-                          >
-                            Save & Use
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
                     {importMessage && (
                       <div className={cn(
-                        "p-3 rounded-xl text-xs font-semibold flex flex-col gap-2",
+                        "p-3 rounded-xl text-xs font-semibold flex items-center gap-2",
                         importMessage.type === 'error' ? "bg-red-500/10 text-red-500 border border-red-500/20" : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
                       )}>
-                        <div className="flex items-center gap-2">
-                          {importMessage.type === 'error' ? <AlertCircle className="w-4 h-4 shrink-0" /> : <Check className="w-4 h-4 shrink-0" />}
-                          <span>{importMessage.text}</span>
-                        </div>
-
-                        {importMessage.type === 'error' && (importMessage.text.includes('API Key') || importMessage.text.includes('API_KEY')) && (
-                          <div className="mt-1 pt-2 border-t border-red-500/20 flex flex-col sm:flex-row gap-2">
-                            <input 
-                              type="password"
-                              value={apiKeyInput}
-                              onChange={e => setApiKeyInput(e.target.value)}
-                              placeholder="Paste your YouTube API Key here (AIzaSy...)"
-                              className="flex-1 bg-card border border-red-500/40 rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const saved = handleSaveApiKey();
-                                if (saved) {
-                                  handleImportPlaylist(saved);
-                                }
-                              }}
-                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
-                            >
-                              Save & Retry Import
-                            </button>
-                          </div>
-                        )}
+                        {importMessage.type === 'error' ? <AlertCircle className="w-4 h-4 shrink-0" /> : <Check className="w-4 h-4 shrink-0" />}
+                        <span>{importMessage.text}</span>
                       </div>
                     )}
                   </div>
