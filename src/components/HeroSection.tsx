@@ -45,16 +45,53 @@ export function HeroSection() {
   }, [coursesList, currentAppLang]);
 
   // Dynamically extract real categories present in current language courses
-  const availableCategories = useMemo(() => {
+  const realCategories = useMemo(() => {
     const cats = new Set<string>();
     filteredCoursesForLang.forEach(c => {
       if (c.category && c.category.trim()) cats.add(c.category.trim());
     });
-    return ['All', ...Array.from(cats)];
+    return Array.from(cats);
   }, [filteredCoursesForLang]);
 
-  // Selected category in smart showcase card
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const availableCategories = useMemo(() => {
+    return ['All', ...realCategories];
+  }, [realCategories]);
+
+  // Mobile mode detection (< 768px, phone screens)
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Selected category in smart showcase card: On tablet/stacked mode, default to the first real category
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      const cats: string[] = [];
+      filteredCoursesForLang.forEach(c => {
+        if (c.category && c.category.trim() && !cats.includes(c.category.trim())) cats.push(c.category.trim());
+      });
+      return cats[0] || 'All';
+    }
+    return 'All';
+  });
+
+  // Ensure on tablet/stacked mode we never stay on 'All'
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024 && selectedCategory === 'All' && realCategories.length > 0) {
+      setSelectedCategory(realCategories[0]);
+    }
+  }, [selectedCategory, realCategories]);
+
   const [activeCourseIndex, setActiveCourseIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isAutoSwitchEnabled, setIsAutoSwitchEnabled] = useState<boolean>(true);
@@ -66,18 +103,16 @@ export function HeroSection() {
 
   // Sync category if it doesn't exist in current language
   useEffect(() => {
-    if (!availableCategories.includes(selectedCategory)) {
-      setSelectedCategory('All');
+    if (selectedCategory !== 'All' && !availableCategories.includes(selectedCategory)) {
+      const fallbackCat = (typeof window !== 'undefined' && window.innerWidth < 1024)
+        ? (realCategories[0] || 'All')
+        : 'All';
+      setSelectedCategory(fallbackCat);
       setActiveCourseIndex(0);
       setIsPlaying(false);
       setSwitchProgress(0);
     }
-  }, [availableCategories, selectedCategory]);
-
-  // Search state
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
-  const searchContainerRef = useRef<HTMLDivElement>(null);
+  }, [availableCategories, selectedCategory, realCategories]);
 
   // Filter courses for active category
   // When 'All': show all courses in this language.
@@ -169,7 +204,7 @@ export function HeroSection() {
   const TICK_INTERVAL_MS = 50;
 
   useEffect(() => {
-    if (!isAutoSwitchEnabled || isHovered || isPlaying) return;
+    if (isMobile || !isAutoSwitchEnabled || isHovered || isPlaying) return;
 
     const interval = setInterval(() => {
       setSwitchProgress(prev => {
@@ -214,40 +249,6 @@ export function HeroSection() {
     }
   }, [activeCourse?.id]);
 
-  // Search Results Filter within current language
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const query = searchQuery.toLowerCase().trim();
-    return filteredCoursesForLang
-      .filter(c => 
-        c.title.toLowerCase().includes(query) || 
-        c.category?.toLowerCase().includes(query) || 
-        c.instructor?.toLowerCase().includes(query) ||
-        c.description?.toLowerCase().includes(query)
-      )
-      .slice(0, 4);
-  }, [filteredCoursesForLang, searchQuery]);
-
-  // Close search suggestions on click outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
-        setIsSearchFocused(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleSearchSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/courses?search=${encodeURIComponent(searchQuery.trim())}`);
-    } else {
-      navigate('/courses');
-    }
-  };
-
   // Directional slide variants for smooth animation
   const slideVariants = {
     enter: (direction: number) => ({
@@ -278,8 +279,16 @@ export function HeroSection() {
   return (
     <section 
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="relative w-full overflow-hidden bg-background py-8 sm:py-12 md:py-16 lg:py-20 border-b border-border/50"
+      className="relative w-full overflow-hidden bg-background py-6 sm:py-10 md:py-14 lg:py-20 border-b border-border/50"
     >
+      {/* Strict CSS Guarantee: Completely hide All Tracks in mobile mode (< 1024px) */}
+      <style>{`
+        @media (max-width: 1023px) {
+          .hero-all-tracks-only {
+            display: none !important;
+          }
+        }
+      `}</style>
       
       {/* Subtle Background Canvas & Modern Dot Pattern */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0">
@@ -295,27 +304,28 @@ export function HeroSection() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 xl:gap-14 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-10 xl:gap-14 items-center">
           
           {/* LEFT / START COLUMN: Clean Editorial Narrative & Actions */}
-          <div className="flex flex-col text-center lg:text-start lg:col-span-7">
+          <div className="flex flex-col text-center lg:text-start lg:col-span-7 max-w-2xl mx-auto lg:max-w-none w-full">
             
             {/* Minimalist Live Status Kicker */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35 }}
-              className="inline-flex items-center gap-2 mb-4 sm:mb-5 mx-auto lg:mx-0 text-xs sm:text-sm font-medium text-muted-foreground"
+              className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 py-1.5 rounded-full bg-primary/5 dark:bg-primary/10 border border-primary/20 mb-4 sm:mb-6 w-fit self-center lg:self-start text-xs sm:text-sm text-muted-foreground shadow-2xs"
             >
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
               <span className="font-medium text-foreground">
-                {t('hero_kicker', 'The Distraction-Free Learning Engine')}
+                <span className="hidden sm:inline">{t('hero_kicker', 'The Distraction-Free Learning Engine')}</span>
+                <span className="inline sm:hidden">{t('hero_kicker_mobile', 'Distraction-Free Learning')}</span>
               </span>
-              <span className="text-border" aria-hidden="true">·</span>
-              <span className="text-primary font-semibold">
+              <span className="text-muted-foreground/60 shrink-0 font-bold" aria-hidden="true">·</span>
+              <span className="text-primary font-bold whitespace-nowrap shrink-0">
                 {t('hero_quick_stats_zero_cost', '100% Free Always')}
               </span>
             </motion.div>
@@ -325,12 +335,12 @@ export function HeroSection() {
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.06 }}
-              className="text-3xl sm:text-4xl md:text-5xl lg:text-5xl xl:text-6xl font-extrabold tracking-tight leading-[1.12] text-foreground mb-4 sm:mb-6"
+              className="text-2xl sm:text-4xl md:text-5xl lg:text-5xl xl:text-6xl font-extrabold tracking-tight leading-[1.18] sm:leading-[1.12] text-foreground mb-3 sm:mb-5"
               style={{ textWrap: 'balance' }}
             >
               <span>{t('hero_title_1', 'Learn Without Distractions.')}</span>
-              <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 dark:from-blue-400 dark:via-indigo-300 dark:to-cyan-400 inline-block mt-1">
+              <br className="hidden sm:inline" />{' '}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 dark:from-blue-400 dark:via-indigo-300 dark:to-cyan-400 inline-block mt-0.5 sm:mt-1">
                 {t('hero_title_accent', 'Build Real Skills.')}
               </span>
             </motion.h1>
@@ -340,124 +350,39 @@ export function HeroSection() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.12 }}
-              className="text-sm sm:text-base md:text-lg text-muted-foreground max-w-xl mx-auto lg:mx-0 mb-6 sm:mb-7 font-normal leading-relaxed"
+              className="text-xs sm:text-base md:text-lg text-muted-foreground max-w-xl mx-auto lg:mx-0 mb-6 sm:mb-8 font-normal leading-relaxed"
             >
               {t('hero_subtitle', 'Skilliq is a structured learning platform that organizes the best free YouTube courses into clear paths. Stay focused, save time, and actually finish what you start.')}
             </motion.p>
-
-            {/* Modern Interactive Search Bar */}
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.18 }}
-              ref={searchContainerRef}
-              className="relative w-full max-w-xl mx-auto lg:mx-0 mb-4 sm:mb-5 z-20"
-            >
-              <form 
-                onSubmit={handleSearchSubmit}
-                className="relative flex items-center bg-card border border-border/80 rounded-xl sm:rounded-2xl p-1.5 shadow-sm hover:border-border focus-within:border-primary/80 focus-within:ring-2 focus-within:ring-primary/20 transition-all"
-              >
-                <Search className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground ms-2.5 sm:ms-3 shrink-0" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onFocus={() => setIsSearchFocused(true)}
-                  placeholder={t('hero_search_placeholder', 'Search courses, skills, or technologies...')}
-                  className="w-full bg-transparent px-2.5 sm:px-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    className="p-1 rounded-md text-muted-foreground hover:text-foreground me-1 cursor-pointer"
-                    aria-label="Clear search"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="px-3 sm:px-4 py-2 bg-primary text-primary-foreground text-xs sm:text-sm font-semibold rounded-lg sm:rounded-xl hover:bg-primary/95 active:scale-95 transition-all shrink-0 cursor-pointer"
-                >
-                  {t('hero_search_btn', 'Search')}
-                </button>
-              </form>
-
-              {/* Instant Search Suggestions Dropdown */}
-              <AnimatePresence>
-                {isSearchFocused && searchQuery.trim().length > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 6 }}
-                    transition={{ duration: 0.18 }}
-                    className="absolute top-full start-0 end-0 mt-2 bg-card/95 backdrop-blur-xl border border-border/80 rounded-xl shadow-xl overflow-hidden text-start z-30"
-                  >
-                    {searchResults.length > 0 ? (
-                      <div className="p-2 space-y-1">
-                        {searchResults.map((course) => (
-                          <Link
-                            key={course.id}
-                            to={`/course/${course.id}`}
-                            onClick={() => {
-                              setIsSearchFocused(false);
-                              setSearchQuery('');
-                            }}
-                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/80 transition-colors group cursor-pointer"
-                          >
-                            <div className="w-10 h-7 rounded bg-muted overflow-hidden shrink-0">
-                              <img 
-                                src={course.thumbnail} 
-                                alt="" 
-                                className="w-full h-full object-cover" 
-                                referrerPolicy="no-referrer"
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                                {course.title}
-                              </div>
-                              <div className="text-[11px] text-muted-foreground truncate">
-                                {course.instructor} · {getCategoryLabel(course.category)}
-                              </div>
-                            </div>
-                            <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/60 group-hover:text-primary rtl:rotate-180 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />
-                          </Link>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => handleSearchSubmit()}
-                          className="w-full text-center py-2 text-xs font-medium text-primary hover:bg-primary/5 rounded-lg transition-colors border-t border-border/40 mt-1 cursor-pointer"
-                        >
-                          {t('hero_view_all_matches', 'View all matches for')} "{searchQuery}" →
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="p-4 text-center text-xs text-muted-foreground">
-                        {t('hero_no_matches', 'No courses match your query')}
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
 
             {/* Curated Popular Categories Quick-Toggles */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.4, delay: 0.22 }}
-              className="flex flex-wrap items-center justify-center lg:justify-start gap-1.5 sm:gap-2 mb-6 sm:mb-8 text-xs text-muted-foreground"
+              transition={{ duration: 0.4, delay: 0.18 }}
+              className="flex items-center justify-start sm:justify-center lg:justify-start gap-1.5 sm:gap-2 mb-5 sm:mb-7 text-xs text-muted-foreground overflow-x-auto no-scrollbar py-1 w-full max-w-full sm:flex-wrap"
             >
-              <span className="font-medium text-foreground/80 me-1">
+              <span className="font-medium text-foreground/80 shrink-0 me-0.5">
                 {t('hero_popular_label', 'Popular:')}
               </span>
-              {availableCategories.slice(0, 5).map((catName) => (
+              {/* Desktop-only All Tracks chip */}
+              <button
+                onClick={() => handleCategorySelect('All')}
+                className={`hero-all-tracks-only hidden lg:inline-block px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border shrink-0 ${
+                  selectedCategory === 'All'
+                    ? 'bg-foreground text-background border-foreground shadow-xs'
+                    : 'bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
+                }`}
+              >
+                {getCategoryLabel('All')}
+              </button>
+
+              {/* Real popular categories - ALWAYS real categories only */}
+              {realCategories.slice(0, 5).map((catName) => (
                 <button
                   key={catName}
                   onClick={() => handleCategorySelect(catName)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border ${
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border shrink-0 ${
                     selectedCategory === catName
                       ? 'bg-foreground text-background border-foreground shadow-xs'
                       : 'bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
@@ -473,22 +398,22 @@ export function HeroSection() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.26 }}
-              className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center lg:justify-start gap-3 w-full sm:w-auto mb-6 sm:mb-8"
+              className="grid grid-cols-2 sm:flex sm:flex-row items-stretch sm:items-center justify-center lg:justify-start gap-2.5 sm:gap-3.5 w-full sm:w-auto mb-5 sm:mb-7"
             >
               <Link
                 to="/courses"
-                className="group px-6 py-3.5 bg-primary text-primary-foreground rounded-xl font-bold text-sm sm:text-base hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                className="group px-3.5 sm:px-6 py-2.5 sm:py-3.5 bg-primary text-primary-foreground rounded-xl font-bold text-xs sm:text-base hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-xs"
               >
-                <span>{t('start_learning', 'Start Learning Free')}</span>
-                <ArrowRight className="w-4 h-4 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
+                <span className="truncate">{t('start_learning', 'Start Learning Free')}</span>
+                <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
               </Link>
 
               <Link
                 to="/paths"
-                className="px-5 py-3.5 bg-card hover:bg-muted/70 text-foreground border border-border/80 rounded-xl font-semibold text-sm sm:text-base hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                className="px-3.5 sm:px-5 py-2.5 sm:py-3.5 bg-card hover:bg-muted/70 text-foreground border border-border/80 rounded-xl font-semibold text-xs sm:text-base hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-xs cursor-pointer"
               >
-                <Layers className="w-4 h-4 text-indigo-500" />
-                <span>{t('explore_paths', 'Explore Paths')}</span>
+                <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 shrink-0" />
+                <span className="truncate">{t('explore_paths', 'Explore Paths')}</span>
               </Link>
             </motion.div>
 
@@ -497,7 +422,7 @@ export function HeroSection() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.4, delay: 0.3 }}
-              className="flex flex-wrap items-center justify-center lg:justify-start gap-y-2 gap-x-4 sm:gap-x-6 text-xs text-muted-foreground pt-4 border-t border-border/50"
+              className="flex flex-wrap items-center justify-center lg:justify-start gap-y-2 gap-x-3 sm:gap-x-6 text-[11px] sm:text-xs text-muted-foreground pt-3.5 sm:pt-4 border-t border-border/50"
             >
               <div className="flex items-center gap-1.5 font-medium">
                 <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
@@ -522,8 +447,8 @@ export function HeroSection() {
 
           </div>
 
-          {/* RIGHT / END COLUMN: SMART INTERACTIVE RECOMMENDATION SHOWCASE */}
-          <div className="lg:col-span-5 w-full max-w-xl mx-auto lg:max-w-none">
+          {/* RIGHT / END COLUMN: SMART INTERACTIVE RECOMMENDATION SHOWCASE - HIDDEN ON MOBILE (< 768px), SHOWN ON TABLET & LAPTOP */}
+          <div className="hidden md:block lg:col-span-5 w-full max-w-2xl lg:max-w-none mx-auto mt-6 lg:mt-0">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -543,7 +468,7 @@ export function HeroSection() {
                 />
               </div>
 
-              {/* TOP HEADER: Category Bar & Auto-Switch Controls */}
+              {/* TOP HEADER: Category Bar & Course Navigation */}
               <div className="flex items-center justify-between gap-2 pb-3 mb-3 border-b border-border/60">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="relative flex h-2 w-2 shrink-0">
@@ -551,70 +476,53 @@ export function HeroSection() {
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                   </span>
                   <span className="text-xs font-bold text-foreground truncate">
-                    {getCategoryLabel(selectedCategory)}
+                    {selectedCategory === 'All'
+                      ? (isMobile ? (activeCourse?.category || (realCategories[0] || 'Courses')) : getCategoryLabel(selectedCategory))
+                      : getCategoryLabel(selectedCategory)}
                   </span>
                   <span className="text-xs text-muted-foreground font-mono">
                     ({categoryCourses.length})
                   </span>
-                  {selectedCategory === 'All' ? (
-                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted/60 px-1.5 py-0.5 rounded">
-                      <Shuffle className="w-2.5 h-2.5" />
-                      <span>{t('random_mode_notice', 'Exploring all')}</span>
-                    </span>
-                  ) : (
-                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                      <Check className="w-2.5 h-2.5" />
-                      <span>{t('category_mode_notice', { category: getCategoryLabel(selectedCategory) })}</span>
-                    </span>
-                  )}
                 </div>
 
-                {/* Auto Switch Controls & Prev / Next Course */}
-                <div className="flex items-center gap-1 shrink-0">
+                {/* Prev / Next Course Navigation Arrows */}
+                <div className="flex items-center border border-border/60 rounded-lg overflow-hidden bg-muted/40 shrink-0">
                   <button
-                    onClick={() => setIsAutoSwitchEnabled(prev => !prev)}
-                    title={isAutoSwitchEnabled ? t('pause_auto_switch', 'Pause auto-switch') : t('resume_auto_switch', 'Resume auto-switch')}
-                    className={`p-1.5 rounded-lg text-xs flex items-center gap-1 transition-colors cursor-pointer border ${
-                      isAutoSwitchEnabled
-                        ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/15'
-                        : 'bg-muted text-muted-foreground border-border/60 hover:text-foreground'
-                    }`}
+                    onClick={handlePrevCourse}
+                    title={t('prev_course', 'Previous course')}
+                    className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                   >
-                    {isAutoSwitchEnabled ? (
-                      <Pause className="w-3 h-3" />
-                    ) : (
-                      <Play className="w-3 h-3 fill-current" />
-                    )}
-                    <span className="text-[10px] font-medium hidden sm:inline">
-                      {isAutoSwitchEnabled ? t('auto_switch', 'Auto') : t('auto_switch_paused', 'Paused')}
-                    </span>
+                    <ChevronLeft className="w-3.5 h-3.5 rtl:rotate-180" />
                   </button>
-
-                  <div className="flex items-center border border-border/60 rounded-lg overflow-hidden bg-muted/40">
-                    <button
-                      onClick={handlePrevCourse}
-                      title={t('prev_course', 'Previous course')}
-                      className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                    >
-                      <ChevronLeft className="w-3.5 h-3.5 rtl:rotate-180" />
-                    </button>
-                    <span className="text-[10px] font-mono px-1.5 text-muted-foreground">
-                      {activeCourseIndex + 1}/{categoryCourses.length}
-                    </span>
-                    <button
-                      onClick={handleNextCourse}
-                      title={t('next_course', 'Next course')}
-                      className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                    >
-                      <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />
-                    </button>
-                  </div>
+                  <span className="text-[10px] font-mono px-2 text-muted-foreground">
+                    {activeCourseIndex + 1}/{categoryCourses.length}
+                  </span>
+                  <button
+                    onClick={handleNextCourse}
+                    title={t('next_course', 'Next course')}
+                    className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                  </button>
                 </div>
               </div>
 
               {/* REAL CATEGORIES SELECTOR TABS */}
               <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-3 mb-3 border-b border-border/40">
-                {availableCategories.map((cat) => {
+                {/* Desktop-only All Tracks tab */}
+                <button
+                  onClick={() => handleCategorySelect('All')}
+                  className={`hero-all-tracks-only hidden lg:inline-block px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all shrink-0 cursor-pointer border ${
+                    selectedCategory === 'All'
+                      ? 'bg-foreground text-background border-foreground shadow-xs'
+                      : 'bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
+                  }`}
+                >
+                  {getCategoryLabel('All')}
+                </button>
+
+                {/* Real categories tabs - ALWAYS real categories only */}
+                {realCategories.map((cat) => {
                   const isCatSelected = selectedCategory === cat;
                   return (
                     <button
@@ -741,7 +649,7 @@ export function HeroSection() {
                   <div className="flex items-center gap-1.5 font-semibold text-foreground">
                     <span>
                       {selectedCategory === 'All'
-                        ? t('all_tracks_courses', 'All Curated Courses')
+                        ? (isMobile ? `${activeCourse?.category || 'Curated'} Courses` : t('all_tracks_courses', 'All Curated Courses'))
                         : t('courses_in_category', { count: categoryCourses.length })}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground">({categoryCourses.length})</span>
@@ -750,7 +658,11 @@ export function HeroSection() {
                     to={selectedCategory === 'All' ? '/courses' : `/courses?category=${encodeURIComponent(selectedCategory)}`}
                     className="text-primary hover:underline text-[11px] font-medium flex items-center gap-0.5"
                   >
-                    <span>{t('view_all_in_category', { category: getCategoryLabel(selectedCategory) })}</span>
+                    <span>
+                      {selectedCategory === 'All'
+                        ? t('view_all_courses', 'Explore all courses')
+                        : t('view_all_in_category', { category: getCategoryLabel(selectedCategory) })}
+                    </span>
                     <ArrowRight className="w-3 h-3 rtl:rotate-180" />
                   </Link>
                 </div>
