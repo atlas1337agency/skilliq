@@ -155,5 +155,97 @@ app.get('/api/analytics', async (req, res) => {
   }
 });
 
+// YouTube Playlist Importer Proxy Endpoint
+const formatIsoDuration = (isoDuration) => {
+  if (!isoDuration) return "00:00";
+  const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) return "00:00";
+  const hours = parseInt(match[1] || "0", 10);
+  const minutes = parseInt(match[2] || "0", 10);
+  const seconds = parseInt(match[3] || "0", 10);
+  let formatted = "";
+  if (hours > 0) formatted += `${hours}:`;
+  formatted += `${hours > 0 && minutes < 10 ? '0' : ''}${minutes}:`;
+  formatted += `${seconds < 10 ? '0' : ''}${seconds}`;
+  return formatted;
+};
+
+app.get('/api/youtube/config', (req, res) => {
+  const hasKey = !!(process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY);
+  res.json({ hasEnvKey: hasKey });
+});
+
+app.get('/api/youtube/playlist', async (req, res) => {
+  try {
+    const playlistId = req.query.id;
+    const apiKey = req.query.key || process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY;
+
+    if (!playlistId) {
+      return res.status(400).json({ error: 'Missing playlist id parameter' });
+    }
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Missing YouTube API Key' });
+    }
+
+    let allItems = [];
+    let nextPageToken = "";
+
+    do {
+      const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}&key=${apiKey}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
+      const ytRes = await fetch(url);
+      const data = await ytRes.json();
+      if (data.error) {
+        return res.status(400).json({ error: data.error.message || 'Failed to fetch playlist items' });
+      }
+      if (!data.items || data.items.length === 0) break;
+      allItems = allItems.concat(data.items);
+      nextPageToken = data.nextPageToken || "";
+    } while (nextPageToken);
+
+    const videos = [];
+    const chunks = [];
+    for (let i = 0; i < allItems.length; i += 50) {
+      chunks.push(allItems.slice(i, i + 50));
+    }
+
+    for (const chunk of chunks) {
+      const videoIds = chunk.map((item) => item.snippet?.resourceId?.videoId || item.contentDetails?.videoId).filter(Boolean).join(',');
+      if (!videoIds) continue;
+
+      const durUrl = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${apiKey}`;
+      const durRes = await fetch(durUrl);
+      const durData = await durRes.json();
+
+      const durationMap = {};
+      if (durData.items) {
+        for (const item of durData.items) {
+          durationMap[item.id] = formatIsoDuration(item.contentDetails?.duration);
+        }
+      }
+
+      for (const item of chunk) {
+        const vId = item.snippet?.resourceId?.videoId || item.contentDetails?.videoId;
+        const isPrivateOrDeleted = item.snippet?.title === "Private video" || item.snippet?.title === "Deleted video";
+        if (vId && !isPrivateOrDeleted) {
+          videos.push({
+            id: `v${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            title: item.snippet?.title || "Unknown Title",
+            youtubeId: vId,
+            duration: durationMap[vId] || "00:00",
+            language: "",
+            description: "",
+            resources: []
+          });
+        }
+      }
+    }
+
+    res.json({ success: true, videos });
+  } catch (err) {
+    console.error('Server YouTube playlist fetch error:', err);
+    res.status(500).json({ error: err.message || 'Server error fetching playlist' });
+  }
+});
+
 // Export the Express API
 export default app;

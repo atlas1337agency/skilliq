@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import YouTube, { YouTubeEvent } from 'react-youtube';
@@ -41,6 +41,9 @@ export function Course() {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const initialStartTimeRef = useRef<number>(0);
+  const loadedVideoIdRef = useRef<string>('');
+  const progressBarRef = useRef<HTMLDivElement>(null);
 
   const course = courses.find((c) => c.id === courseId);
   const courseVideos = course ? filterByLanguage(course.videos, language) : [];
@@ -50,6 +53,81 @@ export function Course() {
     ? courseVideos.findIndex(v => v.id === courseProgress.currentVideoId)
     : 0;
   const currentVideo = courseVideos[currentVideoIndex];
+
+  // Capture start time once when video changes to prevent reload loop during playback
+  if (currentVideo && loadedVideoIdRef.current !== currentVideo.id) {
+    loadedVideoIdRef.current = currentVideo.id;
+    initialStartTimeRef.current = courseProgress.videoTimestamps?.[currentVideo.id] || 0;
+  }
+
+  // Safe normalized video ID
+  const cleanVideoId = useMemo(() => {
+    if (!currentVideo?.youtubeId) return '';
+    const raw = currentVideo.youtubeId.trim();
+    const match = raw.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
+    if (match && match[1]) return match[1];
+    const listMatch = raw.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+    if (listMatch && listMatch[1]) return listMatch[1];
+    return raw;
+  }, [currentVideo?.youtubeId]);
+
+  const isPlaylistType = useMemo(() => {
+    if (!cleanVideoId) return false;
+    return (
+      cleanVideoId.startsWith('PL') || 
+      cleanVideoId.startsWith('UU') || 
+      cleanVideoId.startsWith('FL') || 
+      cleanVideoId.startsWith('RD') || 
+      cleanVideoId.length >= 15
+    );
+  }, [cleanVideoId]);
+
+  // Player options are stable and only update when current video changes
+  const playerOpts = useMemo(() => {
+    return {
+      width: '100%',
+      height: '100%',
+      playerVars: {
+        autoplay: 1,
+        start: Math.floor(initialStartTimeRef.current || 0),
+        modestbranding: 1,
+        rel: 0,
+        showinfo: 0,
+        iv_load_policy: 3,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
+        playsinline: 1,
+        ...(isPlaylistType ? { listType: 'playlist', list: cleanVideoId } : {})
+      },
+    };
+  }, [currentVideo?.id, cleanVideoId, isPlaylistType]);
+
+  // Back button handler with history check and fallback to /courses
+  const handleBack = () => {
+    if (window.history.length > 1 && window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      navigate('/courses');
+    }
+  };
+
+  // Interactive scrubber / seek bar
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!progressBarRef.current || !playerRef.current || duration <= 0) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const newPercentage = Math.max(0, Math.min(1, clickX / rect.width));
+    const newTime = Math.floor(newPercentage * duration);
+    setCurrentTime(newTime);
+    try {
+      if (typeof playerRef.current.seekTo === 'function') {
+        playerRef.current.seekTo(newTime, true);
+      }
+    } catch (err) {
+      console.warn("Seek error:", err);
+    }
+  };
 
   useEffect(() => {
     if (!user || user.uid === '1' || !course) return;
@@ -105,14 +183,14 @@ export function Course() {
   
   useEffect(() => {
     // Reset player state when changing videos
-    if (courseProgress.currentVideoId) {
+    if (currentVideo?.id) {
       setHasError(false);
       setPlayerState(-1);
       setIsPlaying(false);
-      const savedTime = courseProgress.videoTimestamps?.[courseProgress.currentVideoId] || 0;
+      const savedTime = courseProgress.videoTimestamps?.[currentVideo.id] || 0;
       setCurrentTime(savedTime);
     }
-  }, [courseProgress.currentVideoId]);
+  }, [currentVideo?.id]);
 
   useEffect(() => {
     const fetchUserReports = async () => {
@@ -247,17 +325,21 @@ export function Course() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (playerRef.current && playerRef.current.getCurrentTime && isPlaying) {
-        const time = playerRef.current.getCurrentTime();
-        setCurrentTime(time);
-        
-        // Debounce saving DB write roughly every 10 seconds of active playback
-        if (!saveTimeoutRef.current && currentVideo) {
-          saveTimeoutRef.current = setTimeout(() => {
-            saveVideoTimestamp(course.id, currentVideo.id, time);
-            saveTimeoutRef.current = null;
-          }, 10000);
-        }
+      if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function' && isPlaying) {
+        try {
+          const time = playerRef.current.getCurrentTime();
+          if (typeof time === 'number' && !isNaN(time)) {
+            setCurrentTime(time);
+            
+            // Debounce saving DB write roughly every 15 seconds of active playback
+            if (!saveTimeoutRef.current && currentVideo && course) {
+              saveTimeoutRef.current = setTimeout(() => {
+                saveVideoTimestamp(course.id, currentVideo.id, time);
+                saveTimeoutRef.current = null;
+              }, 15000);
+            }
+          }
+        } catch (e) {}
       }
     }, 1000);
     return () => {
@@ -267,7 +349,7 @@ export function Course() {
         saveTimeoutRef.current = null;
       }
     };
-  }, [isPlaying, currentVideo, course]);
+  }, [isPlaying, currentVideo?.id, course?.id]);
 
   // Save when navigating away or changing tabs
   useEffect(() => {
@@ -385,7 +467,7 @@ export function Course() {
         {/* Top Bar (Hidden in Focus Mode) */}
         {!isFocusMode && (
           <div className="h-16 flex-shrink-0 flex items-center justify-between px-6 bg-card border-b border-border z-10 sticky top-0">
-            <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors group">
+            <button onClick={handleBack} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors group cursor-pointer">
               <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
               <span className="font-medium group-hover:underline">{t('back', 'Back')}</span>
             </button>
@@ -426,24 +508,9 @@ export function Course() {
                   {/* YouTube Player */}
                   <div className="absolute inset-0 w-full h-full">
                     <YouTube
-                      videoId={(!currentVideo.youtubeId.startsWith('PL') && !currentVideo.youtubeId.startsWith('UU') && !currentVideo.youtubeId.startsWith('FL') && !currentVideo.youtubeId.startsWith('RD') && currentVideo.youtubeId.length < 15) ? currentVideo.youtubeId : undefined}
-                      opts={{
-                        width: '100%',
-                        height: '100%',
-                        playerVars: {
-                          autoplay: 1,
-                          start: courseProgress.videoTimestamps?.[currentVideo.id] || 0,
-                          modestbranding: 1,
-                          rel: 0,
-                          showinfo: 0,
-                          iv_load_policy: 3,
-                          controls: 0,
-                          disablekb: 1,
-                          fs: 0,
-                          playsinline: 1,
-                          ...((currentVideo.youtubeId.startsWith('PL') || currentVideo.youtubeId.startsWith('UU') || currentVideo.youtubeId.startsWith('FL') || currentVideo.youtubeId.startsWith('RD') || currentVideo.youtubeId.length >= 15) ? { listType: 'playlist', list: currentVideo.youtubeId } : {})
-                        },
-                      }}
+                      key={currentVideo.id}
+                      videoId={!isPlaylistType ? cleanVideoId : undefined}
+                      opts={playerOpts}
                       onReady={handleReady}
                       onStateChange={handleStateChange}
                       onEnd={handleVideoEnd}
@@ -491,11 +558,20 @@ export function Course() {
                   </div>
                 </div>
                 
-                {/* Custom Progress Bar */}
-                <div className="h-1.5 w-full bg-white/20 relative cursor-not-allowed z-20">
+                {/* Custom Seekable Progress Bar */}
+                <div 
+                  ref={progressBarRef}
+                  onClick={handleSeek}
+                  className="h-2 w-full bg-white/20 hover:bg-white/30 relative cursor-pointer z-20 group transition-all"
+                  title="Click to seek"
+                >
                   <div 
-                    className="absolute top-0 start-0 h-full bg-red-600 transition-all duration-1000 ease-linear"
+                    className="absolute top-0 start-0 h-full bg-red-600 group-hover:bg-red-500 transition-all duration-300"
                     style={{ width: `${progressPercentage}%` }}
+                  />
+                  <div 
+                    className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity -translate-x-1/2 shadow"
+                    style={{ left: `${progressPercentage}%` }}
                   />
                 </div>
                 <div className="px-4 py-3 flex justify-between items-center bg-black/90 z-20 sticky bottom-0">

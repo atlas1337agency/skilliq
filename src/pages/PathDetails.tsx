@@ -34,9 +34,17 @@ export function PathDetails() {
   const pathCourses = filterByLanguage(path.courseIds.map(id => courses.find(c => c.id === id)).filter((c): c is any => Boolean(c)), language);
   const Icon = iconMap[path.icon] || Code;
 
+  const handleBack = () => {
+    if (window.history.length > 1 && window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      navigate('/paths');
+    }
+  };
+
   return (
     <div className="w-full px-4 md:px-8 py-8 max-w-7xl mx-auto">
-      <button onClick={() => navigate(-1)} className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-8 transition-colors font-medium">
+      <button onClick={handleBack} className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-8 transition-colors font-medium cursor-pointer">
         <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
         {t('back', 'Back')}
       </button>

@@ -1,3 +1,41 @@
+// YouTube API Key management
+export const getYouTubeApiKey = (): string => {
+  try {
+    const customKey = localStorage.getItem('custom_youtube_api_key');
+    if (customKey && customKey.trim()) {
+      return customKey.trim();
+    }
+  } catch (e) {
+    // localStorage may be unavailable in some sandboxes
+  }
+
+  // @ts-ignore
+  const envKey = import.meta.env?.VITE_YOUTUBE_API_KEY;
+  if (envKey && typeof envKey === 'string' && envKey.trim()) {
+    return envKey.trim();
+  }
+
+  return '';
+};
+
+export const setCustomYouTubeApiKey = (key: string): void => {
+  try {
+    if (!key || !key.trim()) {
+      localStorage.removeItem('custom_youtube_api_key');
+    } else {
+      localStorage.setItem('custom_youtube_api_key', key.trim());
+    }
+  } catch (e) {
+    console.error('Failed to save YouTube API key to localStorage', e);
+  }
+};
+
+export const removeCustomYouTubeApiKey = (): void => {
+  try {
+    localStorage.removeItem('custom_youtube_api_key');
+  } catch (e) {}
+};
+
 // Format duration from PT1H2M10S to HH:MM:SS
 const formatDuration = (isoDuration: string) => {
   if (!isoDuration) return "00:00";
@@ -15,84 +53,114 @@ const formatDuration = (isoDuration: string) => {
   return formatted;
 };
 
-export const fetchPlaylistVideos = async (playlistId: string) => {
-  // @ts-ignore
-  const API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
-  if (!API_KEY) {
-    throw new Error("Missing VITE_YOUTUBE_API_KEY. Please open Settings in AI Studio and add your API Key.");
-  }
-
-  let allItems: any[] = [];
-  let nextPageToken = "";
+export const fetchPlaylistVideos = async (playlistId: string, customApiKey?: string) => {
+  const API_KEY = (customApiKey && customApiKey.trim()) || getYouTubeApiKey();
   
-  // Fetch all items from the playlist (handles up to 50 items per page)
-  do {
-    const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}&key=${API_KEY}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    
-    if (data.error) {
-      throw new Error(data.error.message || "Failed to fetch playlist items");
-    }
-    if (!data.items || data.items.length === 0) break;
-
-    allItems = allItems.concat(data.items);
-    nextPageToken = data.nextPageToken || ""; 
-  } while (nextPageToken);
-
-  const videos = [];
-  const chunks = [];
-  // YouTube videos API only allows up to 50 IDs at a time, so we chunk it
-  for(let i = 0; i < allItems.length; i += 50) {
-    chunks.push(allItems.slice(i, i + 50));
-  }
-
-  // Get exact video durations for every chunk of 50 videos
-  for (const chunk of chunks) {
-    const videoIds = chunk.map((item: any) => item.snippet?.resourceId?.videoId || item.contentDetails?.videoId).filter(Boolean).join(',');
-    if (!videoIds) continue;
-
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    
-    if (data.error) {
-       console.error("Videos API Error:", data.error);
-       throw new Error(`Failed to fetch video durations: ${data.error.message}`);
-    }
-
-    const durationMap: Record<string, string> = {};
-    if (data.items) {
-      for (const item of data.items) {
-        durationMap[item.id] = formatDuration(item.contentDetails?.duration);
-      }
-    }
-
-    // Build the clean video objects
-    for (const item of chunk) {
-      const vId = item.snippet?.resourceId?.videoId || item.contentDetails?.videoId;
-      const isPrivateOrDeleted = item.snippet?.title === "Private video" || item.snippet?.title === "Deleted video";
+  // 1. If we have an API key, call YouTube Data API directly from client
+  if (API_KEY) {
+    try {
+      let allItems: any[] = [];
+      let nextPageToken = "";
       
-      if (vId && !isPrivateOrDeleted) {
-        videos.push({
-          id: `v${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          title: item.snippet?.title || "Unknown Title",
-          youtubeId: vId,
-          duration: durationMap[vId] || "00:00",
-          language: "",
-          description: "",
-          resources: []
-        });
+      // Fetch all items from the playlist (handles up to 50 items per page)
+      do {
+        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}&key=${API_KEY}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (data.error) {
+          throw new Error(data.error.message || "Failed to fetch playlist items");
+        }
+        if (!data.items || data.items.length === 0) break;
+
+        allItems = allItems.concat(data.items);
+        nextPageToken = data.nextPageToken || ""; 
+      } while (nextPageToken);
+
+      const videos = [];
+      const chunks = [];
+      // YouTube videos API only allows up to 50 IDs at a time, so we chunk it
+      for(let i = 0; i < allItems.length; i += 50) {
+        chunks.push(allItems.slice(i, i + 50));
       }
+
+      // Get exact video durations for every chunk of 50 videos
+      for (const chunk of chunks) {
+        const videoIds = chunk.map((item: any) => item.snippet?.resourceId?.videoId || item.contentDetails?.videoId).filter(Boolean).join(',');
+        if (!videoIds) continue;
+
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (data.error) {
+           console.error("Videos API Error:", data.error);
+           throw new Error(`Failed to fetch video durations: ${data.error.message}`);
+        }
+
+        const durationMap: Record<string, string> = {};
+        if (data.items) {
+          for (const item of data.items) {
+            durationMap[item.id] = formatDuration(item.contentDetails?.duration);
+          }
+        }
+
+        // Build the clean video objects
+        for (const item of chunk) {
+          const vId = item.snippet?.resourceId?.videoId || item.contentDetails?.videoId;
+          const isPrivateOrDeleted = item.snippet?.title === "Private video" || item.snippet?.title === "Deleted video";
+          
+          if (vId && !isPrivateOrDeleted) {
+            videos.push({
+              id: `v${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              title: item.snippet?.title || "Unknown Title",
+              youtubeId: vId,
+              duration: durationMap[vId] || "00:00",
+              language: "",
+              description: "",
+              resources: []
+            });
+          }
+        }
+      }
+      
+      if (videos.length > 0) {
+        return videos;
+      }
+    } catch (clientErr: any) {
+      console.warn("Client YouTube API direct call error, trying backend fallback:", clientErr);
     }
   }
-  
-  return videos;
+
+  // 2. Try backend API proxy fallback (/api/youtube/playlist)
+  try {
+    const backendUrl = `/api/youtube/playlist?id=${encodeURIComponent(playlistId)}${API_KEY ? `&key=${encodeURIComponent(API_KEY)}` : ''}`;
+    const res = await fetch(backendUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.videos && Array.isArray(data.videos) && data.videos.length > 0) {
+        return data.videos;
+      }
+      if (data.error) {
+        throw new Error(data.error);
+      }
+    }
+  } catch (backendErr: any) {
+    console.warn("Backend /api/youtube/playlist error:", backendErr);
+  }
+
+  // 3. If neither worked and no API key exists, provide clear actionable message
+  if (!API_KEY) {
+    throw new Error(
+      "Missing YouTube API Key on Vercel. Please paste your YouTube Data API Key below to import immediately, or add VITE_YOUTUBE_API_KEY in your Vercel Project Settings."
+    );
+  }
+
+  throw new Error("Failed to fetch playlist videos. Please check your playlist URL or YouTube API Key.");
 };
 
-export const fetchVideoDetails = async (youtubeId: string) => {
-  // @ts-ignore
-  const API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
+export const fetchVideoDetails = async (youtubeId: string, customApiKey?: string) => {
+  const API_KEY = (customApiKey && customApiKey.trim()) || getYouTubeApiKey();
   if (!API_KEY) return null;
 
   try {
@@ -133,9 +201,8 @@ export const extractPlaylistId = (input: string) => {
   return match ? match[1] : input; 
 };
 
-export const fetchChannelDetailsFromVideoOrPlaylist = async (id: string, isPlaylist: boolean) => {
-  // @ts-ignore
-  const API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
+export const fetchChannelDetailsFromVideoOrPlaylist = async (id: string, isPlaylist: boolean, customApiKey?: string) => {
+  const API_KEY = (customApiKey && customApiKey.trim()) || getYouTubeApiKey();
   if (!API_KEY) return null;
 
   try {

@@ -72,6 +72,14 @@ export function Certificate() {
     );
   }
 
+  const handleBack = () => {
+    if (window.history.length > 1 && window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      navigate('/certificates');
+    }
+  };
+
   const courseRaw = courses.find(c => c.id === courseId);
   const course = courseRaw || (isPreview ? { 
     title: isRtl 
@@ -232,7 +240,7 @@ export function Certificate() {
           {/* Left: Back Link & Status Badge */}
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => navigate(-1)} 
+              onClick={handleBack} 
               className="p-2 rounded-xl bg-card border border-border/70 hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer shadow-xs"
               title={t('back', 'Back')}
             >
