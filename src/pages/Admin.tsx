@@ -671,27 +671,6 @@ export function Admin() {
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-                {isAdmin && (
-                  <button
-                    onClick={async () => {
-                      try {
-                        localStorage.removeItem('deleted_book_ids');
-                        const { defaultBooks } = await import('../data/courses');
-                        for (const b of defaultBooks) {
-                          await addOrUpdateBook(b);
-                        }
-                        await loadContent();
-                      } catch (e: any) {
-                        console.error('Error syncing default books:', e);
-                      }
-                    }}
-                    className="px-3.5 py-2.5 rounded-xl bg-secondary text-secondary-foreground text-xs font-bold hover:bg-secondary/80 transition-all cursor-pointer text-center"
-                    title="Sync default curated books to Firestore"
-                  >
-                    {isRtl ? 'استعادة الكتب الافتراضية' : 'Sync Default Books'}
-                  </button>
-                )}
-
                 <button 
                   onClick={() => setEditingItem({ type: 'book' })}
                   className="flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2.5 rounded-xl text-xs font-black shadow-xs cursor-pointer active:scale-98"

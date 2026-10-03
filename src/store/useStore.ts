@@ -56,8 +56,8 @@ export const useStore = create<StoreState>()(
       userName: 'Student',
       courses: defaultCourses,
       allCourses: defaultCourses,
-      books: defaultBooks,
-      allBooks: defaultBooks,
+      books: [],
+      allBooks: [],
       learningPaths: defaultPaths,
       categories: defaultCategories,
       notifications: [],
@@ -305,6 +305,36 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: 'nexa-store-storage',
+      merge: (persistedState: any, currentState) => {
+        const legacySeedBookIds = new Set([
+          "book-clean-code",
+          "book-deep-work",
+          "book-ai-superpowers",
+          "book-cyber-ghost",
+          "book-atomic-habits-en",
+          "book-pragmatic-programmer",
+          "book-zero-to-one",
+          "book-atomic-habits-ar",
+          "book-deep-work-ar",
+          "book-clean-code-ar",
+          "book-ai-future-ar",
+          "book-cyber-ar",
+          "book-ai-superpowers-en-2",
+          "book-ghost-in-the-wires",
+          "book-lean-startup",
+          "book-system-design-interview",
+          "book-refactoring",
+          "book-Zero-To-One-Ar-En"
+        ]);
+        const merged = { ...currentState, ...(persistedState || {}) };
+        if (Array.isArray(merged.books)) {
+          merged.books = merged.books.filter((b: any) => b && !legacySeedBookIds.has(b.id));
+        }
+        if (Array.isArray(merged.allBooks)) {
+          merged.allBooks = merged.allBooks.filter((b: any) => b && !legacySeedBookIds.has(b.id));
+        }
+        return merged;
+      },
       partialize: (state) => ({ 
         language: state.language, 
         theme: state.theme,

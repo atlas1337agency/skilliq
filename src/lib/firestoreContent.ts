@@ -48,12 +48,40 @@ export async function fetchFirestoreContent() {
       bannersData.push(doc.data() as AdBannerData);
     });
 
-    // Fetch Books from Firestore + API + Default Books
+    // Legacy hardcoded seed book IDs to ignore and auto-clean so only manually added books appear
+    const LEGACY_SEED_BOOK_IDS = new Set([
+      "book-clean-code",
+      "book-deep-work",
+      "book-ai-superpowers",
+      "book-cyber-ghost",
+      "book-atomic-habits-en",
+      "book-pragmatic-programmer",
+      "book-zero-to-one",
+      "book-atomic-habits-ar",
+      "book-deep-work-ar",
+      "book-clean-code-ar",
+      "book-ai-future-ar",
+      "book-cyber-ar",
+      "book-ai-superpowers-en-2",
+      "book-ghost-in-the-wires",
+      "book-lean-startup",
+      "book-system-design-interview",
+      "book-refactoring",
+      "book-Zero-To-One-Ar-En"
+    ]);
+
+    // Fetch Books from Firestore + API (Only manually added books)
     let firestoreBooks: Book[] = [];
     try {
       const booksSnapshot = await getDocs(collection(db, 'books'));
       booksSnapshot.forEach((d) => {
-        firestoreBooks.push(d.data() as Book);
+        const data = d.data() as Book;
+        if (LEGACY_SEED_BOOK_IDS.has(d.id) || (data && LEGACY_SEED_BOOK_IDS.has(data.id))) {
+          // Silently clean up legacy seed books if previously synced to Firestore
+          deleteDoc(doc(db, 'books', d.id)).catch(() => {});
+          return;
+        }
+        firestoreBooks.push(data);
       });
     } catch (e) {
       console.warn("Firestore books read warning:", e);
@@ -66,7 +94,7 @@ export async function fetchFirestoreContent() {
       if (bRes.ok) {
         const bJson = await bRes.json();
         if (Array.isArray(bJson.books)) {
-          apiBooks = bJson.books;
+          apiBooks = bJson.books.filter((b: Book) => b && !LEGACY_SEED_BOOK_IDS.has(b.id));
         }
         if (Array.isArray(bJson.deletedIds)) {
           serverDeletedBookIds = bJson.deletedIds;
@@ -90,18 +118,13 @@ export async function fetchFirestoreContent() {
     } catch (e) {}
 
     const booksMap = new Map<string, Book>();
-    defaultBooks.forEach(b => {
-      if (!deletedBookIds.includes(b.id)) {
-        booksMap.set(b.id, b);
-      }
-    });
     apiBooks.forEach(b => {
-      if (b && b.id && !deletedBookIds.includes(b.id)) {
+      if (b && b.id && !deletedBookIds.includes(b.id) && !LEGACY_SEED_BOOK_IDS.has(b.id)) {
         booksMap.set(b.id, { ...booksMap.get(b.id), ...b });
       }
     });
     firestoreBooks.forEach(b => {
-      if (b && b.id && !deletedBookIds.includes(b.id)) {
+      if (b && b.id && !deletedBookIds.includes(b.id) && !LEGACY_SEED_BOOK_IDS.has(b.id)) {
         booksMap.set(b.id, { ...booksMap.get(b.id), ...b });
       }
     });
