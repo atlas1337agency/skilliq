@@ -176,6 +176,39 @@ service cloud.firestore {
              data.createdAt is number;
     }
 
+    function isValidBook(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'author', 'description', 'category', 'subCategory', 'coverImage', 'youtubeUrl', 'youtubeId', 'videoTitle', 'videoThumbnail', 'videoDuration', 'youtubeName', 'youtubeAvatar', 'youtubeChannelUrl', 'youtubeUrlAr', 'youtubeIdAr', 'videoTitleAr', 'videoThumbnailAr', 'videoDurationAr', 'youtubeNameAr', 'youtubeAvatarAr', 'youtubeChannelUrlAr', 'buyUrl', 'buyUrlAr', 'language', 'keyTakeaways', 'isApproved', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+             data.author is string && data.author.size() > 0 && data.author.size() <= 200 &&
+             isValidOptionalString('description', 0, 10000) &&
+             data.category is string && data.category.size() <= 100 &&
+             isValidOptionalString('subCategory', 0, 100) &&
+             isValidOptionalString('coverImage', 0, 2000) &&
+             isValidOptionalString('youtubeUrl', 0, 2000) &&
+             isValidOptionalString('youtubeId', 0, 100) &&
+             isValidOptionalString('videoTitle', 0, 300) &&
+             isValidOptionalString('videoThumbnail', 0, 2000) &&
+             isValidOptionalString('videoDuration', 0, 50) &&
+             isValidOptionalString('youtubeName', 0, 200) &&
+             isValidOptionalString('youtubeAvatar', 0, 2000) &&
+             isValidOptionalString('youtubeChannelUrl', 0, 2000) &&
+             isValidOptionalString('youtubeUrlAr', 0, 2000) &&
+             isValidOptionalString('youtubeIdAr', 0, 100) &&
+             isValidOptionalString('videoTitleAr', 0, 300) &&
+             isValidOptionalString('videoThumbnailAr', 0, 2000) &&
+             isValidOptionalString('videoDurationAr', 0, 50) &&
+             isValidOptionalString('youtubeNameAr', 0, 200) &&
+             isValidOptionalString('youtubeAvatarAr', 0, 2000) &&
+             isValidOptionalString('youtubeChannelUrlAr', 0, 2000) &&
+             isValidOptionalString('buyUrl', 0, 2000) &&
+             isValidOptionalString('buyUrlAr', 0, 2000) &&
+             isValidOptionalString('language', 0, 50) &&
+             (!('keyTakeaways' in data) || (data.keyTakeaways is list && data.keyTakeaways.size() <= 40)) &&
+             (!('isApproved' in data) || data.isApproved is bool) &&
+             (!('createdAt' in data) || data.createdAt is number);
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -222,6 +255,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /books/{bookId} {
+      allow read: if true;
+      allow create: if (isAdmin() || isPublisher()) && isValidBook(request.resource.data) && request.resource.data.id == bookId;
+      allow update: if (isAdmin() || isPublisher()) && isValidBook(request.resource.data) && request.resource.data.id == resource.data.id;
+      allow delete: if isAdmin() || isPublisher();
+    }
+
     match /learningPaths/{pathId} {
       allow read: if true;
       allow create: if isAdmin() && isValidLearningPath(request.resource.data) && request.resource.data.id == pathId;
@@ -244,6 +284,10 @@ service cloud.firestore {
     }
 
     match /reports/{reportId} {
+      allow read, write: if true;
+    }
+
+    match /form_submissions/{submissionId} {
       allow read, write: if true;
     }
 

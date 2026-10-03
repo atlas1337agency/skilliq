@@ -19,8 +19,6 @@ export function PopularCoursesSection() {
   const { user, courses, setIsAuthModalOpen, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  const [activeCategory, setActiveCategory] = useState<string>('all');
-
   // Filter out single-video courses (masterclasses)
   const allPlaylists = useMemo(() => {
     return filterByLanguage(courses, language).filter(
@@ -28,33 +26,10 @@ export function PopularCoursesSection() {
     );
   }, [courses, language]);
 
-  // Extract available categories with count
-  const categoryFilters = useMemo(() => {
-    const counts: Record<string, number> = {};
-    allPlaylists.forEach(c => {
-      const cat = c.category || 'Other';
-      counts[cat] = (counts[cat] || 0) + 1;
-    });
-
-    const list = Object.keys(counts).map(cat => ({
-      id: cat,
-      label: cat,
-      count: counts[cat]
-    }));
-
-    return [
-      { id: 'all', label: t('quick_filter_all', 'All Topics'), count: allPlaylists.length },
-      ...list
-    ];
-  }, [allPlaylists, t]);
-
-  // Filtered courses based on active category tab
+  // Top 8 popular courses
   const displayedCourses = useMemo(() => {
-    const list = activeCategory === 'all'
-      ? allPlaylists
-      : allPlaylists.filter(c => (c.category || '').toLowerCase() === activeCategory.toLowerCase());
-    return list.slice(0, 8); // Top 8 popular courses
-  }, [allPlaylists, activeCategory]);
+    return allPlaylists.slice(0, 8);
+  }, [allPlaylists]);
 
   return (
     <section dir={isRtl ? 'rtl' : 'ltr'} className="w-full transition-colors">
@@ -81,32 +56,6 @@ export function PopularCoursesSection() {
           <span>{t('view_all_playlists', 'View All Playlists')}</span>
           <ArrowRight className="w-4 h-4 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
         </Link>
-      </div>
-
-      {/* SMART CATEGORY FILTER CHIPS */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-8 scrollbar-none">
-        {categoryFilters.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveCategory(tab.id)}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 shrink-0",
-              activeCategory === tab.id
-                ? "bg-primary text-primary-foreground border-primary shadow-xs font-bold"
-                : "bg-card text-muted-foreground hover:text-foreground border-border/70 hover:bg-muted/60"
-            )}
-          >
-            <span>{tab.label}</span>
-            <span className={cn(
-              "text-[10px] px-1.5 py-0.5 rounded-md",
-              activeCategory === tab.id 
-                ? "bg-background/20 text-background" 
-                : "bg-muted text-muted-foreground"
-            )}>
-              {tab.count}
-            </span>
-          </button>
-        ))}
       </div>
 
       {/* COURSES RESPONSIVE GRID */}

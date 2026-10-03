@@ -44,8 +44,6 @@ export function PopularMasterclassesSection() {
   const { user, courses, setIsAuthModalOpen, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  const [activeFilter, setActiveFilter] = useState<string>('all');
-
   // Single-video masterclasses only
   const allMasterclasses = useMemo(() => {
     return filterByLanguage(courses, language).filter(
@@ -53,25 +51,10 @@ export function PopularMasterclassesSection() {
     );
   }, [courses, language]);
 
-  // Smart filter options
-  const filterTabs = useMemo(() => {
-    return [
-      { id: 'all', label: t('quick_filter_all', 'All Masterclasses') },
-      { id: 'deep_dive', label: t('duration_deep_dive', 'Deep Dives (2h+)') },
-      { id: 'short_workshop', label: t('duration_short_workshop', 'Workshops (< 2h)') },
-    ];
-  }, [t]);
-
-  // Filtered masterclasses
+  // Top 8 masterclasses
   const displayedMasterclasses = useMemo(() => {
-    let list = allMasterclasses;
-    if (activeFilter === 'deep_dive') {
-      list = allMasterclasses.filter(c => parseDurationMinutes(c.videos?.[0]?.duration) >= 120);
-    } else if (activeFilter === 'short_workshop') {
-      list = allMasterclasses.filter(c => parseDurationMinutes(c.videos?.[0]?.duration) < 120);
-    }
-    return list.slice(0, 8); // Top 8 masterclasses
-  }, [allMasterclasses, activeFilter]);
+    return allMasterclasses.slice(0, 8);
+  }, [allMasterclasses]);
 
   return (
     <section dir={isRtl ? 'rtl' : 'ltr'} className="w-full transition-colors">
@@ -98,24 +81,6 @@ export function PopularMasterclassesSection() {
           <span>{t('view_all_masterclasses', 'View All Masterclasses')}</span>
           <ArrowRight className="w-4 h-4 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
         </Link>
-      </div>
-
-      {/* SMART FILTER CHIPS */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-8 scrollbar-none">
-        {filterTabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveFilter(tab.id)}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 shrink-0",
-              activeFilter === tab.id
-                ? "bg-primary text-primary-foreground border-primary shadow-xs font-bold"
-                : "bg-card text-muted-foreground hover:text-foreground border-border/70 hover:bg-muted/60"
-            )}
-          >
-            <span>{tab.label}</span>
-          </button>
-        ))}
       </div>
 
       {/* MASTERCLASSES RESPONSIVE GRID */}

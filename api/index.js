@@ -175,6 +175,138 @@ app.get('/api/youtube/config', (req, res) => {
   res.json({ hasEnvKey: hasKey });
 });
 
+const formatSecondsDuration = (totalSeconds) => {
+  if (!totalSeconds || isNaN(totalSeconds) || totalSeconds <= 0) return "15:00";
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+};
+
+app.get('/api/youtube/video-info', async (req, res) => {
+  try {
+    const videoId = (req.query.id || '').trim();
+    const apiKey = req.query.key || process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY;
+
+    if (!videoId) {
+      return res.status(400).json({ error: 'Missing YouTube video ID' });
+    }
+
+    let videoTitle = '';
+    let videoDuration = '';
+    let videoThumbnail = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+    let youtubeName = '';
+    let youtubeAvatar = '';
+    let youtubeChannelUrl = '';
+    let description = '';
+
+    if (apiKey) {
+      try {
+        const vUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`;
+        const vRes = await fetch(vUrl);
+        const vData = await vRes.json();
+        if (vData.items && vData.items.length > 0) {
+          const item = vData.items[0];
+          videoTitle = item.snippet?.title || '';
+          description = item.snippet?.description || '';
+          videoDuration = formatIsoDuration(item.contentDetails?.duration);
+          videoThumbnail = item.snippet?.thumbnails?.maxres?.url || item.snippet?.thumbnails?.high?.url || videoThumbnail;
+          youtubeName = item.snippet?.channelTitle || '';
+          const channelId = item.snippet?.channelId;
+          if (channelId) {
+            youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}`;
+            const cUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(apiKey)}`;
+            const cRes = await fetch(cUrl);
+            const cData = await cRes.json();
+            if (cData.items && cData.items.length > 0) {
+              const cSnippet = cData.items[0].snippet;
+              youtubeAvatar = cSnippet?.thumbnails?.high?.url || cSnippet?.thumbnails?.default?.url || '';
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.warn('YouTube Data API v3 fallback triggered:', apiErr);
+      }
+    }
+
+    if (!videoTitle || !youtubeName) {
+      try {
+        const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`;
+        const oRes = await fetch(oembedUrl);
+        if (oRes.ok) {
+          const oData = await oRes.json();
+          if (!videoTitle && oData.title) videoTitle = oData.title;
+          if (!youtubeName && oData.author_name) youtubeName = oData.author_name;
+          if (!youtubeChannelUrl && oData.author_url) youtubeChannelUrl = oData.author_url;
+        }
+      } catch (oErr) {}
+    }
+
+    if (!videoDuration || !youtubeAvatar || !description) {
+      try {
+        const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
+          }
+        });
+        if (watchRes.ok) {
+          const html = await watchRes.text();
+          if (!videoDuration) {
+            const lenMatch = html.match(/"lengthSeconds":"(\d+)"/);
+            if (lenMatch && lenMatch[1]) {
+              videoDuration = formatSecondsDuration(parseInt(lenMatch[1], 10));
+            } else {
+              const approxMatch = html.match(/"approxDurationMs":"(\d+)"/);
+              if (approxMatch && approxMatch[1]) {
+                videoDuration = formatSecondsDuration(Math.round(parseInt(approxMatch[1], 10) / 1000));
+              }
+            }
+          }
+          if (!youtubeAvatar) {
+            const ownerAvatarMatch = html.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"([^"]+)"/);
+            if (ownerAvatarMatch && ownerAvatarMatch[1]) {
+              youtubeAvatar = ownerAvatarMatch[1].replace(/\\u0026/g, '&');
+            } else {
+              const yt3Match = html.match(/https:\/\/yt3\.(?:ggpht|googleusercontent)\.com\/(?:ytc\/)?[A-Za-z0-9_\-=]+(?:\=s\d+[^"\\]*)?/);
+              if (yt3Match && yt3Match[0]) {
+                youtubeAvatar = yt3Match[0];
+              }
+            }
+          }
+          if (!youtubeChannelUrl) {
+            const chanMatch = html.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/);
+            if (chanMatch && chanMatch[1]) {
+              youtubeChannelUrl = `https://www.youtube.com/channel/${chanMatch[1]}`;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!youtubeAvatar && youtubeName) {
+      youtubeAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(youtubeName)}&background=ef4444&color=fff&bold=true`;
+    }
+
+    res.json({
+      success: true,
+      youtubeId: videoId,
+      videoTitle: videoTitle || 'Book Video Summary',
+      videoDuration: videoDuration || '15:00',
+      videoThumbnail,
+      youtubeName: youtubeName || 'YouTube Creator',
+      youtubeAvatar,
+      youtubeChannelUrl: youtubeChannelUrl || `https://www.youtube.com/watch?v=${videoId}`,
+      description: description ? description.slice(0, 1200) : ''
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to fetch video info' });
+  }
+});
+
 app.get('/api/youtube/playlist', async (req, res) => {
   try {
     const playlistId = req.query.id;

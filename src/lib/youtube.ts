@@ -243,3 +243,138 @@ export const fetchChannelDetailsFromVideoOrPlaylist = async (id: string, isPlayl
   }
   return null;
 };
+
+export const extractYoutubeVideoId = (input: string): string => {
+  if (!input) return '';
+  const str = input.trim();
+  const regExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const match = str.match(regExp);
+  if (match && match[1]) return match[1];
+  if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
+  return '';
+};
+
+export interface YoutubeFullMetadata {
+  youtubeId: string;
+  videoTitle: string;
+  videoDuration: string;
+  videoThumbnail: string;
+  youtubeName: string;
+  youtubeAvatar: string;
+  youtubeChannelUrl: string;
+  description: string;
+}
+
+export const fetchFullYoutubeVideoMetadata = async (
+  urlOrId: string,
+  customApiKey?: string
+): Promise<YoutubeFullMetadata | null> => {
+  const youtubeId = extractYoutubeVideoId(urlOrId);
+  if (!youtubeId) return null;
+
+  const API_KEY = (customApiKey && customApiKey.trim()) || getYouTubeApiKey();
+
+  // 1. Try server-side smart endpoint (/api/youtube/video-info) which supports both API key & keyless extraction
+  try {
+    const apiUrl = `/api/youtube/video-info?id=${encodeURIComponent(youtubeId)}${API_KEY ? `&key=${encodeURIComponent(API_KEY)}` : ''}`;
+    const res = await fetch(apiUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.youtubeId) {
+        return {
+          youtubeId: data.youtubeId,
+          videoTitle: data.videoTitle || '',
+          videoDuration: data.videoDuration || '15:00',
+          videoThumbnail: data.videoThumbnail || `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+          youtubeName: data.youtubeName || 'YouTube Creator',
+          youtubeAvatar: data.youtubeAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.youtubeName || 'YT')}&background=ef4444&color=fff&bold=true`,
+          youtubeChannelUrl: data.youtubeChannelUrl || `https://www.youtube.com/watch?v=${youtubeId}`,
+          description: data.description || ''
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Backend /api/youtube/video-info warning, trying client fallback:', err);
+  }
+
+  // 2. Direct Client YouTube Data API v3 if key is available
+  if (API_KEY) {
+    try {
+      const [vidDetails, chanDetails] = await Promise.all([
+        fetchVideoDetails(youtubeId, API_KEY),
+        fetchChannelDetailsFromVideoOrPlaylist(youtubeId, false, API_KEY)
+      ]);
+      if (vidDetails || chanDetails) {
+        const name = chanDetails?.instructorName || 'YouTube Creator';
+        return {
+          youtubeId,
+          videoTitle: vidDetails?.title || '',
+          videoDuration: vidDetails?.duration || '15:00',
+          videoThumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+          youtubeName: name,
+          youtubeAvatar: chanDetails?.instructorAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=ef4444&color=fff&bold=true`,
+          youtubeChannelUrl: chanDetails?.instructorUrl || `https://www.youtube.com/watch?v=${youtubeId}`,
+          description: vidDetails?.description || ''
+        };
+      }
+    } catch (e) {
+      console.warn('Direct client YouTube API fallback error:', e);
+    }
+  }
+
+  // 3. Client-side noembed / oEmbed fallback
+  try {
+    const noembedRes = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${youtubeId}`);
+    if (noembedRes.ok) {
+      const oData = await noembedRes.json();
+      const name = oData.author_name || 'YouTube Creator';
+      return {
+        youtubeId,
+        videoTitle: oData.title || '',
+        videoDuration: '15:00',
+        videoThumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+        youtubeName: name,
+        youtubeAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=ef4444&color=fff&bold=true`,
+        youtubeChannelUrl: oData.author_url || `https://www.youtube.com/watch?v=${youtubeId}`,
+        description: ''
+      };
+    }
+  } catch (e) {}
+
+  return {
+    youtubeId,
+    videoTitle: '',
+    videoDuration: '15:00',
+    videoThumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+    youtubeName: 'YouTube Creator',
+    youtubeAvatar: `https://ui-avatars.com/api/?name=YT&background=ef4444&color=fff&bold=true`,
+    youtubeChannelUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
+    description: ''
+  };
+};
+
+export const searchBookCoverOnline = async (title: string, author?: string): Promise<{ coverUrl?: string; authorName?: string; title?: string } | null> => {
+  if (!title.trim()) return null;
+  try {
+    const q = encodeURIComponent(`${title.trim()} ${author ? author.trim() : ''}`.trim());
+    const res = await fetch(`https://openlibrary.org/search.json?q=${q}&limit=5`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.docs) && data.docs.length > 0) {
+        const docWithCover = data.docs.find((d: any) => d.cover_i) || data.docs[0];
+        const coverUrl = docWithCover.cover_i
+          ? `https://covers.openlibrary.org/b/id/${docWithCover.cover_i}-L.jpg`
+          : undefined;
+        const authorName = Array.isArray(docWithCover.author_name) ? docWithCover.author_name[0] : undefined;
+        return {
+          coverUrl,
+          authorName,
+          title: docWithCover.title
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('OpenLibrary cover lookup warning:', e);
+  }
+  return null;
+};

@@ -9,6 +9,7 @@ import { filterByLanguage, filterPathsByLanguage } from '../lib/utils';
 import { HeroSection } from '../components/HeroSection';
 import { ExploreCategoriesSection } from '../components/ExploreCategoriesSection';
 import { WhySkilliqSection } from '../components/WhySkilliqSection';
+import { BooksSection } from '../components/BooksSection';
 import { HowItWorksSection } from '../components/HowItWorksSection';
 import { FinalCTASection } from '../components/FinalCTASection';
 import { PopularCoursesSection } from '../components/PopularCoursesSection';
@@ -349,6 +350,7 @@ export function Home() {
       {/* SECTIONS BEFORE FOOTER */}
       <ExploreCategoriesSection />
       <WhySkilliqSection />
+      <BooksSection />
       <HowItWorksSection />
       <FinalCTASection />
     </div>

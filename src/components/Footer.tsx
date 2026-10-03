@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { 
   ChevronUp, 
   ShieldCheck, 
@@ -13,12 +14,67 @@ import { useStore } from '../store/useStore';
 
 export function Footer() {
   const { t, i18n } = useTranslation();
-  const { language, theme } = useStore();
+  const { language, theme, categories, courses } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
   const isDark = theme === 'dark';
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const dynamicTracks = useMemo(() => {
+    const set = new Set<string>();
+    
+    // Add categories from registered categories
+    if (Array.isArray(categories)) {
+      categories.forEach(c => {
+        const name = c.name?.trim();
+        if (name && name.toLowerCase() !== 'all') {
+          set.add(name);
+        }
+      });
+    }
+
+    // Add categories from active courses
+    if (Array.isArray(courses)) {
+      courses.forEach(c => {
+        const cat = c.category?.trim();
+        if (cat && cat.toLowerCase() !== 'all') {
+          set.add(cat);
+        }
+      });
+    }
+
+    // Rank categories by course count
+    const counts = new Map<string, number>();
+    set.forEach(cat => {
+      const count = courses.filter(c => c.category?.toLowerCase() === cat.toLowerCase()).length;
+      counts.set(cat, count);
+    });
+
+    const sorted = Array.from(set).sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0));
+
+    if (sorted.length === 0) {
+      return ['Web Development', 'Cyber Security', 'Programming', 'Design', 'AI & Machine Learning'];
+    }
+
+    return sorted.slice(0, 5);
+  }, [categories, courses]);
+
+  const getCategoryDisplay = (cat: string) => {
+    const key = cat.toLowerCase();
+    if (isRtl) {
+      if (key.includes('web')) return 'تطوير الويب (Web Development)';
+      if (key.includes('cyber') || key.includes('security')) return 'الأمن السيبراني (Cyber Security)';
+      if (key.includes('prog') || key.includes('python')) return 'البرمجة وبايثون (Programming & Python)';
+      if (key.includes('design') || key.includes('ui')) return 'تصميم الواجهات (UI/UX & 3D Design)';
+      if (key.includes('market')) return 'التسويق الرقمي (Digital Marketing)';
+      if (key.includes('ai') || key.includes('machine')) return 'الذكاء الاصطناعي (AI & ML)';
+      if (key.includes('data')) return 'علم البيانات (Data Science)';
+      if (key.includes('cloud') || key.includes('devops')) return 'الحوسبة السحابية (Cloud & DevOps)';
+      return cat;
+    }
+    return cat;
   };
 
   return (
@@ -146,46 +202,16 @@ export function Footer() {
               <span>{t('footer_tracks_title', 'Featured Tracks')}</span>
             </h4>
             <ul className="space-y-2.5 text-xs sm:text-sm">
-              <li>
-                <Link 
-                  to="/courses?category=Web%20Development" 
-                  className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
-                >
-                  {isRtl ? 'تطوير الويب (Web Development)' : 'Web Development'}
-                </Link>
-              </li>
-              <li>
-                <Link 
-                  to="/courses?category=Cyber%20Security" 
-                  className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
-                >
-                  {isRtl ? 'الأمن السيبراني (Cyber Security)' : 'Cyber Security'}
-                </Link>
-              </li>
-              <li>
-                <Link 
-                  to="/courses?category=Programming" 
-                  className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
-                >
-                  {isRtl ? 'البرمجة وبايثون (Programming & Python)' : 'Programming & Python'}
-                </Link>
-              </li>
-              <li>
-                <Link 
-                  to="/courses?category=Design" 
-                  className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
-                >
-                  {isRtl ? 'تصميم الواجهات (UI/UX & 3D Design)' : 'UI/UX & 3D Design'}
-                </Link>
-              </li>
-              <li>
-                <Link 
-                  to="/courses?category=digital%20marketing" 
-                  className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
-                >
-                  {isRtl ? 'التسويق الرقمي (Digital Marketing)' : 'Digital Marketing'}
-                </Link>
-              </li>
+              {dynamicTracks.map((cat) => (
+                <li key={cat}>
+                  <Link 
+                    to={`/courses?category=${encodeURIComponent(cat)}`} 
+                    className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
+                  >
+                    {getCategoryDisplay(cat)}
+                  </Link>
+                </li>
+              ))}
               <li>
                 <Link 
                   to="/paths" 

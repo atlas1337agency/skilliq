@@ -1,6 +1,6 @@
 import { collection, getDocs, setDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Course, LearningPath, Category, AppNotification, AdBannerData } from '../data/courses';
+import { Course, LearningPath, Category, AppNotification, AdBannerData, Book, defaultBooks } from '../data/courses';
 import { fetchGoogleSheetsContent } from './sheets';
 
 export async function fetchFirestoreContent() {
@@ -48,11 +48,75 @@ export async function fetchFirestoreContent() {
       bannersData.push(doc.data() as AdBannerData);
     });
 
+    // Fetch Books from Firestore + API + Default Books
+    let firestoreBooks: Book[] = [];
+    try {
+      const booksSnapshot = await getDocs(collection(db, 'books'));
+      booksSnapshot.forEach((d) => {
+        firestoreBooks.push(d.data() as Book);
+      });
+    } catch (e) {
+      console.warn("Firestore books read warning:", e);
+    }
+
+    let apiBooks: Book[] = [];
+    let serverDeletedBookIds: string[] = [];
+    try {
+      const bRes = await fetch('/api/books');
+      if (bRes.ok) {
+        const bJson = await bRes.json();
+        if (Array.isArray(bJson.books)) {
+          apiBooks = bJson.books;
+        }
+        if (Array.isArray(bJson.deletedIds)) {
+          serverDeletedBookIds = bJson.deletedIds;
+        }
+      }
+    } catch (e) {
+      console.warn("API books read warning:", e);
+    }
+
+    let localDeletedBookIds: string[] = [];
+    try {
+      const rawDeleted = localStorage.getItem('deleted_book_ids');
+      if (rawDeleted) localDeletedBookIds = JSON.parse(rawDeleted);
+    } catch (e) {}
+
+    const deletedBookIds = Array.from(new Set([...localDeletedBookIds, ...serverDeletedBookIds]));
+    try {
+      if (deletedBookIds.length > 0) {
+        localStorage.setItem('deleted_book_ids', JSON.stringify(deletedBookIds));
+      }
+    } catch (e) {}
+
+    const booksMap = new Map<string, Book>();
+    defaultBooks.forEach(b => {
+      if (!deletedBookIds.includes(b.id)) {
+        booksMap.set(b.id, b);
+      }
+    });
+    apiBooks.forEach(b => {
+      if (b && b.id && !deletedBookIds.includes(b.id)) {
+        booksMap.set(b.id, { ...booksMap.get(b.id), ...b });
+      }
+    });
+    firestoreBooks.forEach(b => {
+      if (b && b.id && !deletedBookIds.includes(b.id)) {
+        booksMap.set(b.id, { ...booksMap.get(b.id), ...b });
+      }
+    });
+
+    const booksData: Book[] = Array.from(booksMap.values()).sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+    );
+
+    import('../lib/courseUtils').then(); // ensure loaded
+    const { normalizeCategory } = await import('../lib/courseUtils');
     const categoriesMap: Record<string, Set<string>> = {};
     coursesData.forEach(c => {
-      const cat = c.category || 'Other';
+      const cat = normalizeCategory(c.category);
       if (!categoriesMap[cat]) categoriesMap[cat] = new Set();
-      if (c.subCategory) categoriesMap[cat].add(c.subCategory);
+      if (c.subCategory && c.subCategory.trim()) categoriesMap[cat].add(c.subCategory.trim());
     });
 
     const categoriesData: Category[] = [
@@ -68,7 +132,8 @@ export async function fetchFirestoreContent() {
       learningPaths: pathsData,
       categories: categoriesData,
       notifications: notificationsData,
-      banners: bannersData
+      banners: bannersData,
+      books: booksData
     };
   } catch (error) {
     console.error("Error fetching from Firestore:", error);
@@ -146,4 +211,57 @@ export async function addOrUpdateBanner(banner: AdBannerData) {
 
 export async function deleteBannerInFirestore(bannerId: string) {
   await deleteDoc(doc(db, 'banners', bannerId));
+}
+
+export async function addOrUpdateBook(book: Book) {
+  try {
+    const rawDeleted = localStorage.getItem('deleted_book_ids');
+    if (rawDeleted) {
+      const list = JSON.parse(rawDeleted) as string[];
+      if (list.includes(book.id)) {
+        localStorage.setItem('deleted_book_ids', JSON.stringify(list.filter(id => id !== book.id)));
+      }
+    }
+  } catch (e) {}
+
+  try {
+    await fetch('/api/books', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(book)
+    });
+  } catch (e) {
+    console.warn("API save book warning:", e);
+  }
+
+  try {
+    await setDoc(doc(db, 'books', book.id), book);
+  } catch (e) {
+    console.warn("Firestore save book warning:", e);
+  }
+}
+
+export async function deleteBookInFirestore(bookId: string) {
+  try {
+    const rawDeleted = localStorage.getItem('deleted_book_ids');
+    const list: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+    if (!list.includes(bookId)) {
+      list.push(bookId);
+      localStorage.setItem('deleted_book_ids', JSON.stringify(list));
+    }
+  } catch (e) {}
+
+  try {
+    await fetch(`/api/books/${encodeURIComponent(bookId)}`, {
+      method: 'DELETE'
+    });
+  } catch (e) {
+    console.warn("API delete book warning:", e);
+  }
+
+  try {
+    await deleteDoc(doc(db, 'books', bookId));
+  } catch (e) {
+    console.warn("Firestore delete book warning:", e);
+  }
 }

@@ -178,6 +178,33 @@
         "resolvedBy": { "type": "string" }
       },
       "required": ["type", "courseId", "courseTitle", "videoId", "videoTitle", "youtubeId", "status", "createdAt"]
+    },
+    "Book": {
+      "title": "Book",
+      "description": "A curated book with a YouTube video summary/explanation, creator profile, category, and optional purchase link.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "subCategory": { "type": "string" },
+        "coverImage": { "type": "string" },
+        "youtubeUrl": { "type": "string" },
+        "youtubeId": { "type": "string" },
+        "videoTitle": { "type": "string" },
+        "videoThumbnail": { "type": "string" },
+        "videoDuration": { "type": "string" },
+        "youtubeName": { "type": "string" },
+        "youtubeAvatar": { "type": "string" },
+        "youtubeChannelUrl": { "type": "string" },
+        "buyUrl": { "type": "string" },
+        "language": { "type": "string" },
+        "isApproved": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "title", "author", "category", "youtubeId"]
     }
   },
   "firestore": {
@@ -192,6 +219,10 @@
     "/courses/{courseId}": {
       "schema": { "$ref": "#/entities/Course" },
       "description": "Global catalog of courses."
+    },
+    "/books/{bookId}": {
+      "schema": { "$ref": "#/entities/Book" },
+      "description": "Global catalog of curated books and video summaries."
     },
     "/learningPaths/{pathId}": {
       "schema": { "$ref": "#/entities/LearningPath" },

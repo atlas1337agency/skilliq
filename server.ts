@@ -573,6 +573,259 @@ Level: "${currentLevel}"`;
     res.json({ hasEnvKey: hasKey });
   });
 
+  // Format raw seconds into H:MM:SS or MM:SS
+  const formatSecondsDuration = (totalSeconds: number) => {
+    if (!totalSeconds || isNaN(totalSeconds) || totalSeconds <= 0) return "15:00";
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // Smart YouTube Single Video Info Fetcher (Works with API Key OR keyless oEmbed + watch page extraction)
+  app.get('/api/youtube/video-info', async (req, res) => {
+    try {
+      const videoId = (req.query.id as string || '').trim();
+      const apiKey = (req.query.key as string) || process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY;
+
+      if (!videoId) {
+        return res.status(400).json({ error: 'Missing YouTube video ID' });
+      }
+
+      let videoTitle = '';
+      let videoDuration = '';
+      let videoThumbnail = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+      let youtubeName = '';
+      let youtubeAvatar = '';
+      let youtubeChannelUrl = '';
+      let description = '';
+
+      // 1. Try Official YouTube Data API v3 if key is available
+      if (apiKey) {
+        try {
+          const vUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`;
+          const vRes = await fetch(vUrl);
+          const vData = await vRes.json();
+          if (vData.items && vData.items.length > 0) {
+            const item = vData.items[0];
+            videoTitle = item.snippet?.title || '';
+            description = item.snippet?.description || '';
+            videoDuration = formatIsoDuration(item.contentDetails?.duration);
+            videoThumbnail =
+              item.snippet?.thumbnails?.maxres?.url ||
+              item.snippet?.thumbnails?.high?.url ||
+              videoThumbnail;
+            youtubeName = item.snippet?.channelTitle || '';
+            const channelId = item.snippet?.channelId;
+            if (channelId) {
+              youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}`;
+              const cUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(apiKey)}`;
+              const cRes = await fetch(cUrl);
+              const cData = await cRes.json();
+              if (cData.items && cData.items.length > 0) {
+                const cSnippet = cData.items[0].snippet;
+                youtubeAvatar = cSnippet?.thumbnails?.high?.url || cSnippet?.thumbnails?.default?.url || '';
+              }
+            }
+          }
+        } catch (apiErr) {
+          console.warn('YouTube Data API v3 fallback triggered:', apiErr);
+        }
+      }
+
+      // 2. Keyless Fallback: Use YouTube oEmbed + Public Watch Page Metadata Extraction
+      if (!videoTitle || !youtubeName) {
+        try {
+          const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`;
+          const oRes = await fetch(oembedUrl);
+          if (oRes.ok) {
+            const oData = await oRes.json();
+            if (!videoTitle && oData.title) videoTitle = oData.title;
+            if (!youtubeName && oData.author_name) youtubeName = oData.author_name;
+            if (!youtubeChannelUrl && oData.author_url) youtubeChannelUrl = oData.author_url;
+          }
+        } catch (oErr) {
+          console.warn('oEmbed fetch warning:', oErr);
+        }
+      }
+
+      if (!videoDuration || !youtubeAvatar || !description) {
+        try {
+          const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9'
+            }
+          });
+          if (watchRes.ok) {
+            const html = await watchRes.text();
+
+            if (!videoDuration) {
+              const lenMatch = html.match(/"lengthSeconds":"(\d+)"/);
+              if (lenMatch && lenMatch[1]) {
+                videoDuration = formatSecondsDuration(parseInt(lenMatch[1], 10));
+              } else {
+                const approxMatch = html.match(/"approxDurationMs":"(\d+)"/);
+                if (approxMatch && approxMatch[1]) {
+                  videoDuration = formatSecondsDuration(Math.round(parseInt(approxMatch[1], 10) / 1000));
+                }
+              }
+            }
+
+            if (!videoTitle) {
+              const titleMatch = html.match(/<meta name="title" content="([^"]+)">/);
+              if (titleMatch && titleMatch[1]) videoTitle = titleMatch[1];
+            }
+
+            if (!description) {
+              const descMatch = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+              if (descMatch && descMatch[1]) {
+                try {
+                  description = JSON.parse(`"${descMatch[1]}"`);
+                } catch {
+                  description = descMatch[1].replace(/\\n/g, '\n');
+                }
+              }
+            }
+
+            if (!youtubeAvatar) {
+              const ownerAvatarMatch = html.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"([^"]+)"/);
+              if (ownerAvatarMatch && ownerAvatarMatch[1]) {
+                youtubeAvatar = ownerAvatarMatch[1].replace(/\\u0026/g, '&');
+              } else {
+                const yt3Match = html.match(/https:\/\/yt3\.(?:ggpht|googleusercontent)\.com\/(?:ytc\/)?[A-Za-z0-9_\-=]+(?:\=s\d+[^"\\]*)?/);
+                if (yt3Match && yt3Match[0]) {
+                  youtubeAvatar = yt3Match[0];
+                }
+              }
+            }
+
+            if (!youtubeChannelUrl) {
+              const chanMatch = html.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/);
+              if (chanMatch && chanMatch[1]) {
+                youtubeChannelUrl = `https://www.youtube.com/channel/${chanMatch[1]}`;
+              }
+            }
+          }
+        } catch (scrapeErr) {
+          console.warn('Watch page metadata fallback warning:', scrapeErr);
+        }
+      }
+
+      if (!youtubeAvatar && youtubeName) {
+        youtubeAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(youtubeName)}&background=ef4444&color=fff&bold=true`;
+      }
+
+      res.json({
+        success: true,
+        youtubeId: videoId,
+        videoTitle: videoTitle || 'Book Video Summary',
+        videoDuration: videoDuration || '15:00',
+        videoThumbnail,
+        youtubeName: youtubeName || 'YouTube Creator',
+        youtubeAvatar,
+        youtubeChannelUrl: youtubeChannelUrl || `https://www.youtube.com/watch?v=${videoId}`,
+        description: description ? description.slice(0, 1200) : ''
+      });
+    } catch (err: any) {
+      console.error('Error in /api/youtube/video-info:', err);
+      res.status(500).json({ error: err.message || 'Failed to fetch video info' });
+    }
+  });
+
+  // Books API Endpoints (Persistence backup alongside Firestore)
+  const booksFilePath = path.join(process.cwd(), 'src', 'data', 'books.json');
+  const deletedBooksFilePath = path.join(process.cwd(), 'src', 'data', 'deleted_books.json');
+
+  const getStoredBooks = (): any[] => {
+    try {
+      if (fs.existsSync(booksFilePath)) {
+        const raw = fs.readFileSync(booksFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.error('Error reading books.json:', e);
+    }
+    return [];
+  };
+
+  const saveStoredBooks = (booksList: any[]) => {
+    try {
+      fs.writeFileSync(booksFilePath, JSON.stringify(booksList, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing books.json:', e);
+    }
+  };
+
+  const getDeletedBookIds = (): string[] => {
+    try {
+      if (fs.existsSync(deletedBooksFilePath)) {
+        const raw = fs.readFileSync(deletedBooksFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.error('Error reading deleted_books.json:', e);
+    }
+    return [];
+  };
+
+  const saveDeletedBookIds = (ids: string[]) => {
+    try {
+      fs.writeFileSync(deletedBooksFilePath, JSON.stringify(Array.from(new Set(ids)), null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing deleted_books.json:', e);
+    }
+  };
+
+  app.get('/api/books', (req, res) => {
+    const list = getStoredBooks();
+    const deletedIds = getDeletedBookIds();
+    res.json({ books: list, deletedIds });
+  });
+
+  app.post('/api/books', (req, res) => {
+    const book = req.body;
+    if (!book || !book.id) {
+      return res.status(400).json({ error: 'Invalid book payload' });
+    }
+    const current = getStoredBooks();
+    const idx = current.findIndex(b => b.id === book.id);
+    if (idx !== -1) {
+      current[idx] = { ...current[idx], ...book };
+    } else {
+      current.unshift(book);
+    }
+    saveStoredBooks(current);
+
+    // If it was previously in deletedIds, remove it from deletedIds
+    const deletedIds = getDeletedBookIds();
+    if (deletedIds.includes(book.id)) {
+      saveDeletedBookIds(deletedIds.filter(id => id !== book.id));
+    }
+
+    res.json({ success: true, book });
+  });
+
+  app.delete('/api/books/:id', (req, res) => {
+    const { id } = req.params;
+    const current = getStoredBooks();
+    const filtered = current.filter(b => b.id !== id);
+    saveStoredBooks(filtered);
+
+    const deletedIds = getDeletedBookIds();
+    if (!deletedIds.includes(id)) {
+      deletedIds.push(id);
+      saveDeletedBookIds(deletedIds);
+    }
+
+    res.json({ success: true, deletedId: id });
+  });
+
   app.get('/api/youtube/playlist', async (req, res) => {
     try {
       const playlistId = req.query.id as string;

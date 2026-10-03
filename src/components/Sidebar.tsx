@@ -9,6 +9,7 @@ export function Sidebar() {
   const links = [
     { to: '/', icon: Home, label: t('home') },
     { to: '/masterclasses', icon: BookOpen, label: t('masterclasses') || 'Masterclasses' },
+    { to: '/books', icon: BookOpen, label: t('books_nav', 'Books') },
     { to: '/dashboard', icon: LayoutDashboard, label: t('dashboard') },
     { to: '/certificates', icon: Award, label: t('certificates') },
   ];

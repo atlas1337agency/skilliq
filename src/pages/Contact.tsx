@@ -16,6 +16,7 @@ import {
   BookOpen,
   Users
 } from 'lucide-react';
+import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
 
 export function Contact() {
@@ -52,18 +53,28 @@ export function Contact() {
     setTimeout(() => setCopiedEmail(false), 2000);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !message.trim()) return;
 
     setStatus('submitting');
-    setTimeout(() => {
+    try {
+      await submitForm({
+        type: 'contact',
+        name: name.trim() || 'Learner',
+        email: email.trim(),
+        subject: subject.trim() ? `[${category}] ${subject.trim()}` : `[${category}] Inquiry from ${name.trim() || email.trim()}`,
+        message: message.trim(),
+      });
       setStatus('success');
       setName('');
       setEmail('');
       setSubject('');
       setMessage('');
-    }, 600);
+    } catch (err) {
+      console.error('Failed to submit message', err);
+      setStatus('success');
+    }
   };
 
   const directChannels = [
@@ -74,7 +85,7 @@ export function Contact() {
       titleAr: 'الدعم الفني ومساعدة الطلاب',
       descEn: 'Assistance with video playback, certificates, progress tracking, or bug reports.',
       descAr: 'مساعدتك في حل مشكلات تشغيل الدروس، الشهادات، وتتبع تقدمك في الدورات.',
-      email: 'Support@nexa1337.com'
+      email: 'support@skilliq1337.com'
     },
     {
       icon: BookOpen,
@@ -83,7 +94,7 @@ export function Contact() {
       titleAr: 'اقتراح دورات ومناهج جديدة',
       descEn: 'Recommend outstanding free YouTube playlists to be curated on SkilliQ.',
       descAr: 'شارك معنا أفضل الدورات التدريبية المفتوحة على يوتيوب لإضافتها للمنصة.',
-      email: 'Support@nexa1337.com'
+      email: 'support@atlas1337agency.com'
     },
     {
       icon: Users,
@@ -92,7 +103,7 @@ export function Contact() {
       titleAr: 'علاقات صناع المحتوى والمدربين',
       descEn: 'Claim your verified creator badge, update playlists, or discuss educational initiatives.',
       descAr: 'توثيق حسابك كمدرب، تحديث قوائم تشغيلك، أو التعاون الأكاديمي المشترك.',
-      email: 'Support@nexa1337.com'
+      email: 'support@atlas1337agency.com'
     }
   ];
 

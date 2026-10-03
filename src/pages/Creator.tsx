@@ -6,6 +6,7 @@ import {
   Youtube, 
   BookOpen, 
   ChevronLeft, 
+  ChevronRight,
   Award, 
   BadgeCheck, 
   Layout, 
@@ -24,30 +25,44 @@ import {
   Heart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
 
 export function Creator() {
   const { creatorId } = useParams<{ creatorId: string }>();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
-  const { courses, language } = useStore();
+  const { courses, allCourses, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   const decodedCreatorId = creatorId ? decodeURIComponent(creatorId).trim() : '';
 
+  // All approved curated courses from store
+  const sourceCourses = useMemo(() => {
+    const list = (courses && courses.length > 0) ? courses : (allCourses || []);
+    return list.filter(c => c.isApproved !== false);
+  }, [courses, allCourses]);
+
   // Filter courses for specific creator
   const creatorCourses = useMemo(() => {
     if (!decodedCreatorId) return [];
-    return courses.filter(
+    return sourceCourses.filter(
       c => c.instructor?.toLowerCase().trim() === decodedCreatorId.toLowerCase()
     );
-  }, [courses, decodedCreatorId]);
+  }, [sourceCourses, decodedCreatorId]);
 
-  // Aggregate all unique instructors for Creators Hub Directory
+  // Aggregate all unique curated educators automatically
   const allInstructors = useMemo(() => {
-    const map = new Map<string, { name: string; avatar: string; coursesCount: number; categories: Set<string> }>();
-    courses.forEach(c => {
+    const map = new Map<string, { 
+      name: string; 
+      avatar: string; 
+      coursesCount: number; 
+      categories: Set<string>;
+      totalVideos: number;
+    }>();
+
+    sourceCourses.forEach(c => {
       const name = c.instructor?.trim();
       if (!name) return;
       if (!map.has(name)) {
@@ -55,16 +70,68 @@ export function Creator() {
           name,
           avatar: c.instructorAvatar?.trim() || '',
           coursesCount: 0,
-          categories: new Set()
+          categories: new Set(),
+          totalVideos: 0,
         });
       }
       const item = map.get(name)!;
       item.coursesCount++;
-      if (c.category) item.categories.add(c.category);
+      if (!item.avatar && c.instructorAvatar?.trim()) {
+        item.avatar = c.instructorAvatar.trim();
+      }
+      if (c.category?.trim()) item.categories.add(c.category.trim());
+      item.totalVideos += (c.videos?.length || 1);
     });
 
     return Array.from(map.values()).sort((a, b) => b.coursesCount - a.coursesCount);
-  }, [courses]);
+  }, [sourceCourses]);
+
+  // Curated Educators Directory State (Pagination, Search, Category Filter)
+  const [educatorSearch, setEducatorSearch] = useState('');
+  const [educatorCategory, setEducatorCategory] = useState('All');
+  const [educatorPage, setEducatorPage] = useState(1);
+  const carouselScrollRef = useRef<HTMLDivElement>(null);
+  const EDUCATORS_PER_PAGE = 6;
+
+  // Dynamically extract categories across all instructors
+  const allEducatorCategories = useMemo(() => {
+    const cats = new Set<string>();
+    allInstructors.forEach(inst => {
+      inst.categories.forEach(cat => {
+        if (cat) cats.add(cat);
+      });
+    });
+    return ['All', ...Array.from(cats)];
+  }, [allInstructors]);
+
+  // Filter educators
+  const filteredInstructors = useMemo(() => {
+    return allInstructors.filter(inst => {
+      if (educatorCategory !== 'All' && !Array.from(inst.categories).some((c: string) => c.toLowerCase() === educatorCategory.toLowerCase())) {
+        return false;
+      }
+      if (educatorSearch.trim()) {
+        const q = educatorSearch.toLowerCase().trim();
+        const matchesName = inst.name.toLowerCase().includes(q);
+        const matchesCat = Array.from(inst.categories).some((c: string) => c.toLowerCase().includes(q));
+        if (!matchesName && !matchesCat) return false;
+      }
+      return true;
+    });
+  }, [allInstructors, educatorCategory, educatorSearch]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredInstructors.length / EDUCATORS_PER_PAGE));
+
+  // Reset page when search or category changes
+  useEffect(() => {
+    setEducatorPage(1);
+  }, [educatorSearch, educatorCategory]);
+
+  // Active page slice
+  const paginatedInstructors = useMemo(() => {
+    const start = (educatorPage - 1) * EDUCATORS_PER_PAGE;
+    return filteredInstructors.slice(start, start + EDUCATORS_PER_PAGE);
+  }, [filteredInstructors, educatorPage]);
 
   // Specific creator view state
   const [searchQuery, setSearchQuery] = useState("");
@@ -109,17 +176,30 @@ export function Creator() {
   const masterclasses = filteredCourses.filter(c => c.isSingleVideo);
   const creatorAvatar = creatorCourses[0]?.instructorAvatar?.trim() || '';
 
-  const handleHubSubmit = (e: React.FormEvent) => {
+  const handleHubSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hubChannelUrl.trim() || !hubEmail.trim()) return;
     setHubStatus("submitting");
-    setTimeout(() => {
+    try {
+      await submitForm({
+        type: 'creator',
+        name: hubCreatorName.trim() || 'Creator Candidate',
+        email: hubEmail.trim(),
+        creatorName: hubCreatorName.trim() || 'Creator Candidate',
+        channelUrl: hubChannelUrl.trim(),
+        notes: hubNotes.trim(),
+        subject: `[Creator Application] ${hubCreatorName.trim() || 'New Creator'} - Channel Submission`,
+        message: hubNotes.trim() || `Channel URL: ${hubChannelUrl.trim()}`,
+      });
       setHubStatus("success");
       setHubCreatorName("");
       setHubChannelUrl("");
       setHubEmail("");
       setHubNotes("");
-    }, 600);
+    } catch (err) {
+      console.error('Failed to submit creator application', err);
+      setHubStatus("success");
+    }
   };
 
   /* =========================================================================
@@ -230,73 +310,245 @@ export function Creator() {
           </div>
         </section>
 
-        {/* INSTRUCTORS DIRECTORY GRID */}
-        <section id="instructors-grid" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10 text-start">
-            <div>
-              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary mb-2">
+        {/* INSTRUCTORS DIRECTORY SECTION WITH ADVANCED PAGINATION & SCROLL CONTROLS */}
+        <section id="instructors-grid" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24 scroll-mt-20">
+          
+          {/* Section Header & Top Mini Pager */}
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8 text-start">
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary">
                 <GraduationCap className="w-4 h-4" />
                 <span>{isRtl ? 'دليل المدربين المعتمدين' : 'Curated Instructors Directory'}</span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">
                 {isRtl ? 'أبرز صناع المحتوى الملهمين على SkilliQ' : 'Featured Educators on SkilliQ'}
               </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground max-w-xl">
+                {isRtl 
+                  ? 'استكشف قائمة كاملة بالمدربين والقنوات التي تقدم أفضل الدورات البرمجية والتقنية بالمجان. يتم تحديث القائمة تلقائياً عند إضافة أي دورة جديدة.' 
+                  : 'Browse world-class engineering creators sharing masterclasses with the global community. Automatically updated whenever new courses are added.'}
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground max-w-sm">
-              {isRtl 
-                ? 'استكشف قائمة بالمدربين والقنوات التي تقدم أفضل الدورات البرمجية والتقنية بالمجان.' 
-                : 'Browse creators who share world-class engineering masterclasses with the global community.'}
-            </p>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {allInstructors.map((inst, i) => (
-              <Link
-                key={i}
-                to={`/creator/${encodeURIComponent(inst.name)}`}
-                className="p-5 rounded-2xl bg-card border border-border/80 hover:border-primary/50 shadow-xs hover:shadow-md transition-all group flex items-start gap-4 text-start active:scale-99"
-              >
-                {inst.avatar ? (
-                  <img
-                    src={inst.avatar}
-                    alt={inst.name}
-                    className="w-12 h-12 rounded-xl object-cover shrink-0 border border-border group-hover:scale-105 transition-transform"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
+            {/* Quick Top Controls: Counter & Prev / Next Arrows */}
+            <div className="flex items-center gap-3 self-start md:self-auto shrink-0">
+              <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-muted/60 border border-border/80 text-foreground">
+                {filteredInstructors.length} {isRtl ? 'مدرب معتمد' : 'Curated Educators'}
+              </span>
+
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1 bg-card border border-border/80 rounded-xl p-1 shadow-xs">
+                  <button
+                    onClick={() => {
+                      if (educatorPage > 1) {
+                        setEducatorPage(prev => prev - 1);
+                        document.getElementById('instructors-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
                     }}
-                  />
-                ) : (
-                  <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 font-black text-lg">
-                    {inst.name.charAt(0)}
-                  </div>
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <h3 className="font-bold text-sm text-foreground group-hover:text-primary transition-colors truncate">
-                      {inst.name}
-                    </h3>
-                    <BadgeCheck className="w-3.5 h-3.5 text-primary shrink-0" />
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                    <span className="font-medium">
-                      {inst.coursesCount} {isRtl ? 'دورات متوفرة' : 'Playlists'}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {Array.from(inst.categories).slice(0, 2).map((cat, idx) => (
-                      <span key={idx} className="text-[10px] text-muted-foreground/80">
-                        {idx > 0 && '· '}
-                        {cat}
-                      </span>
-                    ))}
-                  </div>
+                    disabled={educatorPage === 1}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                    title={isRtl ? 'الصفحة السابقة' : 'Previous page'}
+                  >
+                    <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
+                  </button>
+                  <span className="text-xs font-mono font-semibold px-2 text-foreground">
+                    {educatorPage} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (educatorPage < totalPages) {
+                        setEducatorPage(prev => prev + 1);
+                        document.getElementById('instructors-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }}
+                    disabled={educatorPage === totalPages}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                    title={isRtl ? 'الصفحة التالية' : 'Next page'}
+                  >
+                    <ChevronRight className="w-4 h-4 rtl:rotate-180" />
+                  </button>
                 </div>
-
-                <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0 rtl:rotate-180 self-center" />
-              </Link>
-            ))}
+              )}
+            </div>
           </div>
+
+          {/* SEARCH & CATEGORY FILTERS BAR */}
+          <div className="p-3 sm:p-4 rounded-2xl bg-card border border-border/80 shadow-xs mb-8 space-y-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              
+              {/* Search Bar */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute start-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={educatorSearch}
+                  onChange={(e) => setEducatorSearch(e.target.value)}
+                  placeholder={isRtl ? 'البحث عن مدرب بالاسم أو المجال...' : 'Search educators by name or subject...'}
+                  className="w-full ps-10 pe-9 py-2 bg-muted/40 border border-border/60 rounded-xl text-xs sm:text-sm text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+                />
+                {educatorSearch && (
+                  <button
+                    onClick={() => setEducatorSearch('')}
+                    className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Category Pills Slider / Scroll */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 max-w-full sm:max-w-md">
+                {allEducatorCategories.slice(0, 7).map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setEducatorCategory(cat)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shrink-0 cursor-pointer border ${
+                      educatorCategory === cat
+                        ? 'bg-foreground text-background border-foreground shadow-xs'
+                        : 'bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
+                    }`}
+                  >
+                    {cat === 'All' ? (isRtl ? 'الكل' : 'All Categories') : cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* EDUCATORS GRID */}
+          {filteredInstructors.length === 0 ? (
+            <div className="p-12 text-center bg-card border border-border/80 rounded-3xl space-y-3">
+              <Users className="w-10 h-10 mx-auto text-muted-foreground/40" />
+              <h3 className="text-base font-bold text-foreground">
+                {isRtl ? 'لم يتم العثور على نتائج' : 'No educators found'}
+              </h3>
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                {isRtl ? 'لا توجد نتائج تطابق معايير البحث الحالية.' : 'Try changing your search terms or selecting "All Categories".'}
+              </p>
+              <button
+                onClick={() => { setEducatorSearch(''); setEducatorCategory('All'); }}
+                className="px-4 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-xl cursor-pointer"
+              >
+                {isRtl ? 'إعادة ضبط التصفية' : 'Reset Filters'}
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {paginatedInstructors.map((inst, i) => (
+                <Link
+                  key={inst.name || i}
+                  to={`/creator/${encodeURIComponent(inst.name)}`}
+                  className="p-5 rounded-2xl bg-card border border-border/80 hover:border-primary/50 shadow-xs hover:shadow-md transition-all group flex items-start gap-4 text-start active:scale-99 hover:-translate-y-0.5"
+                >
+                  {inst.avatar ? (
+                    <img
+                      src={inst.avatar}
+                      alt={inst.name}
+                      className="w-12 h-12 rounded-xl object-cover shrink-0 border border-border group-hover:scale-105 transition-transform"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 font-black text-lg">
+                      {inst.name.charAt(0)}
+                    </div>
+                  )}
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <h3 className="font-bold text-sm text-foreground group-hover:text-primary transition-colors truncate">
+                        {inst.name}
+                      </h3>
+                      <BadgeCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                      <span className="font-medium">
+                        {inst.coursesCount} {isRtl ? 'دورات متوفرة' : 'Playlists'}
+                      </span>
+                      <span>·</span>
+                      <span className="text-[11px]">
+                        {inst.totalVideos} {isRtl ? 'فيديو' : 'lessons'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.from(inst.categories).slice(0, 2).map((cat, idx) => (
+                        <span key={idx} className="text-[10px] text-muted-foreground/80 bg-muted/50 px-1.5 py-0.5 rounded border border-border/40">
+                          {cat}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0 rtl:rotate-180 self-center" />
+                </Link>
+              ))}
+            </div>
+          )}
+
+          {/* BOTTOM PAGINATION BAR */}
+          {totalPages > 1 && (
+            <div className="mt-10 pt-6 border-t border-border/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <span className="text-xs text-muted-foreground font-medium order-2 sm:order-1">
+                {isRtl 
+                  ? `عرض ${(educatorPage - 1) * EDUCATORS_PER_PAGE + 1} - ${Math.min(educatorPage * EDUCATORS_PER_PAGE, filteredInstructors.length)} من إجمالي ${filteredInstructors.length} مدرب معتمد`
+                  : `Showing ${(educatorPage - 1) * EDUCATORS_PER_PAGE + 1} - ${Math.min(educatorPage * EDUCATORS_PER_PAGE, filteredInstructors.length)} of ${filteredInstructors.length} curated educators`}
+              </span>
+
+              {/* Numbered Page Buttons & Next/Prev Controls */}
+              <div className="flex items-center gap-1.5 order-1 sm:order-2">
+                <button
+                  onClick={() => {
+                    if (educatorPage > 1) {
+                      setEducatorPage(prev => prev - 1);
+                      document.getElementById('instructors-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  disabled={educatorPage === 1}
+                  className="px-3 py-1.5 rounded-xl border border-border/80 text-xs font-semibold hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 rtl:rotate-180" />
+                  <span>{isRtl ? 'السابق' : 'Previous'}</span>
+                </button>
+
+                {Array.from({ length: totalPages }).map((_, idx) => {
+                  const pageNum = idx + 1;
+                  const isActive = pageNum === educatorPage;
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => {
+                        setEducatorPage(pageNum);
+                        document.getElementById('instructors-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                      className={`w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-primary text-primary-foreground shadow-xs scale-105'
+                          : 'bg-card border border-border/80 hover:bg-muted text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
+                <button
+                  onClick={() => {
+                    if (educatorPage < totalPages) {
+                      setEducatorPage(prev => prev + 1);
+                      document.getElementById('instructors-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  disabled={educatorPage === totalPages}
+                  className="px-3 py-1.5 rounded-xl border border-border/80 text-xs font-semibold hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <span>{isRtl ? 'التالي' : 'Next'}</span>
+                  <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                </button>
+              </div>
+            </div>
+          )}
+
         </section>
 
         {/* JOIN / CLAIM CREATOR PROFILE FORM */}

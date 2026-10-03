@@ -201,6 +201,7 @@ const resources = {
       "hero_subtitle": "Skilliq is a structured learning platform that organizes the best free YouTube courses into clear paths. Stay focused, save time, and actually finish what you start.",
       "hero_trust": "100% Free • Curated Content • No Distractions",
       "hero_kicker": "The Distraction-Free Learning Engine",
+      "hero_kicker_mobile": "Distraction-Free Learning",
       "hero_title_accent": "Build Real Skills.",
       "hero_quick_stats_playlists": "100+ Free Playlists",
       "hero_quick_stats_paths": "Curated Paths",
@@ -499,7 +500,14 @@ const resources = {
       "cert_hub_issued_by": "Issued by Skilliq Academy",
       "cert_hub_credential_id": "Credential ID",
       "cert_hub_all_status": "All Certificates",
-      "cert_hub_empty_prompt": "Complete any structured course or masterclass to unlock your first verifiable certificate."
+      "cert_hub_empty_prompt": "Complete any structured course or masterclass to unlock your first verifiable certificate.",
+      "books_nav": "Books",
+      "curated_book_summaries": "Video Book Explanations",
+      "books_section_title": "Master Tech & Mindset Books",
+      "books_section_desc": "Explore essential engineering, AI, cybersecurity, and deep-focus books explained by top YouTube creators.",
+      "explore_more_books": "Explore More Books",
+      "buy_book": "Buy This Book",
+      "watch_book_explanation": "Watch Book Explanation"
     }
   },
   ar: {
@@ -700,7 +708,8 @@ const resources = {
       "hero_title_2": "ابنِ مهارات حقيقية.",
       "hero_subtitle": "Skilliq هي منصة تعليمية مهيكلة تنظم أفضل دورات اليوتيوب المجانية في مسارات واضحة. حافظ على تركيزك، ووفر وقتك، وأكمل ما بدأته بالفعل.",
       "hero_trust": "مجاني 100% • محتوى منظم • بدون مشتتات",
-      "hero_kicker": "المحرك التعليمي المنظم • بدون مشتتات",
+      "hero_kicker": "منصة التعلم بدون تشتيت",
+      "hero_kicker_mobile": "تعلم بدون تشتيت",
       "hero_title_accent": "ابنِ مهارات برمجية حقيقية.",
       "hero_quick_stats_playlists": "+100 قائمة تشغيل مجانية",
       "hero_quick_stats_paths": "مسارات تعليمية مهيكلة",
@@ -999,7 +1008,14 @@ const resources = {
       "cert_hub_issued_by": "صادرة عن أكاديمية Skilliq",
       "cert_hub_credential_id": "رقم الاعتماد",
       "cert_hub_all_status": "جميع الشهادات",
-      "cert_hub_empty_prompt": "أكمل أي دورة تدريبية أو ماستر كلاس لتحصل على شهادتك الموثقة الأولى."
+      "cert_hub_empty_prompt": "أكمل أي دورة تدريبية أو ماستر كلاس لتحصل على شهادتك الموثقة الأولى.",
+      "books_nav": "الكتب",
+      "curated_book_summaries": "شروحات ومراجعات الكتب بالفيديو",
+      "books_section_title": "أفضل الكتب التقنية والفكرية المشروحة",
+      "books_section_desc": "استكشف أهم الكتب العالمية في البرمجة، الذكاء الاصطناعي، الأمن السيبراني، وتطوير الذات مشروحة بالفيديو من أفضل صناع المحتوى.",
+      "explore_more_books": "استكشف المزيد من الكتب والتصنيفات",
+      "buy_book": "شراء الكتاب",
+      "watch_book_explanation": "مشاهدة شرح الكتاب بالفيديو"
     }
   }
 };

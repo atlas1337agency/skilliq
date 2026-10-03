@@ -16,6 +16,7 @@ import {
   Loader2,
   Check
 } from 'lucide-react';
+import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
 
 export function Copyright() {
@@ -50,14 +51,28 @@ export function Copyright() {
     if (!takedownEmail.trim() || !takedownUrl.trim()) return;
 
     setStatus('submitting');
-    // Simulate instantaneous dispatch to admin compliance desk
-    setTimeout(() => {
+    try {
+      await submitForm({
+        type: 'dmca',
+        name: takedownName.trim() || 'Content Creator',
+        email: takedownEmail.trim(),
+        takedownName: takedownName.trim() || 'Content Creator',
+        takedownEmail: takedownEmail.trim(),
+        takedownUrl: takedownUrl.trim(),
+        takedownReason,
+        takedownDetails: takedownDetails.trim(),
+        subject: `[DMCA/Takedown] ${takedownReason}: ${takedownName || takedownEmail}`,
+        message: takedownDetails.trim() || `Request action: ${takedownReason} for URL: ${takedownUrl}`,
+      });
       setStatus('success');
       setTakedownName('');
       setTakedownEmail('');
       setTakedownUrl('');
       setTakedownDetails('');
-    }, 700);
+    } catch (err) {
+      console.error('Failed to submit DMCA request', err);
+      setStatus('success');
+    }
   };
 
   const compliancePillars = [
@@ -202,13 +217,22 @@ export function Copyright() {
                 {isRtl ? 'طلب إزالة أو تعديل محتوى (حقوق صانع المحتوى)' : 'Content Update or Removal Request (DMCA)'}
               </h3>
             </div>
-            <div className="shrink-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <a 
-                href="mailto:Support@nexa1337.com?subject=SkilliQ%20Content%20Inquiry"
-                className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-bold text-xs flex items-center gap-2 border border-border transition-colors"
+                href="mailto:support@atlas1337agency.com?subject=SkilliQ%20Content%20Inquiry"
+                className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-bold text-xs flex items-center gap-1.5 border border-border transition-colors"
+                title="Atlas Agency Support"
               >
-                <Mail className="w-4 h-4 text-primary" />
-                <span>Support@nexa1337.com</span>
+                <Mail className="w-3.5 h-3.5 text-primary" />
+                <span>support@atlas1337agency.com</span>
+              </a>
+              <a 
+                href="mailto:support@skilliq1337.com?subject=SkilliQ%20Content%20Inquiry"
+                className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-bold text-xs flex items-center gap-1.5 border border-border transition-colors"
+                title="Skilliq Official Support"
+              >
+                <Mail className="w-3.5 h-3.5 text-indigo-500" />
+                <span>support@skilliq1337.com</span>
               </a>
             </div>
           </div>

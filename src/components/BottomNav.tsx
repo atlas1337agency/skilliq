@@ -17,7 +17,7 @@ export function BottomNav() {
   ];
 
   return (
-    <div className="md:hidden fixed bottom-6 start-4 end-4 z-50 flex justify-center pb-safe pointer-events-none">
+    <div className="md:hidden fixed bottom-6 start-4 end-4 z-30 flex justify-center pb-safe pointer-events-none">
       <nav className="flex h-14 w-full max-w-sm items-center justify-between rounded-full border border-border/50 bg-background/70 backdrop-blur-xl px-2 sm:px-4 shadow-2xl pointer-events-auto shadow-black/10 dark:shadow-black/40">
         {links.map((link, index) => {
           if (link.isCentral) {

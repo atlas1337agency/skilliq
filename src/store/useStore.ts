@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { courses as defaultCourses, learningPaths as defaultPaths, categories as defaultCategories, defaultBanners, Course, LearningPath, Category, AppNotification, AdBannerData } from '../data/courses';
+import { courses as defaultCourses, learningPaths as defaultPaths, categories as defaultCategories, defaultBanners, defaultBooks, Course, LearningPath, Category, AppNotification, AdBannerData, Book } from '../data/courses';
 import { fetchFirestoreContent } from '../lib/firestoreContent';
 import { PublicProfile, awardXPAndBadges, initializeOrUpdateProfile } from '../lib/gamification';
 
@@ -24,11 +24,14 @@ interface StoreState {
   userName: string;
   courses: Course[];
   allCourses: Course[];
+  books: Book[];
+  allBooks: Book[];
   learningPaths: LearningPath[];
   categories: Category[];
   notifications: AppNotification[];
   banners: AdBannerData[];
   isContentLoading: boolean;
+  hasLoadedFromDb: boolean;
   isAuthModalOpen: boolean;
   setTheme: (theme: 'light' | 'dark') => void;
   setLanguage: (lang: 'en' | 'ar') => void;
@@ -53,11 +56,14 @@ export const useStore = create<StoreState>()(
       userName: 'Student',
       courses: defaultCourses,
       allCourses: defaultCourses,
+      books: defaultBooks,
+      allBooks: defaultBooks,
       learningPaths: defaultPaths,
       categories: defaultCategories,
       notifications: [],
       banners: [],
       isContentLoading: true,
+      hasLoadedFromDb: false,
       isAuthModalOpen: false,
       setTheme: (theme) => set({ theme }),
       setLanguage: (language) => set({ language }),
@@ -78,18 +84,31 @@ export const useStore = create<StoreState>()(
       
       loadContent: async (retryCount = 0) => {
         try {
-          const { courses, learningPaths, categories, notifications, banners } = await fetchFirestoreContent();
+          const { courses, learningPaths, categories, notifications, banners, books } = await fetchFirestoreContent();
+          let deletedBookIds: string[] = [];
+          try {
+            const rawDeleted = localStorage.getItem('deleted_book_ids');
+            if (rawDeleted) deletedBookIds = JSON.parse(rawDeleted);
+          } catch (e) {}
+
+          const finalBooks = Array.isArray(books)
+            ? books.filter(b => !deletedBookIds.includes(b.id))
+            : defaultBooks.filter(b => !deletedBookIds.includes(b.id));
+          const approvedBooks = finalBooks.filter(b => b.isApproved !== false);
 
           if (courses.length > 0 || learningPaths.length > 0) {
             const approvedCourses = courses.filter(c => c.isApproved !== false);
             set({ 
               allCourses: courses, 
               courses: approvedCourses, 
+              allBooks: finalBooks,
+              books: approvedBooks,
               learningPaths, 
               categories, 
               notifications: notifications || [], 
               banners: banners || [], 
-              isContentLoading: false 
+              isContentLoading: false,
+              hasLoadedFromDb: true
             });
           } else {
             // Retain defaultCourses if DB returns empty
@@ -97,11 +116,14 @@ export const useStore = create<StoreState>()(
             set({ 
               courses: currentCourses, 
               allCourses: currentCourses, 
+              allBooks: finalBooks,
+              books: approvedBooks,
               learningPaths: defaultPaths, 
               categories: defaultCategories, 
               notifications: notifications || [], 
               banners: banners || [], 
-              isContentLoading: false 
+              isContentLoading: false,
+              hasLoadedFromDb: true
             });
           }
         } catch (error: any) {
@@ -283,7 +305,18 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: 'nexa-store-storage',
-      partialize: (state) => ({ language: state.language, theme: state.theme }),
+      partialize: (state) => ({ 
+        language: state.language, 
+        theme: state.theme,
+        courses: state.courses,
+        allCourses: state.allCourses,
+        books: state.books,
+        allBooks: state.allBooks,
+        learningPaths: state.learningPaths,
+        categories: state.categories,
+        banners: state.banners,
+        hasLoadedFromDb: state.hasLoadedFromDb
+      }),
     }
   )
 );
