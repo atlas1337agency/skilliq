@@ -1,6 +1,6 @@
 {
   "name": "Skilliq",
-  "description": "Learning platform",
+  "description": "Discover Skilliq: A distraction-free learning platform with curated YouTube courses, structured career paths, and free masterclasses in tech, AI, and cybersecurity.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

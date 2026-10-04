@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router-dom';
+import { SEO } from '../components/SEO';
 import { PlayCircle, BookOpen, Code, Terminal, Layout, Database, Shield, ArrowRight, Zap, Award, CheckCircle2, ChevronRight, Video, Users, Github, Youtube, Cloud, Search, BarChart3, Star, Layers, Sparkles, Compass } from 'lucide-react';
 import { motion, useScroll, useTransform, useMotionValue, useSpring, useMotionTemplate } from 'motion/react';
 import { useStore } from '../store/useStore';
@@ -206,10 +206,28 @@ export function Home() {
 
   return (
     <div className="w-full">
-      <Helmet>
-        <title>Skilliq | Free Structured Learning Platform & Masterclasses</title>
-        <meta name="description" content="Skilliq offers a premium, distraction-free learning environment. Access curated courses, masterclasses, and guided paths in tech, design, and cybersecurity entirely for free." />
-      </Helmet>
+      <SEO
+        title={isRtl ? 'Skilliq – منصة التعلم المنظم والدورات المجانية' : 'Skilliq – Free Structured Learning Platform & Masterclasses'}
+        description={
+          isRtl
+            ? 'اكتشف Skilliq: بيئة تعليمية احترافية خالية من المشتتات تجمع أفضل دورات يوتيوب في مسارات تعلم منظمة وشهادات معتمدة مجاناً.'
+            : 'Discover Skilliq: A distraction-free learning platform with curated YouTube courses, structured career paths, and free masterclasses in tech, AI, and cybersecurity.'
+        }
+        canonicalPath="/"
+        lang={isRtl ? 'ar' : 'en'}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'ItemList',
+          name: 'Featured Learning Paths & Free Tech Courses on Skilliq',
+          itemListElement: featuredPaths.map((p, idx) => ({
+            '@type': 'ListItem',
+            position: idx + 1,
+            name: p.title,
+            description: p.description,
+            url: `${typeof window !== 'undefined' ? window.location.origin : 'https://skilliq.vercel.app'}/path/${p.id}`
+          }))
+        }}
+      />
       <HeroSection />
       <PartnersSection />
 

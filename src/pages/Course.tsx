@@ -5,6 +5,7 @@ import YouTube, { YouTubeEvent } from 'react-youtube';
 import { useStore } from '../store/useStore';
 import { CheckCircle, Lock, PlayCircle, PauseCircle, ArrowLeft, Maximize, Minimize, Youtube, BookOpen, PenTool, Trash2, BadgeCheck, ChevronRight, AlertTriangle, Check, X, Send, LogIn, Loader2 } from 'lucide-react';
 import { ScrollingText } from '../components/ScrollingText';
+import { SEO } from '../components/SEO';
 import { cn, filterByLanguage } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, setDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
@@ -362,13 +363,148 @@ export function Course() {
 
   if (!course) return null;
 
+  const courseSeoNode = (
+    <SEO
+      title={`${course.title} by ${course.instructor} – Free ${course.isSingleVideo ? 'Masterclass' : 'Course'} | Skilliq`}
+      description={
+        course.description ||
+        `Watch ${course.title} by ${course.instructor} distraction-free on Skilliq with structured lessons, interactive notes, and a verifiable certificate.`
+      }
+      image={course.thumbnail}
+      canonicalPath={`/course/${course.id}`}
+      lang={language === 'ar' ? 'ar' : 'en'}
+      keywords={[
+        course.title,
+        course.instructor,
+        course.category,
+        course.subCategory || '',
+        'free course',
+        'Skilliq certificate'
+      ].filter(Boolean)}
+      breadcrumbs={[
+        { name: 'Home', url: '/' },
+        {
+          name: course.isSingleVideo ? 'Masterclasses' : 'Courses',
+          url: course.isSingleVideo ? '/masterclasses' : '/courses'
+        },
+        { name: course.title, url: `/course/${course.id}` }
+      ]}
+      schema={[
+        {
+          '@context': 'https://schema.org',
+          '@type': 'Course',
+          name: course.title,
+          description:
+            course.description ||
+            `Learn ${course.title} with ${course.instructor} on Skilliq.`,
+          provider: {
+            '@type': 'EducationalOrganization',
+            name: 'Skilliq',
+            sameAs: typeof window !== 'undefined' ? window.location.origin : 'https://skilliq.vercel.app'
+          },
+          instructor: {
+            '@type': 'Person',
+            name: course.instructor
+          },
+          image: course.thumbnail,
+          isAccessibleForFree: true,
+          inLanguage: course.language === 'Arabic' ? 'ar' : 'en',
+          offers: {
+            '@type': 'Offer',
+            category: 'Free',
+            price: '0',
+            priceCurrency: 'USD',
+            availability: 'https://schema.org/InStock'
+          },
+          hasCourseInstance: {
+            '@type': 'CourseInstance',
+            courseMode: 'online',
+            instructor: {
+              '@type': 'Person',
+              name: course.instructor
+            }
+          }
+        },
+        ...(currentVideo && cleanVideoId
+          ? [
+              {
+                '@context': 'https://schema.org',
+                '@type': 'VideoObject',
+                name: `${course.title} - ${currentVideo.title}`,
+                description:
+                  currentVideo.description ||
+                  course.description ||
+                  `Video lesson ${currentVideo.title} from ${course.title} by ${course.instructor}.`,
+                thumbnailUrl: [
+                  course.thumbnail || `https://img.youtube.com/vi/${cleanVideoId}/maxresdefault.jpg`
+                ],
+                uploadDate: course.createdAt
+                  ? new Date(course.createdAt).toISOString()
+                  : '2025-01-01T00:00:00.000Z',
+                embedUrl: `https://www.youtube.com/embed/${cleanVideoId}`
+              }
+            ]
+          : [])
+      ]}
+    />
+  );
+
   if (!user) {
     return (
-      <div className="w-full h-screen flex items-center justify-center bg-background">
-        <div className="text-center max-w-md p-8 bg-card rounded-2xl border border-border shadow-sm">
-          <h2 className="text-2xl font-bold mb-4">Login Required</h2>
-          <p className="text-muted-foreground mb-6">You need to be logged in to start learning and track your progress.</p>
-          <Link to="/" className="text-primary hover:underline">Return to Home</Link>
+      <div className="w-full min-h-screen flex flex-col items-center justify-center bg-background px-4 py-12">
+        {courseSeoNode}
+        <div className="max-w-3xl w-full bg-card rounded-3xl border border-border shadow-sm overflow-hidden">
+          <div className="p-6 sm:p-8 border-b border-border/60">
+            <div className="text-xs font-bold uppercase tracking-wider text-primary mb-2">
+              {course.category} {course.subCategory ? `· ${course.subCategory}` : ''}
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground mb-2">
+              {course.title}
+            </h1>
+            <p className="text-xs sm:text-sm font-semibold text-muted-foreground mb-4">
+              Instructor: <span className="text-foreground">{course.instructor}</span> · {courseVideos.length} Lessons · 100% Free
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {course.description}
+            </p>
+          </div>
+
+          {courseVideos.length > 0 && (
+            <div className="p-6 sm:p-8 bg-muted/20 border-b border-border/60 max-h-60 overflow-y-auto">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
+                Course Syllabus & Video Lessons ({courseVideos.length})
+              </h2>
+              <ol className="space-y-2 text-xs sm:text-sm text-foreground/90 list-decimal list-inside">
+                {courseVideos.map((v) => (
+                  <li key={v.id} className="truncate">
+                    <span className="font-medium">{v.title}</span>
+                    {v.duration ? <span className="text-muted-foreground ms-2">({v.duration})</span> : null}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          <div className="p-6 sm:p-8 text-center">
+            <h2 className="text-xl font-bold mb-2">Login Required to Start Learning</h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              Sign in for free to watch in Cinema Focus Mode, save your timestamps, take notes, and earn your verifiable certificate.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Link
+                to="/courses"
+                className="px-5 py-2.5 rounded-xl border border-border text-sm font-semibold hover:bg-muted transition-colors"
+              >
+                Browse Catalog
+              </Link>
+              <Link
+                to="/"
+                className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors"
+              >
+                Return to Home & Sign In
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -462,6 +598,7 @@ export function Course() {
 
   return (
     <div ref={containerRef} className={cn("h-[100dvh] w-full bg-background overflow-hidden relative", isFocusMode ? "fixed inset-0 z-[100] flex flex-col" : "flex flex-col lg:grid lg:grid-cols-[1fr_340px]")}>
+      {courseSeoNode}
       {/* Main Content Area */}
       <div className={cn("flex flex-col flex-1 min-h-0 overflow-y-auto w-full", isFocusMode ? "bg-black" : "bg-background")}>
         {/* Top Bar (Hidden in Focus Mode) */}

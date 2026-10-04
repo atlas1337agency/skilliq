@@ -23,6 +23,7 @@ import { motion } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { cn, filterPathsByLanguage } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
+import { SEO } from '../components/SEO';
 
 const iconMap: Record<string, any> = {
   Code,
@@ -138,6 +139,36 @@ export function Paths() {
       dir={isRtl ? 'rtl' : 'ltr'} 
       className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12 max-w-7xl mx-auto transition-colors"
     >
+      <SEO
+        title={
+          isRtl
+            ? 'مسارات التعلم المهنية وخرائط الطريق البرمجية | Skilliq'
+            : 'Structured Career Learning Paths & Tech Roadmaps | Skilliq'
+        }
+        description={
+          isRtl
+            ? 'مسارات تعليمية متسلسلة خطوة بخطوة تأخذك من الصفر حتى الاحتراف في تطوير الويب، الأمن السيبراني، والذكاء الاصطناعي مجاناً.'
+            : 'Step-by-step sequential learning roadmaps in Frontend, Full-Stack, Cybersecurity, AI Automation, and 3D Design with verifiable certificates.'
+        }
+        canonicalPath="/paths"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Learning Paths', url: '/paths' }
+        ]}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'ItemList',
+          name: 'Skilliq Structured Career Learning Paths',
+          itemListElement: availablePaths.map((p, idx) => ({
+            '@type': 'ListItem',
+            position: idx + 1,
+            name: p.title,
+            description: p.description,
+            url: `${typeof window !== 'undefined' ? window.location.origin : 'https://skilliq.vercel.app'}/path/${p.id}`
+          }))
+        }}
+      />
       {/* HERO SECTION */}
       <div className="relative mb-10 sm:mb-12 overflow-hidden rounded-3xl p-6 sm:p-10 md:p-12 bg-gradient-to-br from-card via-card/90 to-primary/5 border border-border shadow-sm">
         

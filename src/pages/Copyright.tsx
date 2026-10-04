@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
+import { SEO } from '../components/SEO';
 
 export function Copyright() {
   const { t, i18n } = useTranslation();
@@ -108,6 +109,20 @@ export function Copyright() {
 
   return (
     <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full min-h-screen bg-background text-foreground pb-20">
+      <SEO
+        title={isRtl ? 'حقوق الملكية الفكرية وإخلاء المسؤولية | Skilliq' : 'Copyright Policy & DMCA Compliance | Skilliq'}
+        description={
+          isRtl
+            ? 'سياسة الملكية الفكرية وحماية حقوق صناع المحتوى والامتثال لشروط خدمة يوتيوب في منصة Skilliq.'
+            : "Skilliq's copyright policy, YouTube API terms compliance, fair use educational index, and creator removal protocol."
+        }
+        canonicalPath="/copyright"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Copyright & Legal', url: '/copyright' }
+        ]}
+      />
       
       {/* HEADER SECTION */}
       <section className="relative overflow-hidden pt-12 md:pt-20 pb-16 md:pb-20 border-b border-border/60 bg-gradient-to-b from-card/60 via-background to-background">

@@ -22,6 +22,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, filterByLanguage } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
+import { SEO } from '../components/SEO';
 import { 
   buildDeduplicatedCategories, 
   matchCourseCategory, 
@@ -181,6 +182,33 @@ export function Courses() {
       dir={isRtl ? 'rtl' : 'ltr'} 
       className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12 max-w-[1600px] mx-auto transition-colors"
     >
+      <SEO
+        title={
+          selectedCategory !== 'All'
+            ? `${selectedCategory} Free Courses & Playlists | Skilliq`
+            : isRtl
+            ? 'جميع الدورات وقوائم التشغيل التعليمية المجانية | Skilliq'
+            : 'Free Tech Courses & Curated Playlists Catalog | Skilliq'
+        }
+        description={
+          isRtl
+            ? 'تصفح مئات الدورات التدريبية المجانية وقوائم التشغيل المنظمة في البرمجة، الأمن السيبراني، الذكاء الاصطناعي، والتصميم بدون إعلانات.'
+            : 'Browse curated, ad-free sequential courses in Web Development, Cybersecurity, AI, Programming, and Design with verifiable certificates.'
+        }
+        canonicalPath="/courses"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Courses', url: '/courses' }
+        ]}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'CollectionPage',
+          name: 'Skilliq Free Online Courses Catalog',
+          description: 'Curated sequential playlists organized from beginner to advanced in software engineering, cybersecurity, AI, and design.',
+          numberOfItems: basePlaylists.length
+        }}
+      />
       {/* HERO BANNER */}
       <div className="relative mb-8 sm:mb-12 overflow-hidden rounded-3xl p-6 sm:p-10 md:p-12 bg-gradient-to-br from-card via-card/90 to-primary/5 border border-border shadow-sm">
         <div className="absolute top-0 end-0 -mt-10 -me-10 w-72 h-72 rounded-full bg-primary/10 blur-3xl pointer-events-none" />

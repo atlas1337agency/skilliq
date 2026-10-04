@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Helmet } from 'react-helmet-async';
 import { useSearchParams } from 'react-router-dom';
+import { SEO } from '../components/SEO';
 import { 
   BookOpen, 
   Search, 
@@ -175,17 +175,27 @@ export function Books() {
 
   return (
     <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full min-h-screen bg-background pb-20 text-start">
-      <Helmet>
-        <title>{isRtl ? 'مكتبة الكتب المشروحة بالفيديو | Skilliq' : 'Books Library & Video Summaries | Skilliq'}</title>
-        <meta
-          name="description"
-          content={
-            isRtl
-              ? 'استكشف أفضل الكتب التقنية والعلمية وتطوير الذات مشروحة بالفيديو من نخبة صناع المحتوى على يوتيوب.'
-              : 'Explore the best software engineering, AI, cybersecurity, and mindset books explained by top YouTube educators.'
-          }
-        />
-      </Helmet>
+      <SEO
+        title={isRtl ? 'مكتبة الكتب المشروحة بالفيديو | Skilliq' : 'Tech Books Library & Video Summaries | Skilliq'}
+        description={
+          isRtl
+            ? 'استكشف أفضل الكتب التقنية والعلمية وتطوير الذات مشروحة بالفيديو من نخبة صناع المحتوى على يوتيوب.'
+            : 'Explore the best software engineering, AI, cybersecurity, and mindset books explained by top YouTube educators.'
+        }
+        canonicalPath="/books"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Books Library', url: '/books' }
+        ]}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'CollectionPage',
+          name: 'Skilliq Curated Tech Books & Video Summaries',
+          description: 'Explore top software engineering, AI, cybersecurity, and productivity books explained via curated video summaries.',
+          numberOfItems: baseBooks.length
+        }}
+      />
 
       {/* Book Video Popup Modal */}
       <BookVideoModal

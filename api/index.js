@@ -2,11 +2,168 @@ import express from 'express';
 import cors from 'cors';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { OAuth2Client } from 'google-auth-library';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+const getBaseOrigin = (req) => {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, '');
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.headers['x-forwarded-host'] || req.get('host') || 'skilliq.vercel.app';
+  return `${proto}://${host}`;
+};
+
+app.get(['/robots.txt', '/api/robots.txt'], (req, res) => {
+  const origin = getBaseOrigin(req);
+  const robotsTxt = [
+    'User-agent: *',
+    'Allow: /',
+    'Allow: /courses',
+    'Allow: /masterclasses',
+    'Allow: /paths',
+    'Allow: /books',
+    'Allow: /creator',
+    'Allow: /course/',
+    'Allow: /path/',
+    'Disallow: /admin',
+    'Disallow: /api/',
+    '',
+    `Sitemap: ${origin}/sitemap.xml`,
+    ''
+  ].join('\n');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(robotsTxt);
+});
+
+app.get(['/sitemap.xml', '/api/sitemap.xml'], (req, res) => {
+  const origin = getBaseOrigin(req);
+  const today = new Date().toISOString().split('T')[0];
+
+  const staticRoutes = [
+    { path: '/', priority: '1.0', changefreq: 'daily' },
+    { path: '/courses', priority: '0.9', changefreq: 'daily' },
+    { path: '/masterclasses', priority: '0.9', changefreq: 'daily' },
+    { path: '/paths', priority: '0.9', changefreq: 'weekly' },
+    { path: '/books', priority: '0.8', changefreq: 'weekly' },
+    { path: '/creator', priority: '0.8', changefreq: 'weekly' },
+    { path: '/leaderboard', priority: '0.7', changefreq: 'daily' },
+    { path: '/verify', priority: '0.7', changefreq: 'monthly' },
+    { path: '/about', priority: '0.7', changefreq: 'monthly' },
+    { path: '/contact', priority: '0.6', changefreq: 'monthly' },
+    { path: '/copyright', priority: '0.5', changefreq: 'yearly' }
+  ];
+
+  const courseIds = new Set([
+    'html-crash-course',
+    'react-basics',
+    'css-grid',
+    'javascript-basics',
+    'network-basics',
+    'comptia-a-plus',
+    'python-for-security',
+    'ceh-prep',
+    'full-react-course-2024',
+    'cyber-security-full-course',
+    'ipkxu',
+    'l02pbl',
+    '312ar',
+    '4ptzav',
+    'm1pdcj',
+    'glpr5t'
+  ]);
+
+  const pathIds = new Set([
+    'frontend-master',
+    'cyber-security-expert',
+    'web-mobile-ar',
+    'ai-marketing-ar',
+    'design-3d-ar'
+  ]);
+
+  const creators = new Set();
+
+  try {
+    const backupPath = path.join(process.cwd(), 'public', 'nexa-full-backup.json');
+    if (fs.existsSync(backupPath)) {
+      const raw = fs.readFileSync(backupPath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.courses)) {
+        parsed.courses.forEach((c) => {
+          if (c?.id && c.isApproved !== false) courseIds.add(String(c.id));
+          if (c?.instructor && typeof c.instructor === 'string') {
+            creators.add(c.instructor.trim());
+          }
+        });
+      }
+      if (Array.isArray(parsed.learningPaths)) {
+        parsed.learningPaths.forEach((p) => {
+          if (p?.id) pathIds.add(String(p.id));
+        });
+      }
+    }
+  } catch (e) {}
+
+  const escapeXml = (str) =>
+    str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+
+  const urlsXml = [];
+
+  for (const r of staticRoutes) {
+    urlsXml.push(`  <url>
+    <loc>${escapeXml(`${origin}${r.path}`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${r.changefreq}</changefreq>
+    <priority>${r.priority}</priority>
+  </url>`);
+  }
+
+  for (const pid of pathIds) {
+    urlsXml.push(`  <url>
+    <loc>${escapeXml(`${origin}/path/${encodeURIComponent(pid)}`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>`);
+  }
+
+  for (const cid of courseIds) {
+    urlsXml.push(`  <url>
+    <loc>${escapeXml(`${origin}/course/${encodeURIComponent(cid)}`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>`);
+  }
+
+  for (const creatorName of creators) {
+    if (!creatorName) continue;
+    urlsXml.push(`  <url>
+    <loc>${escapeXml(`${origin}/creator/${encodeURIComponent(creatorName)}`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.70</priority>
+  </url>`);
+  }
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urlsXml.join('\n')}
+</urlset>`;
+
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(xml);
+});
 
 // OAuth Setup Helper
 const getOAuthClient = (req) => {

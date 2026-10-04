@@ -28,6 +28,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
+import { SEO } from '../components/SEO';
 
 export function Creator() {
   const { creatorId } = useParams<{ creatorId: string }>();
@@ -208,6 +209,24 @@ export function Creator() {
   if (!decodedCreatorId) {
     return (
       <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full min-h-screen bg-background text-foreground pb-20">
+        <SEO
+          title={
+            isRtl
+              ? 'دليل المدربين وبرنامج صناع المحتوى | Skilliq'
+              : 'Educators Directory & Creator Program | Skilliq'
+          }
+          description={
+            isRtl
+              ? 'تعرف على نخبة المدربين وصناع المحتوى التعليمي على يوتيوب المعتمدين في منصة Skilliq.'
+              : 'Discover world-class YouTube tech educators and instructors featured on Skilliq.'
+          }
+          canonicalPath="/creator"
+          lang={isRtl ? 'ar' : 'en'}
+          breadcrumbs={[
+            { name: 'Home', url: '/' },
+            { name: 'Creators', url: '/creator' }
+          ]}
+        />
         
         {/* HERO SECTION */}
         <section className="relative overflow-hidden pt-12 md:pt-20 pb-16 md:pb-24 border-b border-border/60 bg-gradient-to-b from-card/60 via-background to-background">
@@ -678,6 +697,29 @@ export function Creator() {
 
   return (
     <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full min-h-screen bg-background text-foreground pb-20">
+      <SEO
+        title={`${decodedCreatorId} – Free Courses & Masterclasses | Skilliq`}
+        description={`Learn from ${decodedCreatorId} on Skilliq. Watch ${creatorCourses.length} curated, ad-free courses and masterclasses with verifiable certificates.`}
+        image={creatorAvatar || undefined}
+        type="profile"
+        canonicalPath={`/creator/${encodeURIComponent(decodedCreatorId)}`}
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Creators', url: '/creator' },
+          { name: decodedCreatorId, url: `/creator/${encodeURIComponent(decodedCreatorId)}` }
+        ]}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'ProfilePage',
+          mainEntity: {
+            '@type': 'Person',
+            name: decodedCreatorId,
+            image: creatorAvatar || undefined,
+            jobTitle: 'Tech Educator & Instructor'
+          }
+        }}
+      />
       
       {/* CREATOR PROFILE HEADER */}
       <section className="relative overflow-hidden pt-10 md:pt-16 pb-12 md:pb-16 border-b border-border/60 bg-gradient-to-b from-card/60 via-background to-background">

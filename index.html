@@ -13,31 +13,96 @@
     <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap" rel="stylesheet" />
 
     <!-- Primary Meta Tags -->
-    <title>Skilliq | Free Structured Learning Platform & Masterclasses</title>
-    <meta name="title" content="Skilliq | Free Structured Learning Platform & Masterclasses" />
-    <meta name="description" content="Discover Skilliq: A premium, distraction-free learning platform featuring curated YouTube courses, structured learning paths, and expert masterclasses in cybersecurity, programming, AI, and design. 100% Free." />
-    <meta name="keywords" content="Skilliq, ATLAS 1337 Agency, free online courses, curated learning platform, youtube courses organized, cybersecurity roadmap, fullstack learning path, free masterclasses, learn programming free, web development course, ethical hacking tutorial, AI learning path" />
+    <title>Skilliq – Free Structured Learning Platform & Masterclasses</title>
+    <meta name="title" content="Skilliq – Free Structured Learning Platform & Masterclasses" />
+    <meta name="description" content="Discover Skilliq: A distraction-free learning platform with curated YouTube courses, structured career paths, and free masterclasses in tech, AI, and cybersecurity." />
+    <meta name="keywords" content="Skilliq, ATLAS 1337 Agency, free online courses, curated learning platform, youtube courses organized, cybersecurity roadmap, fullstack learning path, free masterclasses, learn programming free, web development course, ethical hacking tutorial, AI learning path, كورسات برمجة مجانية, مسارات تعلم, الأمن السيبراني" />
     <meta name="author" content="ATLAS 1337 Agency" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-    <meta name="language" content="English" />
-    <meta name="revisit-after" content="7 days" />
+    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="bingbot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="language" content="English, Arabic" />
+    <meta name="revisit-after" content="3 days" />
     <meta name="theme-color" content="#09090b" />
-    
+    <meta name="application-name" content="Skilliq" />
+    <meta name="apple-mobile-web-app-title" content="Skilliq" />
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />
+
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://nexa1337.github.io/" />
     <meta property="og:site_name" content="Skilliq" />
-    <meta property="og:title" content="Skilliq | Free Structured Learning Platform & Masterclasses" />
-    <meta property="og:description" content="Discover Skilliq: A premium, distraction-free learning platform featuring curated YouTube courses, structured learning paths, and expert masterclasses. 100% Free." />
-    <meta property="og:image" content="https://nexa1337.github.io/banner.jpg" />
-    
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://nexa1337.github.io/" />
-    <meta property="twitter:site" content="@Nexa1337" />
-    <meta property="twitter:title" content="Skilliq | Free Structured Learning Platform & Masterclasses" />
-    <meta property="twitter:description" content="Discover Skilliq: A premium, distraction-free learning platform featuring curated YouTube courses, structured learning paths, and expert masterclasses. 100% Free." />
-    <meta property="twitter:image" content="https://nexa1337.github.io/banner.jpg" />
+    <meta property="og:title" content="Skilliq – Free Structured Learning Platform & Masterclasses" />
+    <meta property="og:description" content="Discover Skilliq: A distraction-free learning platform with curated YouTube courses, structured career paths, and free masterclasses in tech, AI, and cybersecurity." />
+    <meta property="og:image" content="/images/logo_dark.png" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="ar_AR" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@Nexa1337" />
+    <meta name="twitter:title" content="Skilliq – Free Structured Learning Platform & Masterclasses" />
+    <meta name="twitter:description" content="Discover Skilliq: A distraction-free learning platform with curated YouTube courses, structured career paths, and free masterclasses in tech, AI, and cybersecurity." />
+    <meta name="twitter:image" content="/images/logo_dark.png" />
+
+    <!-- Global Schema.org Structured Data (JSON-LD) for Google Indexing & Rich Snippets -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "EducationalOrganization",
+            "@id": "https://skilliq.vercel.app/#organization",
+            "name": "Skilliq",
+            "alternateName": ["SkilliQ", "Skilliq Learning Platform", "منصة Skilliq التعليمية"],
+            "url": "https://skilliq.vercel.app",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://skilliq.vercel.app/images/favicon.png"
+            },
+            "description": "Discover Skilliq: A distraction-free learning platform with curated YouTube courses, structured career paths, and free masterclasses in tech, AI, and cybersecurity.",
+            "founder": {
+              "@type": "Organization",
+              "name": "ATLAS 1337 Agency"
+            },
+            "sameAs": [
+              "https://github.com/nexa1337",
+              "https://linktr.ee/nexa1337"
+            ]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://skilliq.vercel.app/#website",
+            "url": "https://skilliq.vercel.app",
+            "name": "Skilliq",
+            "description": "Free Structured Learning Platform, Curated Courses, Roadmaps & Masterclasses",
+            "publisher": {
+              "@id": "https://skilliq.vercel.app/#organization"
+            },
+            "inLanguage": ["en", "ar"],
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "https://skilliq.vercel.app/courses?search={search_term_string}"
+              },
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "WebApplication",
+            "name": "Skilliq",
+            "applicationCategory": "EducationalApplication",
+            "operatingSystem": "All",
+            "description": "Discover Skilliq: A distraction-free learning platform with curated YouTube courses, structured career paths, and free masterclasses in tech, AI, and cybersecurity.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            }
+          }
+        ]
+      }
+    </script>
     
     <script>
       (function() {

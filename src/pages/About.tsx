@@ -19,6 +19,7 @@ import {
   Play
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { SEO } from '../components/SEO';
 
 export function About() {
   const { t, i18n } = useTranslation();
@@ -139,6 +140,26 @@ export function About() {
 
   return (
     <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full min-h-screen bg-background text-foreground pb-20">
+      <SEO
+        title={isRtl ? 'عن منصة Skilliq – منصة التعليم المنهجي الحر' : 'About Skilliq – Distraction-Free Structured Learning Platform'}
+        description={
+          isRtl
+            ? 'تعرف على رؤية ورسالة Skilliq في تحويل أفضل دورات يوتيوب إلى مسارات تعليمية منظمة خالية من المشتتات والإعلانات.'
+            : "Discover Skilliq's mission: transforming the best free educational content into structured, distraction-free learning paths with verifiable certificates."
+        }
+        canonicalPath="/about"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'About Skilliq', url: '/about' }
+        ]}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'AboutPage',
+          name: 'About Skilliq Learning Platform',
+          description: 'Transforming free educational video content into structured, distraction-free learning paths with verifiable certificates.'
+        }}
+      />
       
       {/* HERO SECTION */}
       <section className="relative overflow-hidden pt-12 md:pt-20 pb-16 md:pb-24 border-b border-border/60 bg-gradient-to-b from-card/60 via-background to-background">

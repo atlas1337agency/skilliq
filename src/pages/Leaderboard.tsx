@@ -21,6 +21,7 @@ import { isSuperAdminEmail } from '../lib/admin';
 import { useStore } from '../store/useStore';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
+import { SEO } from '../components/SEO';
 
 // Official Admin profile pinned at Rank #1
 const OFFICIAL_ADMIN_PROFILE: PublicProfile = {
@@ -214,6 +215,20 @@ export function Leaderboard() {
       dir={isRtl ? 'rtl' : 'ltr'} 
       className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10 text-start"
     >
+      <SEO
+        title={isRtl ? 'لوحة الصدارة العالمية للمتعلمين | Skilliq' : 'Global Developer Leaderboard & Hall of Fame | Skilliq'}
+        description={
+          isRtl
+            ? 'نافس المطورين والطلاب حول العالم على منصة Skilliq، واجمع نقاط الخبرة والأوسمة الرسمية.'
+            : 'Compete with learners and developers worldwide on the Skilliq & ATLAS 1337 Hall of Fame. Earn XP, keep your streak alive, and unlock badges.'
+        }
+        canonicalPath="/leaderboard"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Leaderboard', url: '/leaderboard' }
+        ]}
+      />
       {/* 1. HERO HEADER */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-card via-card/90 to-amber-500/5 border border-border/80 p-6 sm:p-10 text-center shadow-sm">
         <div className="absolute top-0 end-0 -mt-12 -me-12 w-80 h-80 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />

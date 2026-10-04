@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
 import { filterByLanguage } from '../lib/utils';
 import { ScrollingText } from '../components/ScrollingText';
+import { SEO } from '../components/SEO';
 
 const iconMap: Record<string, any> = {
   Code,
@@ -44,6 +45,39 @@ export function PathDetails() {
 
   return (
     <div className="w-full px-4 md:px-8 py-8 max-w-7xl mx-auto">
+      <SEO
+        title={`${path.title} – Structured Learning Path | Skilliq`}
+        description={path.description}
+        canonicalPath={`/path/${path.id}`}
+        lang={language === 'ar' ? 'ar' : 'en'}
+        image={pathCourses[0]?.thumbnail}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Learning Paths', url: '/paths' },
+          { name: path.title, url: `/path/${path.id}` }
+        ]}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'ItemList',
+          name: path.title,
+          description: path.description,
+          numberOfItems: pathCourses.length,
+          itemListElement: pathCourses.map((c, idx) => ({
+            '@type': 'ListItem',
+            position: idx + 1,
+            item: {
+              '@type': 'Course',
+              name: c.title,
+              description: c.description,
+              provider: {
+                '@type': 'EducationalOrganization',
+                name: 'Skilliq'
+              },
+              url: `${typeof window !== 'undefined' ? window.location.origin : 'https://skilliq.vercel.app'}/course/${c.id}`
+            }
+          }))
+        }}
+      />
       <button onClick={handleBack} className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-8 transition-colors font-medium cursor-pointer">
         <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
         {t('back', 'Back')}

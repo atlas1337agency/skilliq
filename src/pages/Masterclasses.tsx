@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, filterByLanguage } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
+import { SEO } from '../components/SEO';
 import { 
   buildDeduplicatedCategories, 
   matchCourseCategory, 
@@ -188,6 +189,31 @@ export function Masterclasses() {
       dir={isRtl ? 'rtl' : 'ltr'} 
       className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12 max-w-[1600px] mx-auto transition-colors"
     >
+      <SEO
+        title={
+          isRtl
+            ? 'الماستركلاس والورش التدريبية المكثفة المجانية | Skilliq'
+            : 'Free Intensive Tech Masterclasses & Deep Dives | Skilliq'
+        }
+        description={
+          isRtl
+            ? 'محاضرات ماستركلاس مكثفة وشاملة في جلسة واحدة لإتقان البرمجة، الذكاء الاصطناعي، والأمن السيبراني مجاناً.'
+            : 'Single-session deep dives and intensive masterclasses designed for rapid skill acquisition in AI, programming, cybersecurity, and design.'
+        }
+        canonicalPath="/masterclasses"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Masterclasses', url: '/masterclasses' }
+        ]}
+        schema={{
+          '@context': 'https://schema.org',
+          '@type': 'CollectionPage',
+          name: 'Skilliq Free Intensive Masterclasses',
+          description: 'Single-session deep dives and intensive masterclasses designed for rapid, focused skill acquisition.',
+          numberOfItems: baseMasterclasses.length
+        }}
+      />
       {/* HERO BANNER */}
       <div className="relative mb-8 sm:mb-12 overflow-hidden rounded-3xl p-6 sm:p-10 md:p-12 bg-gradient-to-br from-card via-card/90 to-purple-500/5 border border-border shadow-sm">
         <div className="absolute top-0 end-0 -mt-10 -me-10 w-72 h-72 rounded-full bg-purple-500/10 blur-3xl pointer-events-none" />

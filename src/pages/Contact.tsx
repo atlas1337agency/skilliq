@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
+import { SEO } from '../components/SEO';
 
 export function Contact() {
   const { t, i18n } = useTranslation();
@@ -130,6 +131,40 @@ export function Contact() {
 
   return (
     <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full min-h-screen bg-background text-foreground pb-20">
+      <SEO
+        title={isRtl ? 'تواصل معنا والأسئلة الشائعة | Skilliq' : 'Contact Us & Support FAQ | Skilliq Platform'}
+        description={
+          isRtl
+            ? 'تواصل مع فريق دعم ومنسقي منصة Skilliq لأي استفسارات أو مقترحات دورات أو شراكات تعليمية.'
+            : 'Reach out to the Skilliq team for technical assistance, course curation recommendations, or educational partnerships.'
+        }
+        canonicalPath="/contact"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Contact Us', url: '/contact' }
+        ]}
+        schema={[
+          {
+            '@context': 'https://schema.org',
+            '@type': 'ContactPage',
+            name: 'Contact Skilliq Support & Curation Team',
+            description: 'Contact page for Skilliq learners, educators, and partners.'
+          },
+          {
+            '@context': 'https://schema.org',
+            '@type': 'FAQPage',
+            mainEntity: faqs.map((f) => ({
+              '@type': 'Question',
+              name: isRtl ? f.qAr : f.qEn,
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: isRtl ? f.aAr : f.aEn
+              }
+            }))
+          }
+        ]}
+      />
       
       {/* HEADER SECTION */}
       <section className="relative overflow-hidden pt-12 md:pt-20 pb-16 md:pb-20 border-b border-border/60 bg-gradient-to-b from-card/60 via-background to-background">

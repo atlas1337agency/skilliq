@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
+import { SEO } from '../components/SEO';
 
 export function Verify() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,6 +61,20 @@ export function Verify() {
       dir={isRtl ? 'rtl' : 'ltr'} 
       className="w-full max-w-4xl mx-auto px-4 py-12 sm:py-16 min-h-[80vh] flex flex-col items-center text-start"
     >
+      <SEO
+        title={isRtl ? 'التحقق من صحة الشهادات المعتمدة | Skilliq' : 'Verify Certificate Authenticity | Skilliq & ATLAS 1337'}
+        description={
+          isRtl
+            ? 'تحقق من مصداقية الشهادات الرقمية الصادرة عن منصة Skilliq وأكاديمية ATLAS 1337 عبر رقم الشهادة.'
+            : 'Verify and authenticate official course completion certificates issued by Skilliq and ATLAS 1337 Academy.'
+        }
+        canonicalPath="/verify"
+        lang={isRtl ? 'ar' : 'en'}
+        breadcrumbs={[
+          { name: 'Home', url: '/' },
+          { name: 'Verify Certificate', url: '/verify' }
+        ]}
+      />
       <div className="text-center mb-10">
         <div className="w-16 h-16 bg-primary/10 text-primary border border-primary/20 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-xs">
           <ShieldCheck className="w-8 h-8" />
