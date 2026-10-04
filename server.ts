@@ -902,7 +902,7 @@ Level: "${currentLevel}"`;
   const getBaseOrigin = (req: any) => {
     if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, '');
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    const host = req.headers['x-forwarded-host'] || req.get('host') || 'skilliq.vercel.app';
+    const host = req.headers['x-forwarded-host'] || req.get('host') || 'skilliq1337school.vercel.app';
     return `${proto}://${host}`;
   };
 

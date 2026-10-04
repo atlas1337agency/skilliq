@@ -58,7 +58,7 @@ export const SEO: React.FC<SEOProps> = ({
   const origin =
     typeof window !== 'undefined' && window.location.origin
       ? window.location.origin
-      : 'https://skilliq.vercel.app';
+      : 'https://skilliq1337school.vercel.app';
 
   const cleanPath = canonicalPath || location.pathname || '/';
   const canonicalUrl = `${origin}${cleanPath === '/' ? '' : cleanPath}`;
