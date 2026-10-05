@@ -16,49 +16,63 @@ import {
   BadgeCheck,
   Layers,
   Flame,
-  Download
+  Download,
+  Youtube,
+  GraduationCap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
 import { PreviewCertificateModal } from '../components/PreviewCertificateModal';
 import { cn } from '../lib/utils';
+import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
 
 export function CertificatesList() {
   const { t, i18n } = useTranslation();
-  const { progress, user, courses, language, setIsAuthModalOpen } = useStore();
+  const { progress, user, courses, learningPaths, language, setIsAuthModalOpen } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'playlist' | 'masterclass'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'playlist' | 'path'>('all');
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(searchParams.get('preview') === 'true');
   const [copiedCertId, setCopiedCertId] = useState<string | null>(null);
 
-  // Completed courses
+  const pathCourseIdsSet = useMemo(() => {
+    const ids = new Set<string>();
+    (learningPaths || []).forEach(p => {
+      (p.courseIds || []).forEach(id => ids.add(id));
+    });
+    return ids;
+  }, [learningPaths]);
+
+  // Completed courses eligible for certificates (Playlists & Path Playlists only — excludes Masterclasses)
   const completedCourses = useMemo(() => {
-    return courses.filter(c => progress[c.id]?.isCompleted);
+    return courses.filter(c => progress[c.id]?.isCompleted && isCertificateEligible(c));
   }, [courses, progress]);
 
   // Filtered by search & format
   const displayedCertificates = useMemo(() => {
     return completedCourses.filter(c => {
+      const educator = resolveCourseEducator(c);
       const matchesSearch = 
         c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.instructor || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        educator.professorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        educator.youtubeChannelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.category || '').toLowerCase().includes(searchQuery.toLowerCase());
 
       if (!matchesSearch) return false;
 
-      if (filterType === 'playlist') {
-        return !(c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true');
+      if (filterType === 'path') {
+        return pathCourseIdsSet.has(c.id);
       }
-      if (filterType === 'masterclass') {
-        return c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true';
+      if (filterType === 'playlist') {
+        return isCertificateEligible(c);
       }
       return true;
     });
-  }, [completedCourses, searchQuery, filterType]);
+  }, [completedCourses, searchQuery, filterType, pathCourseIdsSet]);
 
   const handleCopyLink = (certId: string) => {
     const url = `${window.location.origin}/verify?id=${certId}`;
@@ -242,15 +256,15 @@ export function CertificatesList() {
             {t('playlist_pill', 'Playlists')}
           </button>
           <button
-            onClick={() => setFilterType('masterclass')}
+            onClick={() => setFilterType('path')}
             className={cn(
               "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer",
-              filterType === 'masterclass'
+              filterType === 'path'
                 ? "bg-card text-foreground shadow-xs font-bold"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            {t('masterclass', 'Masterclasses')}
+            {isRtl ? 'مسارات التعلم' : 'Learning Paths'}
           </button>
         </div>
       </div>
@@ -266,14 +280,23 @@ export function CertificatesList() {
             {t('no_certificates_yet', 'No certificates yet')}
           </h3>
           <p className="text-xs sm:text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
-            {t('cert_hub_empty_prompt', 'Complete any structured course or masterclass to unlock your first verifiable certificate.')}
+            {isRtl
+              ? 'أكمل أي قائمة تشغيل تعليمية (دورة كاملة) أو قائمة تشغيل داخل مسار تعليمي للحصول على شهادتك الرسمية الموثقة. (الماستركلاس لا تمنح شهادة).'
+              : 'Complete any structured Course Playlist or Playlist inside a Learning Path to unlock your verifiable certificate. (Single-video Masterclasses do not grant certificates).'}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <Link 
               to="/courses"
               className="px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs sm:text-sm shadow-xs hover:bg-primary/90 transition-all inline-flex items-center gap-2 cursor-pointer"
             >
-              <span>{t('explore_courses', 'Explore Courses')}</span>
+              <span>{t('explore_courses', 'Explore Playlists')}</span>
+              <ArrowRight className="w-4 h-4 rtl:rotate-180" />
+            </Link>
+            <Link 
+              to="/paths"
+              className="px-6 py-2.5 bg-card border border-border/80 text-foreground font-bold rounded-xl text-xs sm:text-sm shadow-xs hover:bg-muted transition-all inline-flex items-center gap-2 cursor-pointer"
+            >
+              <span>{isRtl ? 'تصفح المسارات' : 'Explore Paths'}</span>
               <ArrowRight className="w-4 h-4 rtl:rotate-180" />
             </Link>
             <button
@@ -304,6 +327,7 @@ export function CertificatesList() {
             const userIdPrefix = user?.uid ? user.uid.substring(0, 5) : 'DEMO';
             const cIdPrefix = course.id ? course.id.substring(0, 4) : 'XXXX';
             const certId = `NX-${userIdPrefix}-${cIdPrefix}`.toUpperCase();
+            const educator = resolveCourseEducator(course);
 
             return (
               <motion.div
@@ -323,7 +347,7 @@ export function CertificatesList() {
                   {/* Format tag */}
                   <div className="absolute top-4 start-4">
                     <span className="text-[10px] font-bold uppercase tracking-wider bg-background/80 backdrop-blur px-2.5 py-1 rounded-md border border-border/50 text-foreground">
-                      {course.isSingleVideo ? t('masterclass', 'Masterclass') : t('playlist_pill', 'Playlist')}
+                      {pathCourseIdsSet.has(course.id) ? (isRtl ? 'مسار + قائمة تشغيل' : 'Path Playlist') : t('playlist_pill', 'Playlist')}
                     </span>
                   </div>
 
@@ -334,12 +358,19 @@ export function CertificatesList() {
                     </span>
                   </div>
 
-                  <h3 className="font-bold text-base sm:text-lg mb-1 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+                  <h3 className="font-bold text-base sm:text-lg mb-2 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
                     {course.title}
                   </h3>
 
-                  <div className="text-xs text-muted-foreground w-full truncate">
-                    <ScrollingText>{course.instructor}</ScrollingText>
+                  <div className="flex flex-col items-center gap-1 text-xs text-muted-foreground w-full">
+                    <div className="inline-flex items-center gap-1 font-semibold text-foreground">
+                      <GraduationCap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span className="truncate">{educator.professorName}</span>
+                    </div>
+                    <div className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Youtube className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                      <span className="truncate">{educator.youtubeChannelName}</span>
+                    </div>
                   </div>
                 </div>
 

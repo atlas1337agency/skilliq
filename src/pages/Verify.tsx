@@ -11,16 +11,19 @@ import {
   BadgeCheck,
   Building,
   UserCheck,
-  ArrowRight
+  ArrowRight,
+  GraduationCap,
+  Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { SEO } from '../components/SEO';
+import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
 
 export function Verify() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { t, i18n } = useTranslation();
-  const { language } = useStore();
+  const { language, courses } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   const initialId = searchParams.get('id') || '';
@@ -28,6 +31,19 @@ export function Verify() {
   const [certId, setCertId] = useState(initialId);
   const [isVerifying, setIsVerifying] = useState(false);
   const [result, setResult] = useState<'valid' | 'invalid' | 'demo' | null>(null);
+
+  // Match course prefix from certificate ID (format: NX-USERID-COURSEPREFIX-TIMESTAMP or NX-USERID-COURSEPREFIX)
+  const matchedCourse = (() => {
+    const parts = certId.trim().toUpperCase().split('-');
+    if (parts.length >= 3 && parts[0] === 'NX') {
+      const coursePrefix = parts[2].toLowerCase();
+      return courses.find(
+        c => isCertificateEligible(c) && c.id.toLowerCase().startsWith(coursePrefix)
+      ) || null;
+    }
+    return null;
+  })();
+  const matchedEducator = resolveCourseEducator(matchedCourse);
 
   useEffect(() => {
     if (initialId && !isVerifying && result === null) {
@@ -153,6 +169,22 @@ export function Verify() {
                       <span>{isRtl ? 'جهة الإصدار' : 'Issuing Body'}</span>
                     </span>
                     <span className="font-bold text-foreground">SkilliQ & ATLAS 1337</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1.5 border-t border-border/40">
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      <GraduationCap className="w-3.5 h-3.5 text-amber-500" />
+                      <span>{isRtl ? 'أستاذ الدورة' : 'Course Professor'}</span>
+                    </span>
+                    <span className="font-bold text-foreground">{matchedEducator.professorName}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1.5 border-t border-border/40">
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      <Youtube className="w-3.5 h-3.5 text-red-500" />
+                      <span>{isRtl ? 'قناة يوتيوب الرسمية' : 'YouTube Channel'}</span>
+                    </span>
+                    <span className="font-bold text-foreground">{matchedEducator.youtubeChannelName}</span>
                   </div>
 
                   <div className="flex items-center justify-between pt-1.5 border-t border-border/40">

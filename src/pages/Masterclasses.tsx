@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, filterByLanguage } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
+import { FavoriteButton } from '../components/FavoriteButton';
 import { SEO } from '../components/SEO';
 import { 
   buildDeduplicatedCategories, 
@@ -63,7 +64,7 @@ function parseDurationMinutes(duration?: string): number {
 
 export function Masterclasses() {
   const { t, i18n } = useTranslation();
-  const { user, courses, setIsAuthModalOpen, language, isContentLoading, hasLoadedFromDb } = useStore();
+  const { user, courses, favorites, setIsAuthModalOpen, language, isContentLoading, hasLoadedFromDb } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   const [searchParams] = useSearchParams();
@@ -76,6 +77,7 @@ export function Masterclasses() {
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [durationFilter, setDurationFilter] = useState<DurationFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
   // UI states
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -116,12 +118,16 @@ export function Masterclasses() {
     if (selectedSubCategory !== 'All') count++;
     if (durationFilter !== 'all') count++;
     if (searchQuery.trim()) count++;
+    if (showFavoritesOnly) count++;
     return count;
-  }, [selectedCategory, selectedSubCategory, durationFilter, searchQuery]);
+  }, [selectedCategory, selectedSubCategory, durationFilter, searchQuery, showFavoritesOnly]);
 
   // Filtered masterclasses: guaranteed newest first at top of list
   const filteredMasterclasses = useMemo(() => {
     let result = baseMasterclasses.filter(c => {
+      if (showFavoritesOnly && !favorites?.[`masterclass_${c.id}`]) {
+        return false;
+      }
       const matchCat = matchCourseCategory(c.category, selectedCategory);
       const matchSub = selectedSubCategory === "All" || 
         (c.subCategory && c.subCategory.trim().toLowerCase() === selectedSubCategory.trim().toLowerCase());
@@ -160,7 +166,7 @@ export function Masterclasses() {
     });
 
     return result;
-  }, [baseMasterclasses, selectedCategory, selectedSubCategory, searchQuery, durationFilter, sortBy]);
+  }, [baseMasterclasses, selectedCategory, selectedSubCategory, searchQuery, durationFilter, sortBy, showFavoritesOnly, favorites]);
 
   const totalPages = Math.ceil(filteredMasterclasses.length / itemsPerPage);
   
@@ -175,6 +181,7 @@ export function Masterclasses() {
     setSearchQuery("");
     setDurationFilter("all");
     setSortBy("newest");
+    setShowFavoritesOnly(false);
     setCurrentPage(1);
   };
 
@@ -243,8 +250,8 @@ export function Masterclasses() {
               <span>{isRtl ? 'مشاريع حقيقية تطبيقية' : 'Hands-on Real Projects'}</span>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-background/80 border border-border shadow-xs">
-              <Award className="w-3.5 h-3.5 text-emerald-500" />
-              <span>{t('paths_stat_certs', 'Verifiable Certificates')}</span>
+              <PlayCircle className="w-3.5 h-3.5 text-purple-500" />
+              <span>{isRtl ? 'وضع التركيز السينمائي (الشهادات لقوائم التشغيل والمسارات)' : 'Cinema Focus Mode (Certificates for Playlists & Paths)'}</span>
             </div>
           </div>
         </div>
@@ -336,6 +343,21 @@ export function Masterclasses() {
 
         {/* HORIZONTAL CATEGORY SCROLL CHIPS */}
         <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <button
+            onClick={() => {
+              setShowFavoritesOnly(prev => !prev);
+              setCurrentPage(1);
+            }}
+            className={cn(
+              "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 shrink-0",
+              showFavoritesOnly
+                ? "bg-rose-500 text-white border-rose-500 shadow-xs font-bold"
+                : "bg-card text-rose-500 hover:bg-rose-500/10 border-rose-500/30"
+            )}
+          >
+            <span>❤️ {isRtl ? 'المفضلة' : 'Favorites'}</span>
+          </button>
+
           {categoriesData.map(cat => {
             const isSelected = selectedCategory === cat.name || 
               (selectedCategory === 'All' && cat.name === 'All') ||
@@ -583,15 +605,15 @@ export function Masterclasses() {
             )}
 
             {/* Reassurance Info Card */}
-            <div className="p-4 rounded-2xl bg-muted/40 border border-border/60 text-xs text-muted-foreground">
-              <div className="flex items-center gap-1.5 font-bold text-foreground mb-1">
+            <div className="p-4 rounded-2xl bg-muted/40 border border-border/60 text-xs text-muted-foreground space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-foreground">
                 <Sparkles className="w-4 h-4 text-primary" />
                 <span>{isRtl ? 'جلسات عملية متكاملة' : 'Intensive Focus'}</span>
               </div>
               <p className="leading-relaxed">
                 {isRtl 
-                  ? 'تم تصميم الماستر كلاس لتعلم تقنية محددة في جلسة واحدة شاملة دون تشتيت.' 
-                  : 'Masterclasses are curated for single-session mastery, taking you through complete project builds.'}
+                  ? 'تم تصميم الماستر كلاس لتعلم تقنية محددة في جلسة واحدة شاملة دون تشتيت. للحصول على شهادة موثقة، أكمل أي قائمة تشغيل في قسم الدورات أو المسارات.' 
+                  : 'Masterclasses are curated for single-session mastery. To earn a verifiable certificate, complete any structured Playlist on the Courses or Paths page.'}
               </p>
             </div>
 
@@ -647,6 +669,10 @@ export function Masterclasses() {
                 >
                 {/* 16:9 Thumbnail Header */}
                 <div className="relative aspect-video overflow-hidden bg-muted">
+                  <div className="absolute bottom-3 end-3 z-20">
+                    <FavoriteButton itemId={course.id} itemType="masterclass" size="sm" />
+                  </div>
+
                   {course.language && (
                     <div className="absolute top-3 end-3 z-10 bg-black/75 backdrop-blur text-white px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shadow-sm">
                       {course.language}

@@ -1,12 +1,14 @@
-import { useEffect, useState, useMemo, type RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import QRCode from 'qrcode';
-import { ShieldCheck, Award, BadgeCheck } from 'lucide-react';
+import { ShieldCheck, BadgeCheck, Youtube, GraduationCap } from 'lucide-react';
 
 export interface CertificateData {
   certId: string;
   studentName: string;
   courseTitle: string;
   instructorName: string;
+  professorName?: string;
+  youtubeChannelName?: string;
   issueDate: string;
   verificationUrl: string;
   isDemo?: boolean;
@@ -20,6 +22,12 @@ interface CertificateDocumentProps {
 
 export function CertificateDocument({ data, certRef, isDownloading = false }: CertificateDocumentProps) {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
+
+  const rawProf = (data.professorName || data.instructorName || 'Course Educator').trim();
+  const professorDisplay = /^(prof\.?|professor|dr\.?|أ\.|الأستاذ|د\.)\s/i.test(rawProf)
+    ? rawProf.replace(/^professor\s+/i, 'Prof. ')
+    : `Prof. ${rawProf}`;
+  const channelDisplay = (data.youtubeChannelName || data.instructorName || 'Official YouTube Channel').trim();
 
   // Generate QR Code data URL offline
   useEffect(() => {
@@ -130,58 +138,89 @@ export function CertificateDocument({ data, certRef, isDownloading = false }: Ce
           </p>
         </div>
 
-        {/* COURSE TITLE & SPECIALIZATION */}
-        <div className="w-full max-w-3xl px-4 py-1">
+        {/* COURSE TITLE & EDUCATOR RECOGNITION */}
+        <div className="w-full max-w-3xl px-4 py-0.5 flex flex-col items-center">
           <h3 className="text-2xl font-black text-slate-800 tracking-tight leading-snug line-clamp-2">
             {data.courseTitle}
           </h3>
+
+          {/* Dedicated Educator & YouTube Channel Recognition Pill */}
+          <div className="mt-2.5 inline-flex items-center justify-center gap-3 px-4 py-1.5 rounded-full bg-amber-500/[0.08] border border-amber-600/30 shadow-2xs">
+            <div className="flex items-center gap-1.5 text-xs">
+              <GraduationCap className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Taught By:</span>
+              <span className="font-serif font-bold text-slate-900 text-xs">{professorDisplay}</span>
+            </div>
+            <span className="h-3 w-[1px] bg-amber-600/30" />
+            <div className="flex items-center gap-1.5 text-xs">
+              <Youtube className="w-3.5 h-3.5 text-red-600 shrink-0" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">YouTube Channel:</span>
+              <span className="font-bold text-slate-900 text-xs">{channelDisplay}</span>
+            </div>
+          </div>
         </div>
 
-        {/* BOTTOM AUTHENTICATION, SIGNATURE & QR ROW */}
-        <div className="w-full grid grid-cols-3 items-end gap-6 px-4 pb-2 border-t border-slate-200 pt-4">
+        {/* BOTTOM AUTHENTICATION, SIGNATURES & QR ROW */}
+        <div className="w-full grid grid-cols-[1.15fr_1.2fr_auto_1.2fr] items-end gap-4 px-3 pb-1 border-t border-slate-200 pt-3">
           
           {/* Column 1: Issue Date & QR Code Verification */}
-          <div className="flex items-center gap-3 text-start">
+          <div className="flex items-center gap-2.5 text-start">
             {qrCodeDataUrl ? (
               <img 
                 src={qrCodeDataUrl} 
                 alt="Verification QR Code" 
-                className="w-16 h-16 rounded border border-slate-200 bg-white p-0.5 shrink-0 shadow-xs"
+                className="w-15 h-15 rounded border border-slate-200 bg-white p-0.5 shrink-0 shadow-xs"
               />
             ) : (
-              <div className="w-16 h-16 rounded border border-slate-200 bg-white shrink-0" />
+              <div className="w-15 h-15 rounded border border-slate-200 bg-white shrink-0" />
             )}
-            <div className="text-[11px] font-mono leading-tight">
-              <span className="text-slate-400 block text-[9px] uppercase tracking-wider font-sans font-bold">Issue Date</span>
-              <span className="font-bold text-slate-800 block text-xs mt-0.5">{data.issueDate}</span>
-              <span className="text-slate-400 block text-[9px] mt-1">Scan QR to verify authenticity</span>
+            <div className="text-[10px] font-mono leading-tight">
+              <span className="text-slate-400 block text-[8.5px] uppercase tracking-wider font-sans font-bold">Issue Date</span>
+              <span className="font-bold text-slate-800 block text-[11px] mt-0.5">{data.issueDate}</span>
+              <span className="text-slate-400 block text-[8.5px] mt-1">Scan QR to verify authenticity</span>
             </div>
           </div>
 
-          {/* Column 2: Center Luxury Gold Seal */}
-          <div className="flex flex-col items-center justify-center">
-            <div className="relative w-24 h-24 flex items-center justify-center">
+          {/* Column 2: Course Professor & YouTube Channel Signature */}
+          <div className="flex flex-col items-center text-center">
+            <div className="w-48 border-b-2 border-slate-400 pb-1 mb-1 text-center">
+              <span className="font-serif italic text-sm text-slate-800 font-bold block truncate">
+                {professorDisplay}
+              </span>
+            </div>
+            <span className="text-[9.5px] uppercase tracking-wider text-amber-700 font-bold block">
+              Course Professor & Educator
+            </span>
+            <span className="text-[9px] text-slate-600 font-semibold mt-0.5 flex items-center justify-center gap-1 max-w-[200px] truncate">
+              <Youtube className="w-3 h-3 text-red-600 shrink-0" />
+              <span className="truncate">YouTube: {channelDisplay}</span>
+            </span>
+          </div>
+
+          {/* Column 3: Center Luxury Gold Seal */}
+          <div className="flex flex-col items-center justify-center px-1">
+            <div className="relative w-22 h-22 flex items-center justify-center">
               {/* Outer decorative notched ring */}
               <div className="absolute inset-0 rounded-full border-2 border-amber-600/70 border-dashed animate-[spin_120s_linear_infinite]" />
               <div className="absolute inset-1.5 rounded-full border border-amber-500/50 bg-gradient-to-b from-amber-50 via-amber-100/40 to-amber-200/50 flex flex-col items-center justify-center text-amber-800 shadow-sm p-1">
-                <ShieldCheck className="w-6 h-6 text-amber-600 mb-0.5" />
-                <span className="text-[7.5px] font-black uppercase tracking-wider text-amber-900 leading-none">SKILLIQ VERIFIED</span>
-                <span className="text-[6.5px] font-bold text-amber-700/80 uppercase tracking-tight mt-0.5 leading-none">EXCELLENCE</span>
+                <ShieldCheck className="w-5 h-5 text-amber-600 mb-0.5" />
+                <span className="text-[7px] font-black uppercase tracking-wider text-amber-900 leading-none">SKILLIQ VERIFIED</span>
+                <span className="text-[6px] font-bold text-amber-700/80 uppercase tracking-tight mt-0.5 leading-none">EXCELLENCE</span>
               </div>
             </div>
           </div>
 
-          {/* Column 3: Instructor & Academic Signature */}
+          {/* Column 4: Global Director Signature */}
           <div className="flex flex-col items-end text-end">
-            <div className="w-56 border-b-2 border-slate-400 pb-1 mb-1 text-center">
-              <span className="font-serif italic text-base text-slate-800 font-bold block truncate">
+            <div className="w-48 border-b-2 border-slate-400 pb-1 mb-1 text-center">
+              <span className="font-serif italic text-sm text-slate-800 font-bold block truncate">
                 {data.instructorName || 'Mr. Marouan Anouar'}
               </span>
             </div>
-            <span className="text-[10px] uppercase tracking-wider text-slate-600 font-bold block">
+            <span className="text-[9.5px] uppercase tracking-wider text-slate-600 font-bold block">
               Global Director of ATLAS 1337 Certificates
             </span>
-            <span className="text-[9px] text-slate-400 font-mono mt-0.5 block">
+            <span className="text-[8.5px] text-slate-400 font-mono mt-0.5 block">
               SkilliQ Academic Council & Certification Board
             </span>
           </div>

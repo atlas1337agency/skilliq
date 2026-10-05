@@ -225,6 +225,118 @@ export interface CategorySummary {
 }
 
 /**
+ * Checks whether a course is a single-video Masterclass (displayed on the Masterclasses page).
+ */
+export function isMasterclassCourse(course?: Partial<Course> | null): boolean {
+  if (!course) return false;
+  return course.isSingleVideo === true || String(course.isSingleVideo).toLowerCase() === 'true';
+}
+
+/**
+ * Checks whether a course is eligible for an official certificate.
+ * Only structured Playlists (Courses page & Playlists inside Learning Paths) grant certificates.
+ * Single-video Masterclasses do NOT grant certificates.
+ */
+export function isCertificateEligible(course?: Partial<Course> | null): boolean {
+  if (!course) return false;
+  return !isMasterclassCourse(course);
+}
+
+export interface CourseEducatorInfo {
+  professorName: string;
+  youtubeChannelName: string;
+  youtubeHandle?: string;
+}
+
+const KNOWN_EDUCATORS: Record<string, { professorName: string; youtubeChannelName: string }> = {
+  'traversy media': { professorName: 'Prof. Brad Traversy', youtubeChannelName: 'Traversy Media' },
+  "jeremy's it lab": { professorName: 'Prof. Jeremy McDowell', youtubeChannelName: "Jeremy's IT Lab" },
+  'networkchuck': { professorName: 'Prof. Chuck Keith', youtubeChannelName: 'NetworkChuck' },
+  'professor messer': { professorName: 'Prof. James Messer', youtubeChannelName: 'Professor Messer' },
+  'hackersploit': { professorName: 'Prof. Alexis Ahmed', youtubeChannelName: 'HackerSploit' },
+  'elzero web school': { professorName: 'Prof. Osama Elzero', youtubeChannelName: 'Elzero Web School' },
+  'wael abo hamza': { professorName: 'Prof. Wael Abo Hamza', youtubeChannelName: 'Wael Abo Hamza' },
+  'freecodecamp.org': { professorName: 'Prof. Quincy Larson & Faculty', youtubeChannelName: 'freeCodeCamp.org' },
+  'freecodecamp': { professorName: 'Prof. Quincy Larson & Faculty', youtubeChannelName: 'freeCodeCamp.org' },
+  'simplilearn': { professorName: 'Prof. Simplilearn Faculty', youtubeChannelName: 'Simplilearn' },
+  'edureka': { professorName: 'Prof. Edureka Faculty', youtubeChannelName: 'edureka!' },
+  'programming with mosh': { professorName: 'Prof. Mosh Hamedani', youtubeChannelName: 'Programming with Mosh' },
+  'mosh hamedani': { professorName: 'Prof. Mosh Hamedani', youtubeChannelName: 'Programming with Mosh' },
+  'fireship': { professorName: 'Prof. Jeff Delaney', youtubeChannelName: 'Fireship' },
+  'the net ninja': { professorName: 'Prof. Shaun Pelling', youtubeChannelName: 'Net Ninja' },
+  'net ninja': { professorName: 'Prof. Shaun Pelling', youtubeChannelName: 'Net Ninja' },
+  'bro code': { professorName: 'Prof. Chris (Bro Code)', youtubeChannelName: 'Bro Code' },
+  'dave gray': { professorName: 'Prof. Dave Gray', youtubeChannelName: 'Dave Gray' },
+  'web dev simplified': { professorName: 'Prof. Kyle Cook', youtubeChannelName: 'Web Dev Simplified' },
+  'kevin powell': { professorName: 'Prof. Kevin Powell', youtubeChannelName: 'Kevin Powell' },
+  'david bombal': { professorName: 'Prof. David Bombal', youtubeChannelName: 'David Bombal' },
+  'john hammond': { professorName: 'Prof. John Hammond', youtubeChannelName: 'John Hammond' },
+  'the cyber mentor': { professorName: 'Prof. Heath Adams', youtubeChannelName: 'TCM Security' },
+  'tcm security': { professorName: 'Prof. Heath Adams', youtubeChannelName: 'TCM Security' },
+  'codewithharry': { professorName: 'Prof. Haris Ali Khan', youtubeChannelName: 'CodeWithHarry' },
+  'techworld with nana': { professorName: 'Prof. Nana Janashia', youtubeChannelName: 'TechWorld with Nana' },
+  'abdelrahman gamal': { professorName: 'Prof. Abdelrahman Gamal', youtubeChannelName: 'Abdelrahman Gamal' },
+  'codezilla': { professorName: 'Prof. Islam Hesham', youtubeChannelName: 'Codezilla' },
+  'tarmeez academy': { professorName: 'Prof. Yarob Al-Mustafa', youtubeChannelName: 'Tarmeez Academy' },
+  'أكاديمية ترميز': { professorName: 'Prof. Yarob Al-Mustafa', youtubeChannelName: 'أكاديمية ترميز' },
+  'almuhandis': { professorName: 'Prof. Almuhandis', youtubeChannelName: 'Almuhandis' },
+  'سكوب': { professorName: 'Prof. سكوب', youtubeChannelName: 'سكوب' },
+};
+
+function formatProfessorPrefix(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return 'Prof. Course Educator';
+  if (/^(prof\.?|professor|dr\.?|mr\.?|أ\.|الأستاذ|د\.)\s/i.test(trimmed)) {
+    return trimmed.replace(/^professor\s+/i, 'Prof. ');
+  }
+  return `Prof. ${trimmed}`;
+}
+
+/**
+ * Resolves the Professor (Teacher Name) and Official YouTube Channel Name for any course
+ * so certificates can properly honor and credit the educator.
+ */
+export function resolveCourseEducator(course?: Partial<Course> | null): CourseEducatorInfo {
+  if (!course) {
+    return {
+      professorName: 'Prof. Brad Traversy',
+      youtubeChannelName: 'Traversy Media',
+      youtubeHandle: '@TraversyMedia'
+    };
+  }
+
+  const rawInstructor = (course.instructor || '').trim();
+  const normKey = rawInstructor.toLowerCase();
+  const known = KNOWN_EDUCATORS[normKey];
+
+  let youtubeHandle: string | undefined;
+  if (course.instructorUrl) {
+    const handleMatch = course.instructorUrl.match(/youtube\.com\/(@[a-zA-Z0-9_.-]+)/i);
+    if (handleMatch && handleMatch[1]) {
+      youtubeHandle = handleMatch[1];
+    }
+  }
+
+  const professorName = course.professorName?.trim()
+    ? formatProfessorPrefix(course.professorName)
+    : known
+    ? known.professorName
+    : formatProfessorPrefix(rawInstructor || 'Course Educator');
+
+  const youtubeChannelName = course.youtubeChannelName?.trim()
+    ? course.youtubeChannelName.trim()
+    : known
+    ? known.youtubeChannelName
+    : (rawInstructor || 'Official YouTube Educator');
+
+  return {
+    professorName,
+    youtubeChannelName,
+    youtubeHandle
+  };
+}
+
+/**
  * Builds an aggregated, deduplicated category summary list from courses.
  * Guarantees NO duplicate category names.
  */

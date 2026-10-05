@@ -3,10 +3,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import YouTube, { YouTubeEvent } from 'react-youtube';
 import { useStore } from '../store/useStore';
-import { CheckCircle, Lock, PlayCircle, PauseCircle, ArrowLeft, Maximize, Minimize, Youtube, BookOpen, PenTool, Trash2, BadgeCheck, ChevronRight, AlertTriangle, Check, X, Send, LogIn, Loader2 } from 'lucide-react';
+import { CheckCircle, Lock, PlayCircle, PauseCircle, ArrowLeft, Maximize, Minimize, Youtube, BookOpen, PenTool, Trash2, BadgeCheck, ChevronRight, AlertTriangle, Check, X, Send, LogIn, Loader2, Award } from 'lucide-react';
 import { ScrollingText } from '../components/ScrollingText';
 import { SEO } from '../components/SEO';
 import { cn, filterByLanguage } from '../lib/utils';
+import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
+import { FavoriteButton } from '../components/FavoriteButton';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, setDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
@@ -363,6 +365,9 @@ export function Course() {
 
   if (!course) return null;
 
+  const canEarnCertificate = isCertificateEligible(course);
+  const educatorInfo = resolveCourseEducator(course);
+
   const courseSeoNode = (
     <SEO
       title={`${course.title} by ${course.instructor} – Free ${course.isSingleVideo ? 'Masterclass' : 'Course'} | Skilliq`}
@@ -488,7 +493,9 @@ export function Course() {
           <div className="p-6 sm:p-8 text-center">
             <h2 className="text-xl font-bold mb-2">Login Required to Start Learning</h2>
             <p className="text-sm text-muted-foreground mb-6">
-              Sign in for free to watch in Cinema Focus Mode, save your timestamps, take notes, and earn your verifiable certificate.
+              {canEarnCertificate
+                ? 'Sign in for free to watch in Cinema Focus Mode, save your timestamps, take notes, and earn your verifiable certificate.'
+                : 'Sign in for free to watch this masterclass in Cinema Focus Mode, save your timestamps, and take interactive notes.'}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Link
@@ -751,11 +758,15 @@ export function Course() {
                         <button 
                           onClick={() => {
                             handleVideoEnd();
-                            navigate('/dashboard');
+                            if (canEarnCertificate) {
+                              navigate(`/certificate/${course.id}`);
+                            } else {
+                              navigate('/dashboard');
+                            }
                           }}
-                          className="px-3 py-1 bg-green-500 text-white font-bold rounded text-xs shadow hover:bg-green-600 transition-colors"
+                          className="px-3 py-1 bg-green-500 text-white font-bold rounded text-xs shadow hover:bg-green-600 transition-colors cursor-pointer"
                         >
-                          Complete
+                          {canEarnCertificate ? (language === 'ar' ? 'إكمال واستلام الشهادة' : 'Complete & Get Certificate') : 'Complete'}
                         </button>
                       )
                     ) : (
@@ -775,9 +786,16 @@ export function Course() {
               <div className="text-white text-center p-6 flex-1 flex flex-col items-center justify-center z-20">
                 <h2 className="text-2xl font-bold mb-4">{t('congratulations')}</h2>
                 <p className="mb-6">{t('course_completed_msg')}</p>
-                <Link to="/dashboard" className="px-6 py-3 bg-white text-black rounded-full font-bold shadow hover:shadow-lg hover:bg-gray-100 transition-all active:scale-95 inline-flex items-center gap-2">
-                  {t('get_certificate')}
-                </Link>
+                {canEarnCertificate ? (
+                  <Link to={`/certificate/${course.id}`} className="px-6 py-3 bg-white text-black rounded-full font-bold shadow hover:shadow-lg hover:bg-gray-100 transition-all active:scale-95 inline-flex items-center gap-2">
+                    <Award className="w-5 h-5 text-amber-500" />
+                    <span>{t('get_certificate')}</span>
+                  </Link>
+                ) : (
+                  <Link to="/dashboard" className="px-6 py-3 bg-white text-black rounded-full font-bold shadow hover:shadow-lg hover:bg-gray-100 transition-all active:scale-95 inline-flex items-center gap-2">
+                    <span>{t('back_to_dashboard', 'Back to Dashboard')}</span>
+                  </Link>
+                )}
               </div>
             )}
 
@@ -824,14 +842,23 @@ export function Course() {
                     </div>
                   )}
                   <div>
-                    <div className="font-bold text-foreground text-base flex items-center gap-1.5 max-w-[150px] sm:max-w-[300px]">
-                      <ScrollingText>{course.instructor}</ScrollingText>
+                    <div className="font-bold text-foreground text-base flex items-center gap-1.5 max-w-[180px] sm:max-w-[320px]">
+                      <ScrollingText>{educatorInfo.professorName}</ScrollingText>
                       <BadgeCheck className="w-4 h-4 text-blue-500 shrink-0" />
                     </div>
-                    <div className="text-xs text-muted-foreground">{t('original_creator', 'Original Creator')}</div>
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Youtube className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                      <span>YouTube Channel: <strong className="text-foreground font-semibold">{educatorInfo.youtubeChannelName}</strong></span>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <FavoriteButton
+                    itemId={course.id}
+                    itemType={isMasterclass ? 'masterclass' : 'playlist'}
+                    variant="pill"
+                    size="md"
+                  />
                   <Link 
                     to={`/creator/${encodeURIComponent(course.instructor || '')}`}
                     className="flex-1 sm:flex-none px-4 py-2 bg-primary/10 text-primary border border-primary/20 rounded-full font-bold text-sm hover:bg-primary hover:text-primary-foreground transition-colors flex items-center justify-center gap-1.5"
@@ -943,9 +970,32 @@ export function Course() {
         
         {sidebarTab === 'playlist' ? (
           <div className="flex-1 overflow-y-auto">
-            <div className="p-4 border-b border-border flex justify-between items-center bg-muted/30 shrink-0">
-              <span className="text-sm font-semibold text-muted-foreground">Progress</span>
-              <span className="text-sm text-primary font-bold">{courseVideos.length > 0 ? Math.round((courseProgress.completedVideoIds.length / courseVideos.length) * 100) : 0}%</span>
+            <div className="p-4 border-b border-border flex flex-col gap-2.5 bg-muted/30 shrink-0">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-muted-foreground">Progress</span>
+                <span className="text-sm text-primary font-bold">{courseVideos.length > 0 ? Math.round((courseProgress.completedVideoIds.length / courseVideos.length) * 100) : 0}%</span>
+              </div>
+              {canEarnCertificate ? (
+                courseProgress.isCompleted ? (
+                  <Link
+                    to={`/certificate/${course.id}`}
+                    className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                  >
+                    <Award className="w-4 h-4" />
+                    <span>{language === 'ar' ? 'عرض وتحميل الشهادة الرسمية' : 'View & Download Certificate'}</span>
+                  </Link>
+                ) : (
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span>{language === 'ar' ? 'أكمل جميع دروس القائمة للحصول على الشهادة' : 'Complete all playlist lessons to unlock certificate'}</span>
+                  </div>
+                )
+              ) : (
+                <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                  <PlayCircle className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span>{language === 'ar' ? 'جلسة ماستركلاس (الشهادات مخصصة لقوائم التشغيل والمسارات)' : 'Masterclass session (Certificates are for Playlists & Paths)'}</span>
+                </div>
+              )}
             </div>
             {courseVideos.map((video, index) => {
               const isCompleted = courseProgress.completedVideoIds.includes(video.id);

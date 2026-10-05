@@ -110,6 +110,14 @@ service cloud.firestore {
              data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 100;
     }
 
+    function isValidFavorite(data) {
+      return hasOnlyAllowedFields(['id', 'itemId', 'itemType', 'savedAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.itemId is string && data.itemId.size() > 0 && data.itemId.size() <= 120 &&
+             data.itemType in ['playlist', 'masterclass', 'path', 'book'] &&
+             data.savedAt is number;
+    }
+
     function isValidCourse(data) {
       return hasOnlyAllowedFields(['id', 'title', 'description', 'instructor', 'instructorAvatar', 'instructorUrl', 'thumbnail', 'category', 'subCategory', 'isSingleVideo', 'language', 'resources', 'videos', 'isApproved', 'createdAt']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
@@ -244,6 +252,13 @@ service cloud.firestore {
         allow read: if isOwner(userId) || isAdmin();
         allow create: if isOwner(userId) && isValidNote(request.resource.data);
         allow update: if isOwner(userId) && isValidNote(request.resource.data);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+
+      match /favorites/{favId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidFavorite(request.resource.data) && request.resource.data.id == favId;
+        allow update: if isOwner(userId) && isValidFavorite(request.resource.data) && request.resource.data.id == favId;
         allow delete: if isOwner(userId) || isAdmin();
       }
     }

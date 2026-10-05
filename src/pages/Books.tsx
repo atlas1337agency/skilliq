@@ -24,6 +24,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { Book } from '../data/courses';
 import { cn } from '../lib/utils';
+import { FavoriteButton } from '../components/FavoriteButton';
 import { 
   BookVideoModal, 
   BookCoverVisual, 
@@ -55,7 +56,7 @@ const normalizeCategoryKey = (cat = '') => {
 
 export function Books() {
   const { i18n } = useTranslation();
-  const { books, language } = useStore();
+  const { books, favorites, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -65,6 +66,7 @@ export function Books() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [languageFilter, setLanguageFilter] = useState<'current' | 'all'>('current');
   const [sortBy, setSortBy] = useState<'newest' | 'title' | 'author'>('newest');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState<boolean>(false);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [mobileCategoriesOpen, setMobileCategoriesOpen] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -115,6 +117,10 @@ export function Books() {
   const filteredBooks = useMemo(() => {
     let result = baseBooks;
 
+    if (showFavoritesOnly) {
+      result = result.filter(b => Boolean(favorites?.[`book_${b.id}`]));
+    }
+
     if (activeCategory !== 'all') {
       const targetNorm = normalizeCategoryKey(activeCategory).toLowerCase();
       result = result.filter(
@@ -140,12 +146,12 @@ export function Books() {
       if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '');
       return (b.createdAt || 0) - (a.createdAt || 0);
     });
-  }, [baseBooks, activeCategory, searchQuery, sortBy]);
+  }, [baseBooks, activeCategory, searchQuery, sortBy, showFavoritesOnly, favorites]);
 
   // Reset to page 1 when category, search, language, or sort changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeCategory, searchQuery, languageFilter, sortBy]);
+  }, [activeCategory, searchQuery, languageFilter, sortBy, showFavoritesOnly]);
 
   const totalPages = Math.max(1, Math.ceil(filteredBooks.length / BOOKS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
@@ -288,6 +294,18 @@ export function Books() {
                   >
                     <Globe className="w-3 h-3" />
                     <span>{isRtl ? 'جميع اللغات' : 'All Languages'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFavoritesOnly(prev => !prev)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1",
+                      showFavoritesOnly
+                        ? "bg-rose-500 text-white shadow-2xs"
+                        : "text-rose-500 hover:bg-rose-500/10"
+                    )}
+                  >
+                    <span>❤️ {isRtl ? 'المفضلة' : 'Favorites'}</span>
                   </button>
                 </div>
 
@@ -491,8 +509,11 @@ export function Books() {
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2, delay: Math.min(idx * 0.03, 0.25) }}
                         onClick={() => setSelectedBook(book)}
-                        className="group bg-card border border-border/80 hover:border-primary/40 rounded-3xl p-4 sm:p-5 flex flex-col justify-between hover:shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer text-start"
+                        className="group bg-card border border-border/80 hover:border-primary/40 rounded-3xl p-4 sm:p-5 flex flex-col justify-between hover:shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer text-start relative"
                       >
+                        <div className="absolute top-6 end-6 z-30">
+                          <FavoriteButton itemId={book.id} itemType="book" size="sm" />
+                        </div>
                         <div>
                           {/* 3D Book Cover Presentation */}
                           <div className="px-4 sm:px-6 pt-1 pb-4">
@@ -674,6 +695,7 @@ export function Books() {
                       setSearchQuery('');
                       handleSelectCategory('all');
                       setLanguageFilter('all');
+                      setShowFavoritesOnly(false);
                     }}
                     className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold cursor-pointer"
                   >

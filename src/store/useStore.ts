@@ -15,10 +15,20 @@ interface Progress {
   videoTimestamps?: Record<string, number>;
 }
 
+export type FavoriteItemType = 'playlist' | 'masterclass' | 'path' | 'book';
+
+export interface FavoriteItem {
+  id: string;
+  itemId: string;
+  itemType: FavoriteItemType;
+  savedAt: string;
+}
+
 interface StoreState {
   theme: 'light' | 'dark';
   language: 'en' | 'ar';
   progress: Record<string, Progress>;
+  favorites: Record<string, FavoriteItem>;
   user: any | null;
   publicProfile: PublicProfile | null;
   userName: string;
@@ -39,6 +49,9 @@ interface StoreState {
   setIsAuthModalOpen: (isOpen: boolean) => void;
   loadContent: (retryCount?: number) => Promise<void>;
   loadProgress: () => Promise<void>;
+  loadFavorites: () => Promise<void>;
+  toggleFavorite: (itemId: string, itemType: FavoriteItemType) => Promise<boolean>;
+  isFavorite: (itemId: string, itemType: FavoriteItemType) => boolean;
   markVideoCompleted: (courseId: string, videoId: string, nextVideoId?: string) => Promise<void>;
   setCurrentVideo: (courseId: string, videoId: string) => Promise<void>;
   completeCourse: (courseId: string) => Promise<void>;
@@ -51,6 +64,7 @@ export const useStore = create<StoreState>()(
       theme: 'light',
       language: 'en',
       progress: {},
+      favorites: {},
       user: null,
       publicProfile: null,
       userName: 'Student',
@@ -74,6 +88,7 @@ export const useStore = create<StoreState>()(
           try {
             const profile = await initializeOrUpdateProfile(user);
             set({ publicProfile: profile });
+            get().loadFavorites();
           } catch (err) {
             console.error("Failed to initialize public profile", err);
           }
@@ -155,6 +170,72 @@ export const useStore = create<StoreState>()(
         } catch (error) {
           console.error("Error loading progress:", error);
         }
+      },
+
+      loadFavorites: async () => {
+        const { user } = get();
+        if (!user) return;
+
+        try {
+          const profileSnap = await getDoc(doc(db, 'publicProfiles', user.uid));
+          if (profileSnap.exists()) {
+            const data = profileSnap.data();
+            if (Array.isArray(data.favorites)) {
+              const favMap: Record<string, FavoriteItem> = { ...(get().favorites || {}) };
+              data.favorites.forEach((item: FavoriteItem) => {
+                if (item && item.id) {
+                  favMap[item.id] = item;
+                }
+              });
+              set({ favorites: favMap });
+            }
+          }
+        } catch (error) {
+          console.error("Error loading favorites:", error);
+        }
+      },
+
+      isFavorite: (itemId, itemType) => {
+        const favKey = `${itemType}_${itemId}`;
+        return Boolean(get().favorites?.[favKey]);
+      },
+
+      toggleFavorite: async (itemId, itemType) => {
+        const state = get();
+        const favKey = `${itemType}_${itemId}`;
+        const currentFavs = { ...(state.favorites || {}) };
+        const exists = Boolean(currentFavs[favKey]);
+
+        if (exists) {
+          delete currentFavs[favKey];
+        } else {
+          currentFavs[favKey] = {
+            id: favKey,
+            itemId,
+            itemType,
+            savedAt: new Date().toISOString()
+          };
+        }
+
+        set({ favorites: currentFavs });
+
+        if (state.user?.uid) {
+          try {
+            const favList = Object.values(currentFavs);
+            await setDoc(
+              doc(db, 'publicProfiles', state.user.uid),
+              {
+                uid: state.user.uid,
+                favorites: favList
+              },
+              { merge: true }
+            );
+          } catch (error) {
+            console.error("Error syncing favorites to profile:", error);
+          }
+        }
+
+        return !exists;
       },
 
       markVideoCompleted: async (courseId, videoId, nextVideoId) => {
@@ -338,6 +419,7 @@ export const useStore = create<StoreState>()(
       partialize: (state) => ({ 
         language: state.language, 
         theme: state.theme,
+        favorites: state.favorites,
         courses: state.courses,
         allCourses: state.allCourses,
         books: state.books,

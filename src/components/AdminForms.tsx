@@ -1214,12 +1214,22 @@ export function AdminForms({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <span className="text-[11px] font-semibold text-muted-foreground block mb-1">Instructor Name</span>
+                        <span className="text-[11px] font-semibold text-muted-foreground block mb-1">YouTube Channel / Instructor Name</span>
                         <input 
                           value={course.instructor || ''} 
-                          onChange={e => setCourse({ ...course, instructor: e.target.value })} 
+                          onChange={e => setCourse({ ...course, instructor: e.target.value, youtubeChannelName: course.youtubeChannelName || e.target.value })} 
                           className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground" 
-                          placeholder="e.g. FreeCodeCamp / Mosh Hamedani" 
+                          placeholder="e.g. Traversy Media / Elzero Web School" 
+                        />
+                      </div>
+
+                      <div>
+                        <span className="text-[11px] font-semibold text-muted-foreground block mb-1">Professor / Teacher Name (for Certificate)</span>
+                        <input 
+                          value={course.professorName || ''} 
+                          onChange={e => setCourse({ ...course, professorName: e.target.value })} 
+                          className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground" 
+                          placeholder="e.g. Prof. Brad Traversy / Prof. Osama Elzero" 
                         />
                       </div>
 
@@ -1233,7 +1243,7 @@ export function AdminForms({
                         />
                       </div>
 
-                      <div className="col-span-1 sm:col-span-2">
+                      <div>
                         <span className="text-[11px] font-semibold text-muted-foreground block mb-1">Instructor Channel / Website Link</span>
                         <input 
                           value={course.instructorUrl || ''} 

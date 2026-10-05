@@ -17,6 +17,7 @@ import { motion } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { Book } from '../data/courses';
 import { filterByLanguage, cn } from '../lib/utils';
+import { FavoriteButton } from './FavoriteButton';
 import { 
   BookVideoModal, 
   BookCoverVisual, 
@@ -182,8 +183,11 @@ export function BooksSection() {
                 viewport={{ once: true }}
                 transition={{ duration: 0.25, delay: Math.min(index * 0.05, 0.3) }}
                 onClick={() => setSelectedBook(book)}
-                className="group w-[210px] sm:w-[235px] md:w-[250px] shrink-0 snap-start flex flex-col justify-between bg-card border border-border/80 hover:border-primary/40 rounded-2xl p-3.5 sm:p-4 hover:shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer text-start"
+                className="group w-[210px] sm:w-[235px] md:w-[250px] shrink-0 snap-start flex flex-col justify-between bg-card border border-border/80 hover:border-primary/40 rounded-2xl p-3.5 sm:p-4 hover:shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer text-start relative"
               >
+                <div className="absolute top-2.5 end-2.5 z-20" onClick={(e) => e.stopPropagation()}>
+                  <FavoriteButton itemId={book.id} itemType="book" size="sm" />
+                </div>
                 <div>
                   {/* 3D Book Cover Frame */}
                   <div className="mb-3.5 px-2 pt-1">

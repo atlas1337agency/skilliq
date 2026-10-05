@@ -19,6 +19,8 @@ export interface Course {
   title: string;
   description: string;
   instructor: string;
+  professorName?: string;
+  youtubeChannelName?: string;
   instructorAvatar?: string;
   instructorUrl?: string;
   thumbnail: string;

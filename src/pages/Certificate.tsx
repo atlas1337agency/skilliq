@@ -23,6 +23,7 @@ import * as htmlToImage from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { CertificateDocument, CertificateData } from '../components/CertificateDocument';
 import { ResponsiveCertificateViewer } from '../components/ResponsiveCertificateViewer';
+import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
 
 export function Certificate() {
   const { courseId } = useParams<{ courseId: string }>();
@@ -86,7 +87,9 @@ export function Certificate() {
       ? 'تطوير تطبيقات الويب المتكاملة وهندسة البرمجيات الحديثة' 
       : 'Full-Stack Web Development & Modern Software Architecture', 
     id: 'demo',
-    instructor: 'Mr. Marouan Anouar'
+    instructor: isRtl ? 'Elzero Web School' : 'Traversy Media',
+    professorName: isRtl ? 'Prof. Osama Elzero' : 'Prof. Brad Traversy',
+    youtubeChannelName: isRtl ? 'Elzero Web School' : 'Traversy Media'
   } : null);
   const courseProgress = progress[courseId || ''];
 
@@ -102,6 +105,33 @@ export function Certificate() {
     );
   }
 
+  // Block certificate for single-video Masterclasses (only Playlists & Learning Path Playlists grant certificates)
+  if (!isPreview && courseRaw && !isCertificateEligible(courseRaw)) {
+    return (
+      <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full px-4 md:px-8 py-20 text-center max-w-lg mx-auto">
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center mx-auto mb-4">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h2 className="text-2xl font-black mb-2 text-foreground">
+          {isRtl ? 'الشهادات متاحة لقوائم التشغيل فقط' : 'Certificates Only Available for Playlists'}
+        </h2>
+        <p className="text-muted-foreground text-sm mb-6 leading-relaxed">
+          {isRtl 
+            ? 'تُمنح الشهادات الرسمية الموثقة فقط عند إتمام قوائم التشغيل الكاملة (الدورات) أو قوائم التشغيل ضمن المسارات التعليمية. جلسات الماستركلاس المفردة لا تمنح شهادة.'
+            : 'Official verified certificates are awarded exclusively upon completing structured Course Playlists or Playlists inside Learning Paths. Single-video Masterclasses do not grant certificates.'}
+        </p>
+        <div className="flex flex-wrap justify-center gap-3">
+          <Link to="/courses" className="px-5 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs sm:text-sm">
+            {isRtl ? 'تصفح قوائم التشغيل (الدورات)' : 'Browse Course Playlists'}
+          </Link>
+          <Link to="/paths" className="px-5 py-2.5 bg-card border border-border text-foreground font-bold rounded-xl text-xs sm:text-sm hover:bg-muted transition-colors">
+            {isRtl ? 'تصفح المسارات التعليمية' : 'Explore Learning Paths'}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!isPreview && (!courseProgress || !courseProgress.isCompleted)) {
     return (
       <div dir={isRtl ? 'rtl' : 'ltr'} className="w-full px-4 md:px-8 py-20 text-center max-w-md mx-auto">
@@ -110,7 +140,7 @@ export function Certificate() {
         </div>
         <h2 className="text-2xl font-black mb-2 text-foreground">{t('certificate_not_available', 'Certificate Incomplete')}</h2>
         <p className="text-muted-foreground text-sm mb-6 leading-relaxed">
-          {t('complete_course_to_view', 'You need to complete all lessons in this course to view and download your official certificate.')}
+          {t('complete_course_to_view', 'You need to complete all lessons in this course playlist to view and download your official certificate.')}
         </p>
         <div className="flex justify-center gap-3">
           <Link to={`/course/${course.id}`} className="px-5 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl text-xs sm:text-sm">
@@ -132,12 +162,15 @@ export function Certificate() {
   });
 
   const studentDisplayName = user?.displayName || userName || (isRtl ? 'اسم الطالب' : 'Student Name');
+  const educator = resolveCourseEducator(course);
 
   const certificateData: CertificateData = {
     certId,
     studentName: studentDisplayName,
     courseTitle: course.title,
     instructorName: 'Mr. Marouan Anouar',
+    professorName: educator.professorName,
+    youtubeChannelName: educator.youtubeChannelName,
     issueDate: dateFormatted,
     verificationUrl: `${window.location.origin}/verify?id=${certId}`,
     isDemo: isPreview

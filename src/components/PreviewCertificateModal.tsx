@@ -41,6 +41,8 @@ export function PreviewCertificateModal({ isOpen, onClose }: PreviewCertificateM
         ? 'تطوير تطبيقات الويب المتكاملة وهندسة البرمجيات الحديثة'
         : 'Full-Stack Web Development & Modern Software Architecture',
       instructorName: 'Mr. Marouan Anouar',
+      professorName: isRtl ? 'Prof. Osama Elzero' : 'Prof. Brad Traversy',
+      youtubeChannelName: isRtl ? 'Elzero Web School' : 'Traversy Media',
       issueDate: new Date().toLocaleDateString(undefined, {
         year: 'numeric',
         month: 'long',

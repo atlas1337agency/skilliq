@@ -28,6 +28,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
+import { FavoriteButton } from '../components/FavoriteButton';
 import { SEO } from '../components/SEO';
 
 export function Creator() {
@@ -829,6 +830,9 @@ export function Creator() {
                 className="group flex flex-col bg-card border border-border rounded-2xl overflow-hidden hover:border-primary/50 hover:shadow-lg transition-all text-start"
               >
                 <div className="aspect-video w-full relative overflow-hidden bg-muted">
+                  <div className="absolute top-2.5 end-2.5 z-20" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                    <FavoriteButton itemId={course.id} itemType={course.isSingleVideo ? 'masterclass' : 'playlist'} size="sm" />
+                  </div>
                   <img 
                     src={course.thumbnail} 
                     alt={course.title}

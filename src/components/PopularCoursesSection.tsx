@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { filterByLanguage, cn } from '../lib/utils';
 import { ScrollingText } from './ScrollingText';
+import { FavoriteButton } from './FavoriteButton';
 
 export function PopularCoursesSection() {
   const { t, i18n } = useTranslation();
@@ -76,6 +77,10 @@ export function PopularCoursesSection() {
             >
               {/* 16:9 Thumbnail Header */}
               <div className="relative aspect-video overflow-hidden bg-muted">
+                <div className="absolute bottom-3 end-3 z-20">
+                  <FavoriteButton itemId={course.id} itemType="playlist" size="sm" />
+                </div>
+
                 {course.language && (
                   <div className="absolute top-3 end-3 z-10 bg-black/75 backdrop-blur text-white px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shadow-sm">
                     {course.language}

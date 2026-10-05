@@ -22,6 +22,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, filterByLanguage } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
+import { FavoriteButton } from '../components/FavoriteButton';
 import { SEO } from '../components/SEO';
 import { 
   buildDeduplicatedCategories, 
@@ -36,7 +37,7 @@ type SortOption = 'newest' | 'lessons' | 'title';
 
 export function Courses() {
   const { t, i18n } = useTranslation();
-  const { user, courses, setIsAuthModalOpen, language, isContentLoading, hasLoadedFromDb } = useStore();
+  const { user, courses, favorites, setIsAuthModalOpen, language, isContentLoading, hasLoadedFromDb } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -49,6 +50,7 @@ export function Courses() {
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [lengthFilter, setLengthFilter] = useState<LengthFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   
   // UI states
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -97,12 +99,17 @@ export function Courses() {
     if (selectedSubCategory !== 'All') count++;
     if (lengthFilter !== 'all') count++;
     if (searchQuery.trim()) count++;
+    if (showFavoritesOnly) count++;
     return count;
-  }, [selectedCategory, selectedSubCategory, lengthFilter, searchQuery]);
+  }, [selectedCategory, selectedSubCategory, lengthFilter, searchQuery, showFavoritesOnly]);
 
   // Filtered & sorted courses: guaranteed newest courses at top of list
   const filteredCourses = useMemo(() => {
     let result = basePlaylists.filter(c => {
+      if (showFavoritesOnly && !favorites?.[`playlist_${c.id}`]) {
+        return false;
+      }
+
       // Robust canonical category match (never misses due to case or spacing)
       const matchCat = matchCourseCategory(c.category, selectedCategory);
 
@@ -149,7 +156,7 @@ export function Courses() {
     });
 
     return result;
-  }, [basePlaylists, selectedCategory, selectedSubCategory, searchQuery, lengthFilter, sortBy]);
+  }, [basePlaylists, selectedCategory, selectedSubCategory, searchQuery, lengthFilter, sortBy, showFavoritesOnly, favorites]);
 
   const totalPages = Math.ceil(filteredCourses.length / itemsPerPage);
   
@@ -168,6 +175,7 @@ export function Courses() {
     setSearchQuery("");
     setLengthFilter("all");
     setSortBy("newest");
+    setShowFavoritesOnly(false);
     setCurrentPage(1);
   };
 
@@ -332,6 +340,21 @@ export function Courses() {
 
         {/* HORIZONTAL CATEGORY SCROLL CHIPS */}
         <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <button
+            onClick={() => {
+              setShowFavoritesOnly(prev => !prev);
+              setCurrentPage(1);
+            }}
+            className={cn(
+              "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 shrink-0",
+              showFavoritesOnly
+                ? "bg-rose-500 text-white border-rose-500 shadow-xs font-bold"
+                : "bg-card text-rose-500 hover:bg-rose-500/10 border-rose-500/30"
+            )}
+          >
+            <span>❤️ {isRtl ? 'المفضلة' : 'Favorites'}</span>
+          </button>
+
           {categoriesData.map(cat => {
             const isSelected = selectedCategory === cat.name || 
               (selectedCategory === 'All' && cat.name === 'All') ||
@@ -643,6 +666,10 @@ export function Courses() {
                 >
                 {/* 16:9 Thumbnail Header */}
                 <div className="relative aspect-video overflow-hidden bg-muted">
+                  <div className="absolute bottom-3 end-3 z-20">
+                    <FavoriteButton itemId={course.id} itemType="playlist" size="sm" />
+                  </div>
+
                   {course.language && (
                     <div className="absolute top-3 end-3 z-10 bg-black/75 backdrop-blur text-white px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shadow-sm">
                       {course.language}

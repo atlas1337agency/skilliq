@@ -23,6 +23,7 @@ import { motion } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { cn, filterPathsByLanguage } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
+import { FavoriteButton } from '../components/FavoriteButton';
 import { SEO } from '../components/SEO';
 
 const iconMap: Record<string, any> = {
@@ -71,12 +72,13 @@ const pathColorMap: Record<string, { bg: string; text: string; border: string; g
 
 export function Paths() {
   const { t, i18n } = useTranslation();
-  const { learningPaths, courses, language } = useStore();
+  const { learningPaths, courses, favorites, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const itemsPerPage = 6;
 
   // Language filtered paths
@@ -87,6 +89,10 @@ export function Paths() {
   // Search & category filtered paths
   const filteredPaths = useMemo(() => {
     return availablePaths.filter(path => {
+      if (showFavoritesOnly && !favorites?.[`path_${path.id}`]) {
+        return false;
+      }
+
       // Category filter
       if (selectedCategory !== 'all') {
         const pathCourses = path.courseIds.map(id => courses.find(c => c.id === id)).filter(Boolean);
@@ -108,7 +114,7 @@ export function Paths() {
 
       return inTitle || inDesc || inCourses;
     });
-  }, [availablePaths, courses, searchQuery, selectedCategory]);
+  }, [availablePaths, courses, searchQuery, selectedCategory, showFavoritesOnly, favorites]);
 
   const totalPages = Math.ceil(filteredPaths.length / itemsPerPage);
   
@@ -262,6 +268,21 @@ export function Paths() {
           
           {/* Scrollable Category Chips */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none">
+            <button
+              onClick={() => {
+                setShowFavoritesOnly(prev => !prev);
+                setCurrentPage(1);
+              }}
+              className={cn(
+                "px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all cursor-pointer border shrink-0",
+                showFavoritesOnly
+                  ? "bg-rose-500 text-white border-rose-500 shadow-xs font-bold"
+                  : "bg-card text-rose-500 hover:bg-rose-500/10 border-rose-500/30"
+              )}
+            >
+              ❤️ {isRtl ? 'المفضلة' : 'Favorites'}
+            </button>
+
             {categoryFilters.map((cat) => (
               <button
                 key={cat.id}
@@ -320,13 +341,14 @@ export function Paths() {
                     <Icon className="w-6 h-6 sm:w-7 sm:h-7" />
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
                     <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2.5 py-1 rounded-lg border border-border/40">
                       {isRtl ? 'مسار مهني' : 'Career Track'}
                     </span>
                     <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg">
                       {path.courseIds.length} {t('playlists_in_this_path').split(' ')[0]}
                     </span>
+                    <FavoriteButton itemId={path.id} itemType="path" size="sm" />
                   </div>
                 </div>
 

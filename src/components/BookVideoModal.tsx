@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Book } from '../data/courses';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
+import { FavoriteButton } from './FavoriteButton';
 
 export const BOOK_CATEGORY_LABELS_AR: Record<string, string> = {
   'All': 'جميع الكتب',
@@ -566,6 +567,13 @@ export function BookVideoModal({ book, onClose, onSelectBook }: BookVideoModalPr
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <FavoriteButton
+              itemId={currentBook.id}
+              itemType="book"
+              variant="pill"
+              size="sm"
+            />
+
             <button
               type="button"
               onClick={handleShare}

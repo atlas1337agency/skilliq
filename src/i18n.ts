@@ -507,7 +507,14 @@ const resources = {
       "books_section_desc": "Explore essential engineering, AI, cybersecurity, and deep-focus books explained by top YouTube creators.",
       "explore_more_books": "Explore More Books",
       "buy_book": "Buy This Book",
-      "watch_book_explanation": "Watch Book Explanation"
+      "watch_book_explanation": "Watch Book Explanation",
+      "saved_and_favorites": "Saved & Favorites Library",
+      "saved_favorites_desc": "Playlists, masterclasses, learning paths, and books you saved to return to anytime.",
+      "save_for_later": "Save for Later",
+      "saved_in_profile": "Saved in Profile",
+      "remove_from_favorites": "Remove from Favorites",
+      "no_favorites_yet": "Your Favorites Library is Empty",
+      "favorites_filter": "Favorites"
     }
   },
   ar: {
@@ -1015,7 +1022,14 @@ const resources = {
       "books_section_desc": "استكشف أهم الكتب العالمية في البرمجة، الذكاء الاصطناعي، الأمن السيبراني، وتطوير الذات مشروحة بالفيديو من أفضل صناع المحتوى.",
       "explore_more_books": "استكشف المزيد من الكتب والتصنيفات",
       "buy_book": "شراء الكتاب",
-      "watch_book_explanation": "مشاهدة شرح الكتاب بالفيديو"
+      "watch_book_explanation": "مشاهدة شرح الكتاب بالفيديو",
+      "saved_and_favorites": "مكتبة المفضلة والعناصر المحفوظة",
+      "saved_favorites_desc": "جميع السلاسل التعليمية، الماستر كلاس، المسارات، والكتب التي قمت بحفظها للرجوع إليها في أي وقت.",
+      "save_for_later": "حفظ في المفضلة",
+      "saved_in_profile": "محفوظ في حسابي",
+      "remove_from_favorites": "إزالة من المفضلة",
+      "no_favorites_yet": "قائمة المفضلة فارغة حالياً",
+      "favorites_filter": "المفضلة"
     }
   }
 };
