@@ -17,7 +17,11 @@ import {
   RotateCcw, 
   ArrowRight, 
   Flame,
-  Layers
+  Layers,
+  Eye,
+  ThumbsUp,
+  MessageSquare,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, filterByLanguage } from '../lib/utils';
@@ -25,6 +29,7 @@ import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { SEO } from '../components/SEO';
+import { formatCompactNumber } from '../lib/youtube';
 import { 
   buildDeduplicatedCategories, 
   matchCourseCategory, 
@@ -725,14 +730,44 @@ export function Masterclasses() {
                   </p>
                   
                   {/* Instructor & Duration strip */}
-                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-5 bg-muted/30 p-2.5 rounded-xl border border-border/50">
-                    <div className="flex items-center gap-1.5 font-bold text-foreground">
-                      <Clock className="w-3.5 h-3.5 text-primary" />
-                      <span>{course.videos[0]?.duration || '2h+'}</span>
+                  <div className="flex flex-col gap-2 text-xs text-muted-foreground mb-5 bg-muted/30 p-2.5 rounded-xl border border-border/50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-bold text-foreground">
+                        <Clock className="w-3.5 h-3.5 text-primary" />
+                        <span>{course.videos[0]?.duration || '2h+'}</span>
+                      </div>
+                      <div className="font-medium text-foreground max-w-[55%] truncate flex items-center gap-1.5">
+                        <ScrollingText>{course.instructor}</ScrollingText>
+                        {(course.subscriberCountText || (course.subscriberCount && course.subscriberCount > 0)) && (
+                          <span className="shrink-0 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full border border-red-500/20">
+                            {course.subscriberCountText || formatCompactNumber(course.subscriberCount)}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="font-medium text-foreground max-w-[50%] truncate">
-                      <ScrollingText>{course.instructor}</ScrollingText>
-                    </div>
+
+                    {(() => {
+                      const cViews = course.totalViews || course.videos.reduce((s, v) => s + (v.viewCount || 0), 0);
+                      const cLikes = course.totalLikes || course.videos.reduce((s, v) => s + (v.likeCount || 0), 0);
+                      const cComments = course.totalComments || course.videos.reduce((s, v) => s + (v.commentCount || 0), 0);
+                      if (!cViews && !cLikes && !cComments) return null;
+                      return (
+                        <div className="flex items-center justify-between pt-1.5 border-t border-border/50 text-[11px] font-semibold">
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <Eye className="w-3 h-3 text-primary" />
+                            <span>{formatCompactNumber(cViews)}</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <ThumbsUp className="w-3 h-3 text-emerald-500" />
+                            <span>{formatCompactNumber(cLikes)}</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <MessageSquare className="w-3 h-3 text-amber-500" />
+                            <span>{formatCompactNumber(cComments)}</span>
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Action Button */}

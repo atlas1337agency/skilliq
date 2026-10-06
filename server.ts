@@ -585,6 +585,30 @@ Level: "${currentLevel}"`;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  // Parse human-readable count strings like "1.4M subscribers", "245K", "1,234,567 views" into numbers
+  const parseHumanNumber = (raw?: string): number => {
+    if (!raw) return 0;
+    const cleaned = String(raw).replace(/,/g, '').trim();
+    const match = cleaned.match(/([\d.]+)\s*([KMBkmb]|ألف|مليون)?/);
+    if (!match) return 0;
+    const num = parseFloat(match[1]);
+    if (isNaN(num)) return 0;
+    const unit = (match[2] || '').toUpperCase();
+    if (unit === 'K' || unit === 'ألف') return Math.round(num * 1_000);
+    if (unit === 'M' || unit === 'مليون') return Math.round(num * 1_000_000);
+    if (unit === 'B') return Math.round(num * 1_000_000_000);
+    return Math.round(num);
+  };
+
+  // Format number into clean compact form (e.g. 1.2M, 45.3K)
+  const formatCompactCount = (n?: number): string => {
+    if (!n || isNaN(n) || n <= 0) return '0';
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
+    return n.toLocaleString('en-US');
+  };
+
   // Smart YouTube Single Video Info Fetcher (Works with API Key OR keyless oEmbed + watch page extraction)
   app.get('/api/youtube/video-info', async (req, res) => {
     try {
@@ -601,12 +625,18 @@ Level: "${currentLevel}"`;
       let youtubeName = '';
       let youtubeAvatar = '';
       let youtubeChannelUrl = '';
+      let channelId = '';
       let description = '';
+      let viewCount = 0;
+      let likeCount = 0;
+      let commentCount = 0;
+      let subscriberCount = 0;
+      let subscriberCountText = '';
 
       // 1. Try Official YouTube Data API v3 if key is available
       if (apiKey) {
         try {
-          const vUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`;
+          const vUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`;
           const vRes = await fetch(vUrl);
           const vData = await vRes.json();
           if (vData.items && vData.items.length > 0) {
@@ -619,15 +649,24 @@ Level: "${currentLevel}"`;
               item.snippet?.thumbnails?.high?.url ||
               videoThumbnail;
             youtubeName = item.snippet?.channelTitle || '';
-            const channelId = item.snippet?.channelId;
+            channelId = item.snippet?.channelId || '';
+            viewCount = parseInt(item.statistics?.viewCount || '0', 10) || 0;
+            likeCount = parseInt(item.statistics?.likeCount || '0', 10) || 0;
+            commentCount = parseInt(item.statistics?.commentCount || '0', 10) || 0;
+
             if (channelId) {
               youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}`;
-              const cUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(apiKey)}`;
+              const cUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(apiKey)}`;
               const cRes = await fetch(cUrl);
               const cData = await cRes.json();
               if (cData.items && cData.items.length > 0) {
-                const cSnippet = cData.items[0].snippet;
+                const cItem = cData.items[0];
+                const cSnippet = cItem.snippet;
                 youtubeAvatar = cSnippet?.thumbnails?.high?.url || cSnippet?.thumbnails?.default?.url || '';
+                subscriberCount = parseInt(cItem.statistics?.subscriberCount || '0', 10) || 0;
+                if (subscriberCount > 0) {
+                  subscriberCountText = formatCompactCount(subscriberCount);
+                }
               }
             }
           }
@@ -652,9 +691,9 @@ Level: "${currentLevel}"`;
         }
       }
 
-      if (!videoDuration || !youtubeAvatar || !description) {
+      if (!videoDuration || !youtubeAvatar || !description || !viewCount || !likeCount || !subscriberCount) {
         try {
-          const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
+          const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&hl=en`, {
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
               'Accept-Language': 'en-US,en;q=0.9'
@@ -691,6 +730,73 @@ Level: "${currentLevel}"`;
               }
             }
 
+            // Real View Count Extraction
+            if (!viewCount) {
+              const viewMatch =
+                html.match(/"viewCount":"(\d+)"/) ||
+                html.match(/itemprop="interactionCount"\s+content="(\d+)"/);
+              if (viewMatch && viewMatch[1]) {
+                viewCount = parseInt(viewMatch[1], 10) || 0;
+              }
+            }
+
+            // Real Like Count Extraction
+            if (!likeCount) {
+              const likePatterns = [
+                /"iconName":"LIKE"[^}]*?"title":"([\d.,KMB]+)"/i,
+                /"label":"([\d,]+)\s+likes"/i,
+                /"accessibilityText":"like this video along with ([\d,]+) other people"/i,
+                /"likeCount":(\d+)/,
+                /"likeCountIfIndifferentNumber":"(\d+)"/,
+                /"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i,
+                /"toggledText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i
+              ];
+              for (const pat of likePatterns) {
+                const m = html.match(pat);
+                if (m && m[1]) {
+                  const parsed = parseHumanNumber(m[1]);
+                  if (parsed > 0) {
+                    likeCount = parsed;
+                    break;
+                  }
+                }
+              }
+            }
+
+            // Real Comment Count Extraction
+            if (!commentCount) {
+              const commentPatterns = [
+                /"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i,
+                /"engagementPanelTitleHeaderRenderer":\{"title":\{"runs":\[\{"text":"Comments"\}\]\},"contextualInfo":\{"runs":\[\{"text":"([\d.,KMB]+)"\}\]/i,
+                /"commentsEntryPointHeaderRenderer":\{.*?"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i,
+                /"countText":\{"runs":\[\{"text":"([\d,]+)"\},\{"text":"\s*Comments"\}\]/i
+              ];
+              for (const pat of commentPatterns) {
+                const m = html.match(pat);
+                if (m && m[1]) {
+                  const parsed = parseHumanNumber(m[1]);
+                  if (parsed > 0) {
+                    commentCount = parsed;
+                    break;
+                  }
+                }
+              }
+            }
+
+            // Real Subscriber Count Extraction
+            if (!subscriberCount) {
+              const subMatch =
+                html.match(/"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}\},"simpleText":"([^"]+)"\}/) ||
+                html.match(/"subscriberCountText":\{"simpleText":"([^"]+)"\}/) ||
+                html.match(/"subscriberCountText":\{"runs":\[\{"text":"([^"]+)"\}/);
+              if (subMatch) {
+                const rawSub = subMatch[2] || subMatch[1] || '';
+                const cleanSub = rawSub.replace(/subscribers|مشترك|مشتركين/gi, '').trim();
+                subscriberCount = parseHumanNumber(cleanSub);
+                subscriberCountText = cleanSub || formatCompactCount(subscriberCount);
+              }
+            }
+
             if (!youtubeAvatar) {
               const ownerAvatarMatch = html.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"([^"]+)"/);
               if (ownerAvatarMatch && ownerAvatarMatch[1]) {
@@ -703,11 +809,15 @@ Level: "${currentLevel}"`;
               }
             }
 
-            if (!youtubeChannelUrl) {
+            if (!channelId) {
               const chanMatch = html.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/);
               if (chanMatch && chanMatch[1]) {
-                youtubeChannelUrl = `https://www.youtube.com/channel/${chanMatch[1]}`;
+                channelId = chanMatch[1];
               }
+            }
+
+            if (!youtubeChannelUrl && channelId) {
+              youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}`;
             }
           }
         } catch (scrapeErr) {
@@ -722,13 +832,20 @@ Level: "${currentLevel}"`;
       res.json({
         success: true,
         youtubeId: videoId,
-        videoTitle: videoTitle || 'Book Video Summary',
+        videoTitle: videoTitle || 'Video Lesson',
         videoDuration: videoDuration || '15:00',
         videoThumbnail,
         youtubeName: youtubeName || 'YouTube Creator',
         youtubeAvatar,
         youtubeChannelUrl: youtubeChannelUrl || `https://www.youtube.com/watch?v=${videoId}`,
-        description: description ? description.slice(0, 1200) : ''
+        channelId,
+        viewCount,
+        likeCount,
+        commentCount,
+        subscriberCount,
+        subscriberCountText: subscriberCountText || (subscriberCount > 0 ? formatCompactCount(subscriberCount) : ''),
+        description: description ? description.slice(0, 1200) : '',
+        syncedAt: Date.now()
       });
     } catch (err: any) {
       console.error('Error in /api/youtube/video-info:', err);
@@ -826,72 +943,400 @@ Level: "${currentLevel}"`;
     res.json({ success: true, deletedId: id });
   });
 
+  // Private Community Posts API Endpoints (Persistence alongside Firestore)
+  const communityPostsFilePath = path.join(process.cwd(), 'src', 'data', 'community_posts.json');
+  const deletedCommunityPostsFilePath = path.join(process.cwd(), 'src', 'data', 'deleted_community_posts.json');
+  const communityCategoriesFilePath = path.join(process.cwd(), 'src', 'data', 'community_categories.json');
+
+  const getStoredCommunityCategories = (): any[] => {
+    try {
+      if (fs.existsSync(communityCategoriesFilePath)) {
+        const raw = fs.readFileSync(communityCategoriesFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.error('Error reading community_categories.json:', e);
+    }
+    return [];
+  };
+
+  const saveStoredCommunityCategories = (catsList: any[]) => {
+    try {
+      fs.writeFileSync(communityCategoriesFilePath, JSON.stringify(catsList, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing community_categories.json:', e);
+    }
+  };
+
+  app.get('/api/community/categories', (req, res) => {
+    res.json({ categories: getStoredCommunityCategories() });
+  });
+
+  app.post('/api/community/categories', (req, res) => {
+    const { categories } = req.body;
+    if (!Array.isArray(categories)) {
+      return res.status(400).json({ error: 'Invalid categories payload' });
+    }
+    saveStoredCommunityCategories(categories);
+    res.json({ success: true, categories });
+  });
+
+  const getStoredCommunityPosts = (): any[] => {
+    try {
+      if (fs.existsSync(communityPostsFilePath)) {
+        const raw = fs.readFileSync(communityPostsFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.error('Error reading community_posts.json:', e);
+    }
+    return [];
+  };
+
+  const saveStoredCommunityPosts = (postsList: any[]) => {
+    try {
+      fs.writeFileSync(communityPostsFilePath, JSON.stringify(postsList, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing community_posts.json:', e);
+    }
+  };
+
+  const getDeletedCommunityPostIds = (): string[] => {
+    try {
+      if (fs.existsSync(deletedCommunityPostsFilePath)) {
+        const raw = fs.readFileSync(deletedCommunityPostsFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.error('Error reading deleted_community_posts.json:', e);
+    }
+    return [];
+  };
+
+  const saveDeletedCommunityPostIds = (ids: string[]) => {
+    try {
+      fs.writeFileSync(deletedCommunityPostsFilePath, JSON.stringify(Array.from(new Set(ids)), null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing deleted_community_posts.json:', e);
+    }
+  };
+
+  app.get('/api/community', (req, res) => {
+    const list = getStoredCommunityPosts();
+    const deletedIds = getDeletedCommunityPostIds();
+    res.json({ posts: list.filter(p => p && !deletedIds.includes(p.id)), deletedIds });
+  });
+
+  app.post('/api/community', (req, res) => {
+    const post = req.body;
+    if (!post || !post.id) {
+      return res.status(400).json({ error: 'Invalid community post payload' });
+    }
+    const current = getStoredCommunityPosts();
+    const idx = current.findIndex(p => p.id === post.id);
+    if (idx !== -1) {
+      current[idx] = { ...current[idx], ...post };
+    } else {
+      current.unshift(post);
+    }
+    saveStoredCommunityPosts(current);
+
+    const deletedIds = getDeletedCommunityPostIds();
+    if (deletedIds.includes(post.id)) {
+      saveDeletedCommunityPostIds(deletedIds.filter(id => id !== post.id));
+    }
+
+    res.json({ success: true, post });
+  });
+
+  app.post('/api/community/:id/react', (req, res) => {
+    const { id } = req.params;
+    const { userId, reaction } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+    const current = getStoredCommunityPosts();
+    const idx = current.findIndex(p => p.id === id);
+    if (idx !== -1) {
+      const reactions = { ...(current[idx].reactions || {}) };
+      if (!reaction) {
+        delete reactions[userId];
+      } else {
+        reactions[userId] = reaction;
+      }
+      current[idx] = { ...current[idx], reactions };
+      saveStoredCommunityPosts(current);
+      return res.json({ success: true, post: current[idx] });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete('/api/community/:id', (req, res) => {
+    const { id } = req.params;
+    const current = getStoredCommunityPosts();
+    const filtered = current.filter(p => p.id !== id);
+    saveStoredCommunityPosts(filtered);
+
+    const deletedIds = getDeletedCommunityPostIds();
+    if (!deletedIds.includes(id)) {
+      deletedIds.push(id);
+      saveDeletedCommunityPostIds(deletedIds);
+    }
+
+    res.json({ success: true, deletedId: id });
+  });
+
   app.get('/api/youtube/playlist', async (req, res) => {
     try {
-      const playlistId = req.query.id as string;
+      const playlistId = (req.query.id as string || '').trim();
       const apiKey = (req.query.key as string) || process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY;
 
       if (!playlistId) {
         return res.status(400).json({ error: 'Missing playlist id parameter' });
       }
-      if (!apiKey) {
-        return res.status(400).json({ error: 'Missing YouTube API Key' });
-      }
 
-      let allItems: any[] = [];
-      let nextPageToken = "";
+      let videos: any[] = [];
+      let channelId = '';
+      let channelName = '';
+      let channelAvatar = '';
+      let channelUrl = '';
+      let subscriberCount = 0;
+      let subscriberCountText = '';
 
-      do {
-        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}&key=${apiKey}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
-        const ytRes = await fetch(url);
-        const data = await ytRes.json();
-        if (data.error) {
-          return res.status(400).json({ error: data.error.message || 'Failed to fetch playlist items' });
-        }
-        if (!data.items || data.items.length === 0) break;
-        allItems = allItems.concat(data.items);
-        nextPageToken = data.nextPageToken || "";
-      } while (nextPageToken);
+      // 1. Official YouTube Data API v3 when key is available
+      if (apiKey) {
+        try {
+          let allItems: any[] = [];
+          let nextPageToken = '';
 
-      const videos = [];
-      const chunks = [];
-      for (let i = 0; i < allItems.length; i += 50) {
-        chunks.push(allItems.slice(i, i + 50));
-      }
+          do {
+            const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${encodeURIComponent(playlistId)}&key=${encodeURIComponent(apiKey)}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
+            const ytRes = await fetch(url);
+            const data = await ytRes.json();
+            if (data.error) {
+              break;
+            }
+            if (!data.items || data.items.length === 0) break;
+            allItems = allItems.concat(data.items);
+            nextPageToken = data.nextPageToken || '';
+          } while (nextPageToken);
 
-      for (const chunk of chunks) {
-        const videoIds = chunk.map((item: any) => item.snippet?.resourceId?.videoId || item.contentDetails?.videoId).filter(Boolean).join(',');
-        if (!videoIds) continue;
-
-        const durUrl = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${apiKey}`;
-        const durRes = await fetch(durUrl);
-        const durData = await durRes.json();
-
-        const durationMap: Record<string, string> = {};
-        if (durData.items) {
-          for (const item of durData.items) {
-            durationMap[item.id] = formatIsoDuration(item.contentDetails?.duration);
+          if (allItems.length > 0) {
+            channelId = allItems[0]?.snippet?.videoOwnerChannelId || allItems[0]?.snippet?.channelId || '';
+            channelName = allItems[0]?.snippet?.videoOwnerChannelTitle || allItems[0]?.snippet?.channelTitle || '';
           }
-        }
 
-        for (const item of chunk) {
-          const vId = item.snippet?.resourceId?.videoId || item.contentDetails?.videoId;
-          const isPrivateOrDeleted = item.snippet?.title === "Private video" || item.snippet?.title === "Deleted video";
-          if (vId && !isPrivateOrDeleted) {
-            videos.push({
-              id: `v${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-              title: item.snippet?.title || "Unknown Title",
-              youtubeId: vId,
-              duration: durationMap[vId] || "00:00",
-              language: "",
-              description: "",
-              resources: []
-            });
+          const chunks: any[][] = [];
+          for (let i = 0; i < allItems.length; i += 50) {
+            chunks.push(allItems.slice(i, i + 50));
           }
+
+          for (const chunk of chunks) {
+            const videoIds = chunk
+              .map((item: any) => item.snippet?.resourceId?.videoId || item.contentDetails?.videoId)
+              .filter(Boolean)
+              .join(',');
+            if (!videoIds) continue;
+
+            const durUrl = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics,snippet&id=${encodeURIComponent(videoIds)}&key=${encodeURIComponent(apiKey)}`;
+            const durRes = await fetch(durUrl);
+            const durData = await durRes.json();
+
+            const detailsMap: Record<string, { duration: string; viewCount: number; likeCount: number; commentCount: number; publishedAt: string }> = {};
+            if (durData.items) {
+              for (const item of durData.items) {
+                detailsMap[item.id] = {
+                  duration: formatIsoDuration(item.contentDetails?.duration),
+                  viewCount: parseInt(item.statistics?.viewCount || '0', 10) || 0,
+                  likeCount: parseInt(item.statistics?.likeCount || '0', 10) || 0,
+                  commentCount: parseInt(item.statistics?.commentCount || '0', 10) || 0,
+                  publishedAt: item.snippet?.publishedAt || '',
+                };
+              }
+            }
+
+            for (const item of chunk) {
+              const vId = item.snippet?.resourceId?.videoId || item.contentDetails?.videoId;
+              const isPrivateOrDeleted =
+                item.snippet?.title === 'Private video' || item.snippet?.title === 'Deleted video';
+              if (vId && !isPrivateOrDeleted) {
+                const det = detailsMap[vId];
+                videos.push({
+                  id: `v_${vId}`,
+                  title: item.snippet?.title || 'Unknown Title',
+                  youtubeId: vId,
+                  duration: det?.duration || '15:00',
+                  viewCount: det?.viewCount || 0,
+                  likeCount: det?.likeCount || 0,
+                  commentCount: det?.commentCount || 0,
+                  publishedAt: det?.publishedAt || item.contentDetails?.videoPublishedAt || '',
+                  language: '',
+                  description: item.snippet?.description ? String(item.snippet.description).slice(0, 600) : '',
+                  resources: [],
+                });
+              }
+            }
+          }
+
+          if (channelId) {
+            channelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
+            const cUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(apiKey)}`;
+            const cRes = await fetch(cUrl);
+            const cData = await cRes.json();
+            if (cData.items && cData.items.length > 0) {
+              const cItem = cData.items[0];
+              channelName = cItem.snippet?.title || channelName;
+              channelAvatar =
+                cItem.snippet?.thumbnails?.high?.url || cItem.snippet?.thumbnails?.default?.url || '';
+              subscriberCount = parseInt(cItem.statistics?.subscriberCount || '0', 10) || 0;
+              if (subscriberCount > 0) {
+                subscriberCountText = formatCompactCount(subscriberCount);
+              }
+            }
+          }
+        } catch (apiErr) {
+          console.warn('YouTube Data API playlist warning, trying keyless fallback:', apiErr);
         }
       }
 
-      res.json({ success: true, videos });
+      // 2. Keyless Public Playlist Extraction Fallback (when no API Key or API quota reached)
+      if (videos.length === 0) {
+        try {
+          const plRes = await fetch(`https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}&hl=en`, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          });
+          if (plRes.ok) {
+            const html = await plRes.text();
+            const initMatch = html.match(/var ytInitialData = (\{.*?\});<\/script>/s);
+            if (initMatch && initMatch[1]) {
+              const initData = JSON.parse(initMatch[1]);
+              const jsonStr = JSON.stringify(initData);
+
+              // Extract playlistVideoRenderer items
+              const rendererRegex = /"playlistVideoRenderer":\{"videoId":"([a-zA-Z0-9_-]{11})".*?"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"\}\](?:.*?"videoInfo":\{"runs":\[\{"text":"([^"]+)"\})?.*?"lengthText":\{.*?"simpleText":"([^"]+)"\}/g;
+              const seenIds = new Set<string>();
+              let match: RegExpExecArray | null;
+              while ((match = rendererRegex.exec(jsonStr)) !== null) {
+                const vId = match[1];
+                if (seenIds.has(vId)) continue;
+                seenIds.add(vId);
+                let vTitle = match[2];
+                try {
+                  vTitle = JSON.parse(`"${vTitle}"`);
+                } catch {}
+                const rawViews = match[3] || '';
+                const vViews = parseHumanNumber(rawViews);
+                const vDur = match[4] || '15:00';
+                if (vTitle !== 'Private video' && vTitle !== 'Deleted video') {
+                  videos.push({
+                    id: `v_${vId}`,
+                    title: vTitle,
+                    youtubeId: vId,
+                    duration: vDur,
+                    viewCount: vViews,
+                    likeCount: 0,
+                    commentCount: 0,
+                    language: '',
+                    description: '',
+                    resources: [],
+                  });
+                }
+              }
+
+              // Also try to enrich the first video & channel metadata via watch page if channel info is missing
+              if (videos.length > 0 && (!channelName || !subscriberCount || !videos[0].likeCount)) {
+                try {
+                  const firstVidId = videos[0].youtubeId;
+                  const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(firstVidId)}&hl=en`, {
+                    headers: {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                      'Accept-Language': 'en-US,en;q=0.9',
+                    },
+                  });
+                  if (watchRes.ok) {
+                    const wHtml = await watchRes.text();
+                    const viewMatch = wHtml.match(/"viewCount":"(\d+)"/);
+                    if (viewMatch && viewMatch[1]) {
+                      videos[0].viewCount = parseInt(viewMatch[1], 10) || videos[0].viewCount;
+                    }
+                    const likeMatch =
+                      wHtml.match(/"iconName":"LIKE"[^}]*?"title":"([\d.,KMB]+)"/i) ||
+                      wHtml.match(/"label":"([\d,]+)\s+likes"/i) ||
+                      wHtml.match(/"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i);
+                    if (likeMatch && likeMatch[1]) {
+                      videos[0].likeCount = parseHumanNumber(likeMatch[1]);
+                    }
+                    const commentMatch =
+                      wHtml.match(/"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i) ||
+                      wHtml.match(/"engagementPanelTitleHeaderRenderer":\{"title":\{"runs":\[\{"text":"Comments"\}\]\},"contextualInfo":\{"runs":\[\{"text":"([\d.,KMB]+)"\}\]/i);
+                    if (commentMatch && commentMatch[1]) {
+                      videos[0].commentCount = parseHumanNumber(commentMatch[1]);
+                    }
+                    const subMatch =
+                      wHtml.match(/"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}\},"simpleText":"([^"]+)"\}/) ||
+                      wHtml.match(/"subscriberCountText":\{"simpleText":"([^"]+)"\}/) ||
+                      wHtml.match(/"subscriberCountText":\{"runs":\[\{"text":"([^"]+)"\}/);
+                    if (subMatch) {
+                      const rawSub = subMatch[2] || subMatch[1] || '';
+                      const cleanSub = rawSub.replace(/subscribers|مشترك|مشتركين/gi, '').trim();
+                      subscriberCount = parseHumanNumber(cleanSub);
+                      subscriberCountText = cleanSub || formatCompactCount(subscriberCount);
+                    }
+                    const ownerAvatarMatch = wHtml.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"([^"]+)"/);
+                    if (ownerAvatarMatch && ownerAvatarMatch[1]) {
+                      channelAvatar = ownerAvatarMatch[1].replace(/\\u0026/g, '&');
+                    }
+                    const chanIdMatch = wHtml.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/);
+                    if (chanIdMatch && chanIdMatch[1]) {
+                      channelId = chanIdMatch[1];
+                      channelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
+                    }
+                    const authorMatch = wHtml.match(/"author":"((?:[^"\\]|\\.)*)"/);
+                    if (authorMatch && authorMatch[1] && !channelName) {
+                      channelName = authorMatch[1];
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+        } catch (scrapeErr) {
+          console.warn('Keyless playlist scrape fallback warning:', scrapeErr);
+        }
+      }
+
+      if (videos.length === 0) {
+        return res.status(400).json({
+          error: 'Could not extract videos from this playlist. Make sure the playlist is Public.',
+        });
+      }
+
+      // Calculate total playlist metrics
+      const totalViews = videos.reduce((acc, v) => acc + (v.viewCount || 0), 0);
+      const totalLikes = videos.reduce((acc, v) => acc + (v.likeCount || 0), 0);
+      const totalComments = videos.reduce((acc, v) => acc + (v.commentCount || 0), 0);
+
+      res.json({
+        success: true,
+        playlistId,
+        videos,
+        channelId,
+        channelName,
+        channelAvatar,
+        channelUrl,
+        subscriberCount,
+        subscriberCountText: subscriberCountText || (subscriberCount > 0 ? formatCompactCount(subscriberCount) : ''),
+        totalViews,
+        totalLikes,
+        totalComments,
+        syncedAt: Date.now(),
+      });
     } catch (err: any) {
       console.error('Server YouTube playlist fetch error:', err);
       res.status(500).json({ error: err.message || 'Server error fetching playlist' });

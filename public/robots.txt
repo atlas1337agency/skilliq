@@ -4,4 +4,4 @@ Disallow: /admin
 Disallow: /dashboard
 Disallow: /api/
 
-Sitemap: https://skilliq.me/sitemap.xml
+Sitemap: https://skilliq1337.online/sitemap.xml

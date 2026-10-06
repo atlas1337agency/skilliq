@@ -1,3 +1,5 @@
+import { Course, Video } from '../data/courses';
+
 // YouTube API Key management
 export const getYouTubeApiKey = (): string => {
   try {
@@ -36,206 +38,312 @@ export const removeCustomYouTubeApiKey = (): void => {
   } catch (e) {}
 };
 
+// Format number into compact form (e.g. 1.2M, 45.3K, 920)
+export const formatCompactNumber = (n?: number, fallbackText?: string): string => {
+  if (fallbackText && (!n || n <= 0)) return fallbackText;
+  if (!n || isNaN(n) || n <= 0) return '0';
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
+  return n.toLocaleString('en-US');
+};
+
+export const formatFullNumber = (n?: number): string => {
+  if (!n || isNaN(n) || n <= 0) return '0';
+  return n.toLocaleString('en-US');
+};
+
 // Format duration from PT1H2M10S to HH:MM:SS
 const formatDuration = (isoDuration: string) => {
-  if (!isoDuration) return "00:00";
+  if (!isoDuration) return '00:00';
   const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!match) return "00:00";
-  
-  const hours = parseInt(match[1] || "0", 10);
-  const minutes = parseInt(match[2] || "0", 10);
-  const seconds = parseInt(match[3] || "0", 10);
-  
-  let formatted = "";
+  if (!match) return '00:00';
+
+  const hours = parseInt(match[1] || '0', 10);
+  const minutes = parseInt(match[2] || '0', 10);
+  const seconds = parseInt(match[3] || '0', 10);
+
+  let formatted = '';
   if (hours > 0) formatted += `${hours}:`;
   formatted += `${hours > 0 && minutes < 10 ? '0' : ''}${minutes}:`;
   formatted += `${seconds < 10 ? '0' : ''}${seconds}`;
   return formatted;
 };
 
-export const fetchPlaylistVideos = async (playlistId: string, customApiKey?: string) => {
+export interface PlaylistSyncResponse {
+  playlistId: string;
+  videos: Video[];
+  channelId?: string;
+  channelName?: string;
+  channelAvatar?: string;
+  channelUrl?: string;
+  subscriberCount?: number;
+  subscriberCountText?: string;
+  totalViews?: number;
+  totalLikes?: number;
+  totalComments?: number;
+  syncedAt: number;
+}
+
+export const fetchPlaylistFullData = async (
+  playlistId: string,
+  customApiKey?: string
+): Promise<PlaylistSyncResponse> => {
   const API_KEY = (customApiKey && customApiKey.trim()) || getYouTubeApiKey();
-  
-  // 1. If we have an API key, call YouTube Data API directly from client
+
+  // 1. Try backend smart endpoint first (/api/youtube/playlist) which uses API key if available OR keyless scraping
+  try {
+    const backendUrl = `/api/youtube/playlist?id=${encodeURIComponent(playlistId)}${
+      API_KEY ? `&key=${encodeURIComponent(API_KEY)}` : ''
+    }`;
+    const res = await fetch(backendUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.videos) && data.videos.length > 0) {
+        return {
+          playlistId,
+          videos: data.videos,
+          channelId: data.channelId || '',
+          channelName: data.channelName || '',
+          channelAvatar: data.channelAvatar || '',
+          channelUrl: data.channelUrl || '',
+          subscriberCount: data.subscriberCount || 0,
+          subscriberCountText: data.subscriberCountText || '',
+          totalViews: data.totalViews || 0,
+          totalLikes: data.totalLikes || 0,
+          totalComments: data.totalComments || 0,
+          syncedAt: data.syncedAt || Date.now(),
+        };
+      }
+    }
+  } catch (backendErr) {
+    console.warn('Backend /api/youtube/playlist warning, trying direct client fallback:', backendErr);
+  }
+
+  // 2. Direct client YouTube Data API v3 call if API_KEY is provided
   if (API_KEY) {
     try {
       let allItems: any[] = [];
-      let nextPageToken = "";
-      
-      // Fetch all items from the playlist (handles up to 50 items per page)
+      let nextPageToken = '';
+
       do {
-        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}&key=${API_KEY}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
+        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}&key=${API_KEY}${
+          nextPageToken ? `&pageToken=${nextPageToken}` : ''
+        }`;
         const res = await fetch(url);
         const data = await res.json();
-        
+
         if (data.error) {
-          throw new Error(data.error.message || "Failed to fetch playlist items");
+          throw new Error(data.error.message || 'Failed to fetch playlist items');
         }
         if (!data.items || data.items.length === 0) break;
 
         allItems = allItems.concat(data.items);
-        nextPageToken = data.nextPageToken || ""; 
+        nextPageToken = data.nextPageToken || '';
       } while (nextPageToken);
 
-      const videos = [];
-      const chunks = [];
-      // YouTube videos API only allows up to 50 IDs at a time, so we chunk it
-      for(let i = 0; i < allItems.length; i += 50) {
+      const videos: Video[] = [];
+      const chunks: any[][] = [];
+      for (let i = 0; i < allItems.length; i += 50) {
         chunks.push(allItems.slice(i, i + 50));
       }
 
-      // Get exact video durations for every chunk of 50 videos
+      let channelId =
+        allItems[0]?.snippet?.videoOwnerChannelId || allItems[0]?.snippet?.channelId || '';
+      let channelName =
+        allItems[0]?.snippet?.videoOwnerChannelTitle || allItems[0]?.snippet?.channelTitle || '';
+
       for (const chunk of chunks) {
-        const videoIds = chunk.map((item: any) => item.snippet?.resourceId?.videoId || item.contentDetails?.videoId).filter(Boolean).join(',');
+        const videoIds = chunk
+          .map((item: any) => item.snippet?.resourceId?.videoId || item.contentDetails?.videoId)
+          .filter(Boolean)
+          .join(',');
         if (!videoIds) continue;
 
-        const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${API_KEY}`;
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics,snippet&id=${videoIds}&key=${API_KEY}`;
         const res = await fetch(url);
         const data = await res.json();
-        
+
         if (data.error) {
-           console.error("Videos API Error:", data.error);
-           throw new Error(`Failed to fetch video durations: ${data.error.message}`);
+          throw new Error(`Failed to fetch video durations & statistics: ${data.error.message}`);
         }
 
-        const durationMap: Record<string, string> = {};
+        const detailsMap: Record<
+          string,
+          { duration: string; viewCount: number; likeCount: number; commentCount: number; publishedAt: string }
+        > = {};
         if (data.items) {
           for (const item of data.items) {
-            durationMap[item.id] = formatDuration(item.contentDetails?.duration);
+            detailsMap[item.id] = {
+              duration: formatDuration(item.contentDetails?.duration),
+              viewCount: parseInt(item.statistics?.viewCount || '0', 10) || 0,
+              likeCount: parseInt(item.statistics?.likeCount || '0', 10) || 0,
+              commentCount: parseInt(item.statistics?.commentCount || '0', 10) || 0,
+              publishedAt: item.snippet?.publishedAt || '',
+            };
           }
         }
 
-        // Build the clean video objects
         for (const item of chunk) {
           const vId = item.snippet?.resourceId?.videoId || item.contentDetails?.videoId;
-          const isPrivateOrDeleted = item.snippet?.title === "Private video" || item.snippet?.title === "Deleted video";
-          
+          const isPrivateOrDeleted =
+            item.snippet?.title === 'Private video' || item.snippet?.title === 'Deleted video';
+
           if (vId && !isPrivateOrDeleted) {
+            const det = detailsMap[vId];
             videos.push({
-              id: `v${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-              title: item.snippet?.title || "Unknown Title",
+              id: `v_${vId}`,
+              title: item.snippet?.title || 'Unknown Title',
               youtubeId: vId,
-              duration: durationMap[vId] || "00:00",
-              language: "",
-              description: "",
-              resources: []
+              duration: det?.duration || '00:00',
+              viewCount: det?.viewCount || 0,
+              likeCount: det?.likeCount || 0,
+              commentCount: det?.commentCount || 0,
+              publishedAt: det?.publishedAt || '',
+              language: '',
+              description: item.snippet?.description ? String(item.snippet.description).slice(0, 500) : '',
+              resources: [],
             });
           }
         }
       }
-      
+
+      let channelAvatar = '';
+      let channelUrl = '';
+      let subscriberCount = 0;
+      let subscriberCountText = '';
+
+      if (channelId) {
+        channelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
+        try {
+          const cUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}&key=${API_KEY}`;
+          const cRes = await fetch(cUrl);
+          const cData = await cRes.json();
+          if (cData.items && cData.items.length > 0) {
+            const cItem = cData.items[0];
+            channelName = cItem.snippet?.title || channelName;
+            channelAvatar =
+              cItem.snippet?.thumbnails?.high?.url || cItem.snippet?.thumbnails?.default?.url || '';
+            subscriberCount = parseInt(cItem.statistics?.subscriberCount || '0', 10) || 0;
+            subscriberCountText = formatCompactNumber(subscriberCount);
+          }
+        } catch {}
+      }
+
+      const totalViews = videos.reduce((acc, v) => acc + (v.viewCount || 0), 0);
+      const totalLikes = videos.reduce((acc, v) => acc + (v.likeCount || 0), 0);
+      const totalComments = videos.reduce((acc, v) => acc + (v.commentCount || 0), 0);
+
       if (videos.length > 0) {
-        return videos;
+        return {
+          playlistId,
+          videos,
+          channelId,
+          channelName,
+          channelAvatar,
+          channelUrl,
+          subscriberCount,
+          subscriberCountText,
+          totalViews,
+          totalLikes,
+          totalComments,
+          syncedAt: Date.now(),
+        };
       }
-    } catch (clientErr: any) {
-      console.warn("Client YouTube API direct call error, trying backend fallback:", clientErr);
+    } catch (clientErr) {
+      console.warn('Direct client YouTube playlist fetch warning:', clientErr);
     }
   }
 
-  // 2. Try backend API proxy fallback (/api/youtube/playlist)
-  try {
-    const backendUrl = `/api/youtube/playlist?id=${encodeURIComponent(playlistId)}${API_KEY ? `&key=${encodeURIComponent(API_KEY)}` : ''}`;
-    const res = await fetch(backendUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.videos && Array.isArray(data.videos) && data.videos.length > 0) {
-        return data.videos;
-      }
-      if (data.error) {
-        throw new Error(data.error);
-      }
-    }
-  } catch (backendErr: any) {
-    console.warn("Backend /api/youtube/playlist error:", backendErr);
-  }
+  throw new Error('Failed to fetch playlist videos. Please make sure the playlist URL is public.');
+};
 
-  // 3. If neither worked and no API key exists, provide clear actionable message
-  if (!API_KEY) {
-    throw new Error(
-      "Missing YouTube API Key on Vercel. Please paste your YouTube Data API Key below to import immediately, or add VITE_YOUTUBE_API_KEY in your Vercel Project Settings."
-    );
-  }
-
-  throw new Error("Failed to fetch playlist videos. Please check your playlist URL or YouTube API Key.");
+export const fetchPlaylistVideos = async (playlistId: string, customApiKey?: string) => {
+  const fullData = await fetchPlaylistFullData(playlistId, customApiKey);
+  return fullData.videos;
 };
 
 export const fetchVideoDetails = async (youtubeId: string, customApiKey?: string) => {
-  const API_KEY = (customApiKey && customApiKey.trim()) || getYouTubeApiKey();
-  if (!API_KEY) return null;
-
-  try {
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${youtubeId}&key=${API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.items && data.items.length > 0) {
-      const item = data.items[0];
-      const durationMatch = item.contentDetails.duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-      let durationStr = '00:00';
-      if (durationMatch) {
-         const h = (parseInt(durationMatch[1]) || 0);
-         const m = (parseInt(durationMatch[2]) || 0);
-         const s = (parseInt(durationMatch[3]) || 0);
-         if (h > 0) {
-           durationStr = `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-         } else {
-           durationStr = `${m}:${s.toString().padStart(2, '0')}`;
-         }
-      }
-
-      return {
-        title: item.snippet?.title || 'Unknown Title',
-        duration: durationStr,
-        description: item.snippet?.description || ''
-      };
-    }
-  } catch (err) {
-    console.error("Error fetching video details:", err);
-  }
-  return null;
+  const meta = await fetchFullYoutubeVideoMetadata(youtubeId, customApiKey);
+  if (!meta) return null;
+  return {
+    title: meta.videoTitle || 'Unknown Title',
+    duration: meta.videoDuration || '00:00',
+    description: meta.description || '',
+    viewCount: meta.viewCount || 0,
+    likeCount: meta.likeCount || 0,
+    commentCount: meta.commentCount || 0,
+  };
 };
 
 export const extractPlaylistId = (input: string) => {
   if (!input) return null;
   input = input.trim();
   const match = input.match(/[?&]list=([a-zA-Z0-9_-]+)/);
-  return match ? match[1] : input; 
+  if (match && match[1]) return match[1];
+  if (/^(PL|UU|FL|RD|OL)[a-zA-Z0-9_-]{10,}$/.test(input)) return input;
+  return null;
 };
 
-export const fetchChannelDetailsFromVideoOrPlaylist = async (id: string, isPlaylist: boolean, customApiKey?: string) => {
+export const fetchChannelDetailsFromVideoOrPlaylist = async (
+  id: string,
+  isPlaylist: boolean,
+  customApiKey?: string
+) => {
   const API_KEY = (customApiKey && customApiKey.trim()) || getYouTubeApiKey();
+
+  if (!isPlaylist) {
+    const meta = await fetchFullYoutubeVideoMetadata(id, API_KEY);
+    if (meta && meta.youtubeName) {
+      return {
+        instructorName: meta.youtubeName,
+        instructorAvatar: meta.youtubeAvatar,
+        instructorUrl: meta.youtubeChannelUrl,
+        channelId: meta.channelId || '',
+        subscriberCount: meta.subscriberCount || 0,
+        subscriberCountText: meta.subscriberCountText || '',
+      };
+    }
+  }
+
   if (!API_KEY) return null;
 
   try {
     let channelId = null;
 
     if (isPlaylist) {
-       const url = `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${id}&key=${API_KEY}`;
-       const res = await fetch(url);
-       const data = await res.json();
-       if (data.items && data.items.length > 0) {
-         channelId = data.items[0].snippet?.channelId;
-       }
+      const url = `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${id}&key=${API_KEY}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.items && data.items.length > 0) {
+        channelId = data.items[0].snippet?.channelId;
+      }
     } else {
-       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${id}&key=${API_KEY}`;
-       const res = await fetch(url);
-       const data = await res.json();
-       if (data.items && data.items.length > 0) {
-         channelId = data.items[0].snippet?.channelId;
-       }
+      const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${id}&key=${API_KEY}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.items && data.items.length > 0) {
+        channelId = data.items[0].snippet?.channelId;
+      }
     }
 
     if (!channelId) return null;
 
-    const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${channelId}&key=${API_KEY}`;
+    const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}&key=${API_KEY}`;
     const channelRes = await fetch(channelUrl);
     const channelData = await channelRes.json();
 
     if (channelData.items && channelData.items.length > 0) {
-      const channel = channelData.items[0].snippet;
+      const item = channelData.items[0];
+      const channel = item.snippet;
+      const subscriberCount = parseInt(item.statistics?.subscriberCount || '0', 10) || 0;
       return {
         instructorName: channel?.title || 'Unknown Instructor',
         instructorAvatar: channel?.thumbnails?.high?.url || channel?.thumbnails?.default?.url || '',
-        instructorUrl: `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`
+        instructorUrl: `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`,
+        channelId,
+        subscriberCount,
+        subscriberCountText: formatCompactNumber(subscriberCount),
       };
     }
   } catch (err) {
@@ -247,7 +355,8 @@ export const fetchChannelDetailsFromVideoOrPlaylist = async (id: string, isPlayl
 export const extractYoutubeVideoId = (input: string): string => {
   if (!input) return '';
   const str = input.trim();
-  const regExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const regExp =
+    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
   const match = str.match(regExp);
   if (match && match[1]) return match[1];
   if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
@@ -262,6 +371,12 @@ export interface YoutubeFullMetadata {
   youtubeName: string;
   youtubeAvatar: string;
   youtubeChannelUrl: string;
+  channelId?: string;
+  viewCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  subscriberCount?: number;
+  subscriberCountText?: string;
   description: string;
 }
 
@@ -276,7 +391,9 @@ export const fetchFullYoutubeVideoMetadata = async (
 
   // 1. Try server-side smart endpoint (/api/youtube/video-info) which supports both API key & keyless extraction
   try {
-    const apiUrl = `/api/youtube/video-info?id=${encodeURIComponent(youtubeId)}${API_KEY ? `&key=${encodeURIComponent(API_KEY)}` : ''}`;
+    const apiUrl = `/api/youtube/video-info?id=${encodeURIComponent(youtubeId)}${
+      API_KEY ? `&key=${encodeURIComponent(API_KEY)}` : ''
+    }`;
     const res = await fetch(apiUrl);
     if (res.ok) {
       const data = await res.json();
@@ -285,11 +402,22 @@ export const fetchFullYoutubeVideoMetadata = async (
           youtubeId: data.youtubeId,
           videoTitle: data.videoTitle || '',
           videoDuration: data.videoDuration || '15:00',
-          videoThumbnail: data.videoThumbnail || `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+          videoThumbnail:
+            data.videoThumbnail || `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
           youtubeName: data.youtubeName || 'YouTube Creator',
-          youtubeAvatar: data.youtubeAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.youtubeName || 'YT')}&background=ef4444&color=fff&bold=true`,
+          youtubeAvatar:
+            data.youtubeAvatar ||
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(
+              data.youtubeName || 'YT'
+            )}&background=ef4444&color=fff&bold=true`,
           youtubeChannelUrl: data.youtubeChannelUrl || `https://www.youtube.com/watch?v=${youtubeId}`,
-          description: data.description || ''
+          channelId: data.channelId || '',
+          viewCount: data.viewCount || 0,
+          likeCount: data.likeCount || 0,
+          commentCount: data.commentCount || 0,
+          subscriberCount: data.subscriberCount || 0,
+          subscriberCountText: data.subscriberCountText || '',
+          description: data.description || '',
         };
       }
     }
@@ -297,34 +425,11 @@ export const fetchFullYoutubeVideoMetadata = async (
     console.warn('Backend /api/youtube/video-info warning, trying client fallback:', err);
   }
 
-  // 2. Direct Client YouTube Data API v3 if key is available
-  if (API_KEY) {
-    try {
-      const [vidDetails, chanDetails] = await Promise.all([
-        fetchVideoDetails(youtubeId, API_KEY),
-        fetchChannelDetailsFromVideoOrPlaylist(youtubeId, false, API_KEY)
-      ]);
-      if (vidDetails || chanDetails) {
-        const name = chanDetails?.instructorName || 'YouTube Creator';
-        return {
-          youtubeId,
-          videoTitle: vidDetails?.title || '',
-          videoDuration: vidDetails?.duration || '15:00',
-          videoThumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
-          youtubeName: name,
-          youtubeAvatar: chanDetails?.instructorAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=ef4444&color=fff&bold=true`,
-          youtubeChannelUrl: chanDetails?.instructorUrl || `https://www.youtube.com/watch?v=${youtubeId}`,
-          description: vidDetails?.description || ''
-        };
-      }
-    } catch (e) {
-      console.warn('Direct client YouTube API fallback error:', e);
-    }
-  }
-
-  // 3. Client-side noembed / oEmbed fallback
+  // 2. Client-side noembed / oEmbed fallback
   try {
-    const noembedRes = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${youtubeId}`);
+    const noembedRes = await fetch(
+      `https://noembed.com/embed?url=https://www.youtube.com/watch?v=${youtubeId}`
+    );
     if (noembedRes.ok) {
       const oData = await noembedRes.json();
       const name = oData.author_name || 'YouTube Creator';
@@ -334,9 +439,16 @@ export const fetchFullYoutubeVideoMetadata = async (
         videoDuration: '15:00',
         videoThumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
         youtubeName: name,
-        youtubeAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=ef4444&color=fff&bold=true`,
+        youtubeAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(
+          name
+        )}&background=ef4444&color=fff&bold=true`,
         youtubeChannelUrl: oData.author_url || `https://www.youtube.com/watch?v=${youtubeId}`,
-        description: ''
+        viewCount: 0,
+        likeCount: 0,
+        commentCount: 0,
+        subscriberCount: 0,
+        subscriberCountText: '',
+        description: '',
       };
     }
   } catch (e) {}
@@ -349,11 +461,256 @@ export const fetchFullYoutubeVideoMetadata = async (
     youtubeName: 'YouTube Creator',
     youtubeAvatar: `https://ui-avatars.com/api/?name=YT&background=ef4444&color=fff&bold=true`,
     youtubeChannelUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
-    description: ''
+    viewCount: 0,
+    likeCount: 0,
+    commentCount: 0,
+    subscriberCount: 0,
+    subscriberCountText: '',
+    description: '',
   };
 };
 
-export const searchBookCoverOnline = async (title: string, author?: string): Promise<{ coverUrl?: string; authorName?: string; title?: string } | null> => {
+/**
+ * Live Sync Engine for a Course or Playlist:
+ * 1. If the course has a `playlistId`, fetches the latest playlist videos from YouTube,
+ *    automatically appends any NEW videos the original creator added to the playlist,
+ *    and updates real views, likes, comments, and channel subscriber counts.
+ * 2. Syncs the currently active video's real-time views, likes, comments, and creator subscribers.
+ */
+export const syncCourseRealtimeWithYouTube = async (
+  course: Course,
+  activeYoutubeId?: string
+): Promise<{
+  updatedCourse: Course;
+  hasChanges: boolean;
+  newVideosAddedCount: number;
+  activeVideoStats?: {
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    subscriberCount: number;
+    subscriberCountText: string;
+  };
+}> => {
+  let hasChanges = false;
+  let newVideosAddedCount = 0;
+  let updatedVideos = [...(course.videos || [])];
+  let subscriberCount = course.subscriberCount || 0;
+  let subscriberCountText = course.subscriberCountText || '';
+  let channelId = course.channelId || '';
+  let instructorAvatar = course.instructorAvatar || '';
+  let instructorUrl = course.instructorUrl || '';
+
+  // Step 1: If course has a playlistId, check for newly added videos by original creator & updated playlist stats
+  if (course.playlistId && !course.isSingleVideo) {
+    try {
+      const plData = await fetchPlaylistFullData(course.playlistId);
+      if (plData && Array.isArray(plData.videos) && plData.videos.length > 0) {
+        const existingByYtId = new Map<string, Video>();
+        updatedVideos.forEach((v) => {
+          if (v.youtubeId) existingByYtId.set(v.youtubeId.trim(), v);
+        });
+
+        const mergedList: Video[] = [];
+        // Keep existing videos in order and update their live stats if available
+        const liveByYtId = new Map<string, Video>();
+        plData.videos.forEach((lv) => {
+          if (lv.youtubeId) liveByYtId.set(lv.youtubeId.trim(), lv);
+        });
+
+        for (const existingVid of updatedVideos) {
+          const liveMatch = existingVid.youtubeId ? liveByYtId.get(existingVid.youtubeId.trim()) : undefined;
+          if (liveMatch) {
+            const nextView = liveMatch.viewCount || existingVid.viewCount || 0;
+            const nextLike = liveMatch.likeCount || existingVid.likeCount || 0;
+            const nextComment = liveMatch.commentCount || existingVid.commentCount || 0;
+            if (
+              nextView !== (existingVid.viewCount || 0) ||
+              nextLike !== (existingVid.likeCount || 0) ||
+              nextComment !== (existingVid.commentCount || 0)
+            ) {
+              hasChanges = true;
+            }
+            mergedList.push({
+              ...existingVid,
+              duration:
+                existingVid.duration && existingVid.duration !== '00:00'
+                  ? existingVid.duration
+                  : liveMatch.duration || '15:00',
+              viewCount: nextView,
+              likeCount: nextLike,
+              commentCount: nextComment,
+            });
+          } else {
+            mergedList.push(existingVid);
+          }
+        }
+
+        // Detect any brand-new videos added to the YouTube playlist by the original creator!
+        for (const liveVid of plData.videos) {
+          const cleanId = (liveVid.youtubeId || '').trim();
+          if (cleanId && !existingByYtId.has(cleanId)) {
+            newVideosAddedCount++;
+            hasChanges = true;
+            mergedList.push({
+              id: `v_${cleanId}`,
+              title: liveVid.title || 'New Lesson',
+              youtubeId: cleanId,
+              duration: liveVid.duration || '15:00',
+              viewCount: liveVid.viewCount || 0,
+              likeCount: liveVid.likeCount || 0,
+              commentCount: liveVid.commentCount || 0,
+              language: course.language || '',
+              description: liveVid.description || '',
+              resources: [],
+            });
+          }
+        }
+
+        updatedVideos = mergedList;
+
+        if (plData.subscriberCount && plData.subscriberCount !== subscriberCount) {
+          subscriberCount = plData.subscriberCount;
+          subscriberCountText = plData.subscriberCountText || formatCompactNumber(plData.subscriberCount);
+          hasChanges = true;
+        }
+        if (plData.channelId && !channelId) {
+          channelId = plData.channelId;
+          hasChanges = true;
+        }
+        if (plData.channelAvatar && !instructorAvatar) {
+          instructorAvatar = plData.channelAvatar;
+          hasChanges = true;
+        }
+      }
+    } catch (plErr) {
+      console.warn('Playlist auto-sync warning:', plErr);
+    }
+  }
+
+  // Step 2: Sync the active video (or first video) for real-time exact viewCount, likeCount, commentCount & channel subscribers
+  const targetVidId =
+    (activeYoutubeId && activeYoutubeId.trim()) ||
+    updatedVideos[0]?.youtubeId?.trim() ||
+    '';
+
+  let activeVideoStats:
+    | {
+        viewCount: number;
+        likeCount: number;
+        commentCount: number;
+        subscriberCount: number;
+        subscriberCountText: string;
+      }
+    | undefined;
+
+  if (targetVidId) {
+    try {
+      const liveMeta = await fetchFullYoutubeVideoMetadata(targetVidId);
+      if (liveMeta) {
+        activeVideoStats = {
+          viewCount: liveMeta.viewCount || 0,
+          likeCount: liveMeta.likeCount || 0,
+          commentCount: liveMeta.commentCount || 0,
+          subscriberCount: liveMeta.subscriberCount || subscriberCount || 0,
+          subscriberCountText:
+            liveMeta.subscriberCountText ||
+            subscriberCountText ||
+            formatCompactNumber(liveMeta.subscriberCount || subscriberCount),
+        };
+
+        if (liveMeta.subscriberCount && liveMeta.subscriberCount !== subscriberCount) {
+          subscriberCount = liveMeta.subscriberCount;
+          subscriberCountText =
+            liveMeta.subscriberCountText || formatCompactNumber(liveMeta.subscriberCount);
+          hasChanges = true;
+        }
+        if (liveMeta.channelId && !channelId) {
+          channelId = liveMeta.channelId;
+          hasChanges = true;
+        }
+        if (liveMeta.youtubeAvatar && !instructorAvatar) {
+          instructorAvatar = liveMeta.youtubeAvatar;
+          hasChanges = true;
+        }
+        if (liveMeta.youtubeChannelUrl && !instructorUrl) {
+          instructorUrl = liveMeta.youtubeChannelUrl;
+          hasChanges = true;
+        }
+
+        updatedVideos = updatedVideos.map((v) => {
+          if (v.youtubeId && v.youtubeId.trim() === targetVidId) {
+            const newViews = liveMeta.viewCount || v.viewCount || 0;
+            const newLikes = liveMeta.likeCount || v.likeCount || 0;
+            const newComments = liveMeta.commentCount || v.commentCount || 0;
+            if (
+              newViews !== (v.viewCount || 0) ||
+              newLikes !== (v.likeCount || 0) ||
+              newComments !== (v.commentCount || 0)
+            ) {
+              hasChanges = true;
+            }
+            return {
+              ...v,
+              viewCount: newViews,
+              likeCount: newLikes,
+              commentCount: newComments,
+              duration:
+                v.duration && v.duration !== '00:00'
+                  ? v.duration
+                  : liveMeta.videoDuration || '15:00',
+            };
+          }
+          return v;
+        });
+      }
+    } catch (vErr) {
+      console.warn('Video live stats sync warning:', vErr);
+    }
+  }
+
+  // Compute aggregate course totals
+  const totalViews = updatedVideos.reduce((sum, v) => sum + (v.viewCount || 0), 0);
+  const totalLikes = updatedVideos.reduce((sum, v) => sum + (v.likeCount || 0), 0);
+  const totalComments = updatedVideos.reduce((sum, v) => sum + (v.commentCount || 0), 0);
+
+  if (
+    totalViews !== (course.totalViews || 0) ||
+    totalLikes !== (course.totalLikes || 0) ||
+    totalComments !== (course.totalComments || 0)
+  ) {
+    hasChanges = true;
+  }
+
+  const updatedCourse: Course = {
+    ...course,
+    videos: updatedVideos,
+    channelId: channelId || course.channelId,
+    subscriberCount: subscriberCount || course.subscriberCount,
+    subscriberCountText:
+      subscriberCountText ||
+      course.subscriberCountText ||
+      (subscriberCount > 0 ? formatCompactNumber(subscriberCount) : undefined),
+    instructorAvatar: instructorAvatar || course.instructorAvatar,
+    instructorUrl: instructorUrl || course.instructorUrl,
+    totalViews,
+    totalLikes,
+    totalComments,
+    lastSyncedAt: Date.now(),
+  };
+
+  return {
+    updatedCourse,
+    hasChanges,
+    newVideosAddedCount,
+    activeVideoStats,
+  };
+};
+
+export const searchBookCoverOnline = async (
+  title: string,
+  author?: string
+): Promise<{ coverUrl?: string; authorName?: string; title?: string } | null> => {
   if (!title.trim()) return null;
   try {
     const q = encodeURIComponent(`${title.trim()} ${author ? author.trim() : ''}`.trim());
@@ -365,11 +722,13 @@ export const searchBookCoverOnline = async (title: string, author?: string): Pro
         const coverUrl = docWithCover.cover_i
           ? `https://covers.openlibrary.org/b/id/${docWithCover.cover_i}-L.jpg`
           : undefined;
-        const authorName = Array.isArray(docWithCover.author_name) ? docWithCover.author_name[0] : undefined;
+        const authorName = Array.isArray(docWithCover.author_name)
+          ? docWithCover.author_name[0]
+          : undefined;
         return {
           coverUrl,
           authorName,
-          title: docWithCover.title
+          title: docWithCover.title,
         };
       }
     }

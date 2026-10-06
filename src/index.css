@@ -64,12 +64,3 @@
     scrollbar-width: none;
   }
 }
-
-@media (pointer: fine) {
-  body, a, button, p, div, span, h1, h2, h3, h4, h5, h6, li, ul, section, main, header, nav, footer, label {
-    cursor: none !important;
-  }
-  input, textarea, [contenteditable="true"] {
-    cursor: text !important;
-  }
-}

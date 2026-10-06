@@ -100,12 +100,15 @@ service cloud.firestore {
     }
 
     function isValidNote(data) {
-      return hasOnlyAllowedFields(['courseId', 'courseTitle', 'videoId', 'videoTitle', 'timestamp', 'text', 'createdAt']) &&
+      return hasOnlyAllowedFields(['id', 'courseId', 'courseTitle', 'videoId', 'videoTitle', 'timestamp', 'title', 'tag', 'text', 'createdAt', 'updatedAt']) &&
              data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 100 &&
              data.courseTitle is string && data.courseTitle.size() > 0 && data.courseTitle.size() <= 200 &&
              data.videoId is string && data.videoId.size() > 0 && data.videoId.size() <= 100 &&
              data.videoTitle is string && data.videoTitle.size() > 0 && data.videoTitle.size() <= 200 &&
              data.timestamp is number &&
+             isValidOptionalString('title', 0, 200) &&
+             isValidOptionalString('tag', 0, 50) &&
+             isValidOptionalString('updatedAt', 0, 100) &&
              data.text is string && data.text.size() > 0 && data.text.size() <= 10000 &&
              data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 100;
     }
@@ -119,13 +122,19 @@ service cloud.firestore {
     }
 
     function isValidCourse(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'description', 'instructor', 'instructorAvatar', 'instructorUrl', 'thumbnail', 'category', 'subCategory', 'isSingleVideo', 'language', 'resources', 'videos', 'isApproved', 'createdAt']) &&
+      return hasOnlyAllowedFields(['id', 'title', 'description', 'instructor', 'professorName', 'youtubeChannelName', 'instructorAvatar', 'instructorUrl', 'channelId', 'subscriberCount', 'subscriberCountText', 'playlistId', 'totalViews', 'totalLikes', 'totalComments', 'lastSyncedAt', 'difficulty', 'thumbnail', 'category', 'subCategory', 'isSingleVideo', 'language', 'resources', 'videos', 'isApproved', 'createdAt']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.description is string && data.description.size() <= 5000 &&
              isValidOptionalString('instructor', 0, 100) &&
+             isValidOptionalString('professorName', 0, 100) &&
+             isValidOptionalString('youtubeChannelName', 0, 100) &&
              isValidOptionalString('instructorAvatar', 0, 2000) &&
              isValidOptionalString('instructorUrl', 0, 2000) &&
+             isValidOptionalString('channelId', 0, 100) &&
+             isValidOptionalString('subscriberCountText', 0, 100) &&
+             isValidOptionalString('playlistId', 0, 150) &&
+             isValidOptionalString('difficulty', 0, 50) &&
              data.thumbnail is string && data.thumbnail.size() <= 2000 &&
              data.category is string && data.category.size() <= 100 &&
              isValidOptionalString('subCategory', 0, 100) &&
@@ -266,7 +275,21 @@ service cloud.firestore {
     match /courses/{courseId} {
       allow read: if true;
       allow create: if (isAdmin() || (isPublisher() && request.resource.data.isApproved == false)) && isValidCourse(request.resource.data) && request.resource.data.id == courseId;
-      allow update: if isAdmin() && isValidCourse(request.resource.data) && request.resource.data.id == resource.data.id;
+      allow update: if (isAdmin() || (
+        isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'videos',
+          'totalViews',
+          'totalLikes',
+          'totalComments',
+          'subscriberCount',
+          'subscriberCountText',
+          'channelId',
+          'instructorAvatar',
+          'instructorUrl',
+          'lastSyncedAt'
+        ])
+      )) && isValidCourse(request.resource.data) && request.resource.data.id == resource.data.id;
       allow delete: if isAdmin();
     }
 
@@ -308,6 +331,20 @@ service cloud.firestore {
 
     match /system_backups/{backupId} {
       allow read, write: if isAdmin();
+    }
+
+    match /community_posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+      );
+    }
+
+    match /community_categories/{catId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
   }
 }

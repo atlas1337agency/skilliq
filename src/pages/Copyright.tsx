@@ -242,12 +242,12 @@ export function Copyright() {
                 <span>support@atlas1337agency.com</span>
               </a>
               <a 
-                href="mailto:support@skilliq1337.com?subject=SkilliQ%20Content%20Inquiry"
+                href="mailto:support@skilliq1337.online?subject=SkilliQ%20Content%20Inquiry"
                 className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-bold text-xs flex items-center gap-1.5 border border-border transition-colors"
                 title="Skilliq Official Support"
               >
                 <Mail className="w-3.5 h-3.5 text-indigo-500" />
-                <span>support@skilliq1337.com</span>
+                <span>support@skilliq1337.online</span>
               </a>
             </div>
           </div>

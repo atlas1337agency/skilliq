@@ -11,7 +11,7 @@ import { useStore } from './store/useStore';
 import { Layout } from './components/Layout';
 import { WhatsNew } from './components/WhatsNew';
 import { PushNotificationPopup } from './components/PushNotificationPopup';
-import { CustomCursor } from './components/CustomCursor';
+import { AuthFeedbackToast } from './components/AuthFeedbackToast';
 import { ScrollToTop } from './components/ScrollToTop';
 
 import { Home } from './pages/Home';
@@ -31,6 +31,7 @@ import { About } from './pages/About';
 import { Copyright } from './pages/Copyright';
 import { Contact } from './pages/Contact';
 import { Creator } from './pages/Creator';
+import { Community } from './pages/Community';
 
 export default function App() {
   const { loadContent, language } = useStore();
@@ -48,9 +49,9 @@ export default function App() {
 
   return (
     <HelmetProvider>
-      <CustomCursor />
       <Router>
         <ScrollToTop />
+        <AuthFeedbackToast />
         <WhatsNew />
         <PushNotificationPopup />
         <Routes>
@@ -72,6 +73,8 @@ export default function App() {
             <Route path="contact" element={<Contact />} />
             <Route path="creator" element={<Creator />} />
             <Route path="creator/:creatorId" element={<Creator />} />
+            <Route path="community" element={<Community />} />
+            <Route path="community/:postId" element={<Community />} />
           </Route>
           <Route path="/course/:courseId" element={<Course />} />
         </Routes>

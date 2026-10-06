@@ -22,7 +22,11 @@ import {
   ExternalLink,
   GraduationCap,
   Layers,
-  Heart
+  Heart,
+  Eye,
+  ThumbsUp,
+  MessageSquare,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import React, { useMemo, useState, useEffect, useRef } from 'react';
@@ -30,6 +34,7 @@ import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { SEO } from '../components/SEO';
+import { fetchFullYoutubeVideoMetadata, formatCompactNumber } from '../lib/youtube';
 
 export function Creator() {
   const { creatorId } = useParams<{ creatorId: string }>();
@@ -54,6 +59,11 @@ export function Creator() {
     );
   }, [sourceCourses, decodedCreatorId]);
 
+  // Live fetched subscriber counts keyed by instructor name
+  const [liveCreatorStats, setLiveCreatorStats] = useState<
+    Record<string, { subscriberCount: number; subscriberCountText: string; avatar?: string }>
+  >({});
+
   // Aggregate all unique curated educators automatically
   const allInstructors = useMemo(() => {
     const map = new Map<string, { 
@@ -62,6 +72,10 @@ export function Creator() {
       coursesCount: number; 
       categories: Set<string>;
       totalVideos: number;
+      subscriberCount: number;
+      subscriberCountText: string;
+      totalViews: number;
+      sampleYoutubeId: string;
     }>();
 
     sourceCourses.forEach(c => {
@@ -74,6 +88,10 @@ export function Creator() {
           coursesCount: 0,
           categories: new Set(),
           totalVideos: 0,
+          subscriberCount: c.subscriberCount || 0,
+          subscriberCountText: c.subscriberCountText || '',
+          totalViews: 0,
+          sampleYoutubeId: c.videos?.[0]?.youtubeId || '',
         });
       }
       const item = map.get(name)!;
@@ -81,6 +99,17 @@ export function Creator() {
       if (!item.avatar && c.instructorAvatar?.trim()) {
         item.avatar = c.instructorAvatar.trim();
       }
+      if (c.subscriberCount && c.subscriberCount > item.subscriberCount) {
+        item.subscriberCount = c.subscriberCount;
+      }
+      if (!item.subscriberCountText && c.subscriberCountText) {
+        item.subscriberCountText = c.subscriberCountText;
+      }
+      if (!item.sampleYoutubeId && c.videos?.[0]?.youtubeId) {
+        item.sampleYoutubeId = c.videos[0].youtubeId;
+      }
+      const courseViews = c.totalViews || (c.videos || []).reduce((acc, v) => acc + (v.viewCount || 0), 0);
+      item.totalViews += courseViews;
       if (c.category?.trim()) item.categories.add(c.category.trim());
       item.totalVideos += (c.videos?.length || 1);
     });
@@ -134,6 +163,37 @@ export function Creator() {
     const start = (educatorPage - 1) * EDUCATORS_PER_PAGE;
     return filteredInstructors.slice(start, start + EDUCATORS_PER_PAGE);
   }, [filteredInstructors, educatorPage]);
+
+  // Automatically fetch real subscriber counts for visible educators if not already fetched
+  useEffect(() => {
+    let cancelled = false;
+    const targets = decodedCreatorId
+      ? allInstructors.filter(i => i.name.toLowerCase() === decodedCreatorId.toLowerCase())
+      : paginatedInstructors;
+
+    targets.forEach(async (inst) => {
+      if (inst.subscriberCountText || inst.subscriberCount > 0 || liveCreatorStats[inst.name] || !inst.sampleYoutubeId) {
+        return;
+      }
+      try {
+        const meta = await fetchFullYoutubeVideoMetadata(inst.sampleYoutubeId);
+        if (!cancelled && meta && (meta.subscriberCount || meta.subscriberCountText)) {
+          setLiveCreatorStats(prev => ({
+            ...prev,
+            [inst.name]: {
+              subscriberCount: meta.subscriberCount || 0,
+              subscriberCountText: meta.subscriberCountText || formatCompactNumber(meta.subscriberCount),
+              avatar: meta.youtubeAvatar,
+            },
+          }));
+        }
+      } catch {}
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paginatedInstructors, decodedCreatorId, allInstructors]);
 
   // Specific creator view state
   const [searchQuery, setSearchQuery] = useState("");
@@ -454,15 +514,23 @@ export function Creator() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {paginatedInstructors.map((inst, i) => (
+              {paginatedInstructors.map((inst, i) => {
+                const liveInfo = liveCreatorStats[inst.name];
+                const subText =
+                  inst.subscriberCountText ||
+                  liveInfo?.subscriberCountText ||
+                  (inst.subscriberCount > 0 ? formatCompactNumber(inst.subscriberCount) : '');
+                const avatarSrc = inst.avatar || liveInfo?.avatar || '';
+
+                return (
                 <Link
                   key={inst.name || i}
                   to={`/creator/${encodeURIComponent(inst.name)}`}
                   className="p-5 rounded-2xl bg-card border border-border/80 hover:border-primary/50 shadow-xs hover:shadow-md transition-all group flex items-start gap-4 text-start active:scale-99 hover:-translate-y-0.5"
                 >
-                  {inst.avatar ? (
+                  {avatarSrc ? (
                     <img
-                      src={inst.avatar}
+                      src={avatarSrc}
                       alt={inst.name}
                       className="w-12 h-12 rounded-xl object-cover shrink-0 border border-border group-hover:scale-105 transition-transform"
                       onError={(e) => {
@@ -482,7 +550,16 @@ export function Creator() {
                       </h3>
                       <BadgeCheck className="w-3.5 h-3.5 text-primary shrink-0" />
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mb-2">
+                      {subText && (
+                        <>
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20">
+                            <Users className="w-3 h-3" />
+                            <span>{subText} {isRtl ? 'مشترك' : 'subscribers'}</span>
+                          </span>
+                          <span>·</span>
+                        </>
+                      )}
                       <span className="font-medium">
                         {inst.coursesCount} {isRtl ? 'دورات متوفرة' : 'Playlists'}
                       </span>
@@ -502,7 +579,8 @@ export function Creator() {
 
                   <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0 rtl:rotate-180 self-center" />
                 </Link>
-              ))}
+              );
+              })}
             </div>
           )}
 
@@ -767,7 +845,24 @@ export function Creator() {
                   : `Curated masterclasses and playlists by ${decodedCreatorId}, presented in SkilliQ's distraction-free learning engine.`}
               </p>
 
-              <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-4 text-xs font-mono text-muted-foreground">
+              <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs font-mono text-muted-foreground">
+                {(() => {
+                  const matchedInst = allInstructors.find(i => i.name.toLowerCase() === decodedCreatorId.toLowerCase());
+                  const liveInfo = matchedInst ? liveCreatorStats[matchedInst.name] : undefined;
+                  const subText =
+                    matchedInst?.subscriberCountText ||
+                    liveInfo?.subscriberCountText ||
+                    (matchedInst?.subscriberCount ? formatCompactNumber(matchedInst.subscriberCount) : '');
+                  return subText ? (
+                    <>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 font-sans font-bold text-xs">
+                        <Users className="w-3.5 h-3.5" />
+                        <span>{subText} {isRtl ? 'مشترك على يوتيوب' : 'YouTube Subscribers'}</span>
+                      </span>
+                      <span>·</span>
+                    </>
+                  ) : null;
+                })()}
                 <span className="font-bold text-foreground">
                   {creatorCourses.length} {isRtl ? 'دورات متوفرة' : 'Curated Playlists'}
                 </span>

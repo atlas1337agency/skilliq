@@ -205,6 +205,26 @@
         "createdAt": { "type": "number" }
       },
       "required": ["id", "title", "author", "category", "youtubeId"]
+    },
+    "CommunityPost": {
+      "title": "CommunityPost",
+      "description": "A private community post created by an admin for logged-in members.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "paragraph": { "type": "string" },
+        "image": { "type": "string" },
+        "category": { "type": "string" },
+        "language": { "type": "string" },
+        "isPinned": { "type": "boolean" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "title", "paragraph", "category", "createdAt"]
     }
   },
   "firestore": {
@@ -239,6 +259,10 @@
     "/reports/{reportId}": {
       "schema": { "$ref": "#/entities/Report" },
       "description": "User submitted issue and broken video reports."
+    },
+    "/community_posts/{postId}": {
+      "schema": { "$ref": "#/entities/CommunityPost" },
+      "description": "Private community posts visible only to authenticated users."
     }
   }
 }

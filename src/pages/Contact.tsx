@@ -86,7 +86,7 @@ export function Contact() {
       titleAr: 'الدعم الفني ومساعدة الطلاب',
       descEn: 'Assistance with video playback, certificates, progress tracking, or bug reports.',
       descAr: 'مساعدتك في حل مشكلات تشغيل الدروس، الشهادات، وتتبع تقدمك في الدورات.',
-      email: 'support@skilliq1337.com'
+      email: 'support@skilliq1337.online'
     },
     {
       icon: BookOpen,

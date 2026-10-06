@@ -26,7 +26,8 @@ import {
   Youtube,
   ShoppingBag,
   Clock,
-  ExternalLink
+  ExternalLink,
+  MessageSquareHeart
 } from 'lucide-react';
 import { 
   deleteCourseInFirestore, 
@@ -43,6 +44,7 @@ import { AdminAnalytics } from '../components/AdminAnalytics';
 import { AdminUsers } from '../components/AdminUsers';
 import { AdminReports } from '../components/AdminReports';
 import { AdminSubmissions } from '../components/AdminSubmissions';
+import { AdminCommunity } from '../components/AdminCommunity';
 import { BookCoverVisual, BookVideoModal, AmazonIcon } from '../components/BookVideoModal';
 import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -75,7 +77,7 @@ export function Admin() {
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   // Active Tab: Analytics, Courses, Books, Users, Notifications (Push Notif), Banners, Reports, Paths, Submissions
-  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'books' | 'users' | 'notifications' | 'banners' | 'reports' | 'paths' | 'submissions'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'books' | 'community' | 'users' | 'notifications' | 'banners' | 'reports' | 'paths' | 'submissions'>('analytics');
   const [pendingSubmissionsCount, setPendingSubmissionsCount] = useState(0);
   
   // Reports state
@@ -421,6 +423,17 @@ export function Admin() {
 
           {isAdmin && (
             <>
+              <button 
+                onClick={() => setActiveTab('community')}
+                className={cn(
+                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
+                  activeTab === 'community' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <MessageSquareHeart className="w-3.5 h-3.5 text-emerald-500" />
+                <span>{isRtl ? 'المجتمع (Community)' : 'Community'}</span>
+              </button>
+
               <button 
                 onClick={() => setActiveTab('users')}
                 className={cn(
@@ -1171,6 +1184,11 @@ export function Admin() {
       {/* TAB CONTENT 8: FORM SUBMISSIONS (DMCA, Contact Direct Notes, Creator Claims) */}
       {activeTab === 'submissions' && isAdmin && (
         <AdminSubmissions />
+      )}
+
+      {/* TAB CONTENT 9: PRIVATE COMMUNITY */}
+      {activeTab === 'community' && isAdmin && (
+        <AdminCommunity />
       )}
 
     </div>

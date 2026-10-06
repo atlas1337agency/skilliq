@@ -12,6 +12,10 @@ export interface Video {
   description?: string;
   language?: string;
   resources?: VideoResource[];
+  viewCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  publishedAt?: string;
 }
 
 export interface Course {
@@ -23,6 +27,15 @@ export interface Course {
   youtubeChannelName?: string;
   instructorAvatar?: string;
   instructorUrl?: string;
+  channelId?: string;
+  subscriberCount?: number;
+  subscriberCountText?: string;
+  playlistId?: string;
+  totalViews?: number;
+  totalLikes?: number;
+  totalComments?: number;
+  lastSyncedAt?: number;
+  difficulty?: string;
   thumbnail: string;
   category: string;
   subCategory?: string;

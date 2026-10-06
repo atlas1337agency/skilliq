@@ -514,7 +514,11 @@ const resources = {
       "saved_in_profile": "Saved in Profile",
       "remove_from_favorites": "Remove from Favorites",
       "no_favorites_yet": "Your Favorites Library is Empty",
-      "favorites_filter": "Favorites"
+      "favorites_filter": "Favorites",
+      "our_network_kicker": "Ecosystem & Communities",
+      "our_network_title": "Our Network",
+      "our_network_subtitle": "Connected to leading entrepreneurial and business communities across Morocco and Africa.",
+      "our_network_visit": "Visit Community"
     }
   },
   ar: {
@@ -1029,7 +1033,11 @@ const resources = {
       "saved_in_profile": "محفوظ في حسابي",
       "remove_from_favorites": "إزالة من المفضلة",
       "no_favorites_yet": "قائمة المفضلة فارغة حالياً",
-      "favorites_filter": "المفضلة"
+      "favorites_filter": "المفضلة",
+      "our_network_kicker": "النظام البيئي والمجتمعات",
+      "our_network_title": "شبكتنا",
+      "our_network_subtitle": "متصلون بأبرز مجتمعات ريادة الأعمال والأعمال في المغرب وإفريقيا.",
+      "our_network_visit": "زيارة الموقع"
     }
   }
 };

@@ -13,6 +13,7 @@ import { BooksSection } from '../components/BooksSection';
 import { HowItWorksSection } from '../components/HowItWorksSection';
 import { FinalCTASection } from '../components/FinalCTASection';
 import { PopularCoursesSection } from '../components/PopularCoursesSection';
+import { OurNetworkSection } from '../components/OurNetworkSection';
 import { PopularMasterclassesSection } from '../components/PopularMasterclassesSection';
 
 const iconMap: Record<string, any> = {
@@ -60,45 +61,255 @@ const pathColorMap: Record<string, { bg: string; text: string; border: string; g
 };
 
 function PartnersSection() {
-  const { t } = useTranslation();
-  const partners = [
-    { name: 'YouTube', icon: Youtube },
-    { name: 'GitHub', icon: Github },
-    { name: 'Vercel', icon: Zap },
-    { name: 'Firebase', icon: Database },
-    { name: 'Google Cloud', icon: Cloud },
-    { name: 'Google Analytics', icon: BarChart3 }
-  ];
+  const { t, i18n } = useTranslation();
+  const { language } = useStore();
+  const isRtl = language === 'ar' || i18n.language === 'ar';
 
   return (
-    <div className="w-full bg-background border-y border-border/50 py-8 overflow-hidden relative">
-      <div className="absolute start-0 top-0 bottom-0 w-24 bg-gradient-to-r from-background to-transparent z-10"></div>
-      <div className="absolute end-0 top-0 bottom-0 w-24 bg-gradient-to-l from-background to-transparent z-10"></div>
-      
-      <p className="text-center text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-6">{t('trusted_integrated_with', 'Trusted by & Integrated With')}</p>
-      
-      <div className="flex whitespace-nowrap animate-marquee">
-        {/* Double the array for seamless infinite scroll */}
-        {[...partners, ...partners, ...partners].map((partner, idx) => {
-          const Icon = partner.icon;
-          return (
-            <div key={idx} className="flex items-center gap-2 mx-8 text-foreground/60 hover:text-foreground transition-colors cursor-pointer grayscale hover:grayscale-0">
-              <Icon className="w-6 h-6" />
-              <span className="font-bold text-lg">{partner.name}</span>
+    <section
+      dir={isRtl ? 'rtl' : 'ltr'}
+      className="w-full bg-gradient-to-b from-muted/30 via-background to-background border-y border-border/70 py-12 sm:py-16 overflow-hidden relative"
+    >
+      {/* Subtle Ambient Glows */}
+      <div className="pointer-events-none absolute top-0 left-1/4 w-72 h-72 rounded-full bg-primary/5 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 right-1/4 w-72 h-72 rounded-full bg-red-500/5 blur-3xl" />
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        {/* Section Header */}
+        <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-12">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-extrabold uppercase tracking-wider mb-3">
+            <Shield className="w-3.5 h-3.5" />
+            <span>
+              {isRtl
+                ? 'تكامل رسمي يحترم حقوق الملكية الفكرية'
+                : t('trusted_integrated_with', 'Trusted by & Integrated With')}
+            </span>
+          </div>
+
+          <h2 className="text-xl sm:text-3xl md:text-4xl font-black text-foreground tracking-tight">
+            {isRtl
+              ? 'كيف يعمل Skilliq بالتكامل المباشر مع YouTube؟'
+              : 'How Skilliq Works with Official YouTube Streams'}
+          </h2>
+
+          <p className="text-xs sm:text-sm md:text-base text-muted-foreground mt-2.5 leading-relaxed">
+            {isRtl
+              ? 'لا يقوم Skilliq بتحميل أو إعادة رفع أي فيديو على خوادمه مطلقاً. تعمل المنصة كطبقة تعليمية ذكية فوق المشغل الرسمي لـ YouTube لحماية حقوق صناع المحتوى بالكامل.'
+              : 'Skilliq never hosts, downloads, or re-uploads video files. We operate as a smart educational workspace over the official YouTube IFrame API—100% compliant with creator copyright.'}
+          </p>
+        </div>
+
+        {/* VISUAL ARCHITECTURE FLOW DIAGRAM (Inspired by Cloudflare Browser -> Hub -> Origin Diagram) */}
+        <div className="bg-card/90 backdrop-blur-md border border-border/80 rounded-3xl p-6 sm:p-10 shadow-sm">
+          <div
+            dir="ltr"
+            className="flex flex-col md:flex-row items-center justify-between gap-6 md:gap-4 max-w-4xl mx-auto"
+          >
+            {/* NODE 1: LEARNER BROWSER */}
+            <div className="flex flex-col items-center text-center w-full md:w-52 shrink-0 group">
+              <div className="w-28 h-22 sm:w-32 sm:h-24 rounded-2xl bg-blue-500/10 dark:bg-blue-500/15 border-2 border-blue-500/40 flex flex-col overflow-hidden shadow-xs group-hover:scale-105 transition-transform">
+                {/* Browser Top Bar */}
+                <div className="h-5 bg-blue-600 flex items-center gap-1.5 px-2.5">
+                  <span className="w-2 h-2 rounded-full bg-white/90" />
+                  <span className="w-2 h-2 rounded-full bg-white/60" />
+                  <span className="w-2 h-2 rounded-full bg-white/40" />
+                  <span className="ms-auto text-[8px] font-mono text-white/90 font-bold">
+                    skilliq.app
+                  </span>
+                </div>
+                {/* Browser Wireframe Layout */}
+                <div className="flex-1 p-2 grid grid-cols-3 gap-1.5 bg-background/80">
+                  <div className="col-span-2 rounded bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
+                    <PlayCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="col-span-1 flex flex-col gap-1">
+                    <div className="h-1/2 rounded bg-blue-500/15" />
+                    <div className="h-1/2 rounded bg-blue-500/25" />
+                  </div>
+                </div>
+              </div>
+
+              <span className="mt-3 text-sm sm:text-base font-extrabold text-foreground">
+                {isRtl ? 'متصفح المتعلم' : 'Learner Browser'}
+              </span>
+              <span className="text-[11px] text-muted-foreground mt-0.5">
+                {isRtl
+                  ? 'ملاحظات ذكية، تتبع التقدم، وشهادات'
+                  : 'Smart Notes, Progress & Certificates'}
+              </span>
             </div>
-          );
-        })}
+
+            {/* CONNECTOR 1: BROWSER <---> SKILLIQ */}
+            <div className="flex md:flex-1 items-center justify-center w-full py-1 md:py-0">
+              <div className="hidden md:flex items-center w-full">
+                <div className="h-0.5 flex-1 bg-gradient-to-r from-blue-500/50 to-primary" />
+                <div
+                  className="w-10 h-10 rounded-full bg-primary/10 border-2 border-primary text-primary flex items-center justify-center shadow-xs shrink-0 mx-1.5"
+                  title="Distraction-Free Learning Layer"
+                >
+                  <Award className="w-4 h-4" />
+                </div>
+                <div className="h-0.5 flex-1 bg-primary relative">
+                  <ArrowRight className="w-4 h-4 text-primary absolute -right-2 -top-2" />
+                </div>
+              </div>
+
+              {/* Mobile Vertical Connector */}
+              <div className="flex md:hidden flex-col items-center">
+                <div className="w-0.5 h-5 bg-blue-500/50" />
+                <div className="w-9 h-9 rounded-full bg-primary/10 border-2 border-primary text-primary flex items-center justify-center">
+                  <Award className="w-4 h-4" />
+                </div>
+                <div className="w-0.5 h-5 bg-primary" />
+              </div>
+            </div>
+
+            {/* NODE 2: CENTER HUB — SKILLIQ SMART EDUCATION LAYER */}
+            <div className="flex flex-col items-center text-center shrink-0 relative">
+              <div className="relative w-36 h-36 sm:w-40 sm:h-40 rounded-full bg-card border-[3px] border-primary shadow-xl flex flex-col items-center justify-center p-4 ring-8 ring-primary/10">
+                <div className="w-14 h-14 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center shadow-md mb-2">
+                  <Layers className="w-8 h-8" />
+                </div>
+                <span className="text-base sm:text-lg font-black tracking-tight text-foreground">
+                  SKILLIQ
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-primary mt-0.5">
+                  {isRtl ? 'بيئة التعلم الذكية' : 'Smart Learning Layer'}
+                </span>
+              </div>
+            </div>
+
+            {/* CONNECTOR 2: SKILLIQ <---> YOUTUBE ORIGIN SERVER */}
+            <div className="flex md:flex-1 items-center justify-center w-full py-1 md:py-0">
+              <div className="hidden md:flex items-center w-full">
+                <div className="h-0.5 flex-1 bg-gradient-to-r from-primary to-[#FF0000]" />
+                <div
+                  className="w-10 h-10 rounded-full bg-red-500/10 border-2 border-[#FF0000] text-[#FF0000] flex items-center justify-center shadow-xs shrink-0 mx-1.5"
+                  title="Official YouTube IFrame API & Copyright Safe"
+                >
+                  <Shield className="w-4 h-4" />
+                </div>
+                <div className="h-0.5 flex-1 bg-[#FF0000] relative">
+                  <ArrowRight className="w-4 h-4 text-[#FF0000] absolute -right-2 -top-2" />
+                </div>
+              </div>
+
+              {/* Mobile Vertical Connector */}
+              <div className="flex md:hidden flex-col items-center">
+                <div className="w-0.5 h-5 bg-primary" />
+                <div className="w-9 h-9 rounded-full bg-red-500/10 border-2 border-[#FF0000] text-[#FF0000] flex items-center justify-center">
+                  <Shield className="w-4 h-4" />
+                </div>
+                <div className="w-0.5 h-5 bg-[#FF0000]" />
+              </div>
+            </div>
+
+            {/* NODE 3: YOUTUBE ORIGIN SERVER & ORIGINAL CREATORS */}
+            <div className="flex flex-col items-center text-center w-full md:w-52 shrink-0 group">
+              <div className="w-28 h-22 sm:w-32 sm:h-24 rounded-2xl bg-red-500/10 dark:bg-red-500/15 border-2 border-[#FF0000]/50 flex flex-col items-center justify-center p-3 shadow-xs group-hover:scale-105 transition-transform relative">
+                {/* Official YouTube Play Badge */}
+                <svg className="w-12 h-12 shrink-0 drop-shadow-xs" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
+                    fill="#FF0000"
+                  />
+                  <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#FFFFFF" />
+                </svg>
+                <span className="mt-1 text-[10px] font-mono font-bold text-red-600 dark:text-red-400">
+                  YouTube Origin API
+                </span>
+              </div>
+
+              <span className="mt-3 text-sm sm:text-base font-extrabold text-foreground">
+                {isRtl ? 'خادم YouTube الأصلي' : 'YouTube Origin Server'}
+              </span>
+              <span className="text-[11px] text-muted-foreground mt-0.5">
+                {isRtl
+                  ? 'المشاهدات والاشتراكات تذهب للمنشئ الأصلي'
+                  : '100% Views & Subs Go to Original Creator'}
+              </span>
+            </div>
+          </div>
+
+          {/* 3 COPYRIGHT & CREATOR RESPECT PILLARS */}
+          <div className="mt-8 pt-6 border-t border-border/70 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-muted/30 border border-border/60 flex items-start gap-3 text-start">
+              <div className="w-9 h-9 rounded-xl bg-red-500/10 text-[#FF0000] flex items-center justify-center shrink-0 mt-0.5">
+                <Youtube className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-foreground">
+                  {isRtl
+                    ? 'مشغل YouTube المدمج الرسمي'
+                    : 'Official YouTube IFrame Embed'}
+                </h3>
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {isRtl
+                    ? 'يتم بث جميع الدروس مباشرة من خوادم YouTube الرسمية. كل مشاهدة وإعجاب واشتراك يُحتسب مباشرة لصالح قناة المعلم الأصلي.'
+                    : 'Every video streams directly from YouTube’s origin servers. All views, watch time, and subscriptions count directly toward the original creator.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-muted/30 border border-border/60 flex items-start gap-3 text-start">
+              <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 mt-0.5">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-foreground">
+                  {isRtl
+                    ? 'إضافة أدوات تعلم ذكية بدون تعديل الفيديو'
+                    : 'Value-Add Learning Workspace'}
+                </h3>
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {isRtl
+                    ? 'يوفر Skilliq تنظيم المسارات، تدوين الملاحظات بالثانية، تتبع الإنجاز، والشهادات دون المساس بملف الفيديو الأصلي.'
+                    : 'Skilliq provides structured roadmaps, timestamped smart notes, progress tracking, and verifiable certificates around public educational playlists.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-muted/30 border border-border/60 flex items-start gap-3 text-start">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-foreground">
+                  {isRtl
+                    ? 'احترام كامل لحقوق النشر والملكية (DMCA)'
+                    : '100% Copyright & Creator Respect'}
+                </h3>
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {isRtl
+                    ? 'نلتزم بشروط خدمة YouTube API وننسب كل دورة لصاحبها مع رابط مباشر لقناته الرسمية.'
+                    : 'Fully compliant with YouTube API Terms of Service with prominent creator attribution, direct channel links, and instant takedown support.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Link to Full Copyright Policy */}
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs text-muted-foreground px-1">
+            <span>
+              {isRtl
+                ? '🔒 جميع العلامات التجارية وحقوق الفيديوهات محفوظة لأصحابها الأصليين على YouTube.'
+                : '🔒 All video copyrights and trademarks belong to their respective original creators on YouTube.'}
+            </span>
+            <Link
+              to="/copyright"
+              className="font-bold text-primary hover:underline inline-flex items-center gap-1"
+            >
+              <span>
+                {isRtl
+                  ? 'اقرأ سياسة حقوق الملكية الفكرية الكاملة'
+                  : 'Read our Copyright & Creator Policy'}
+              </span>
+              <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+            </Link>
+          </div>
+        </div>
       </div>
-      <style>{`
-        @keyframes marquee {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-33.33%); }
-        }
-        .animate-marquee {
-          animation: marquee 20s linear infinite;
-        }
-      `}</style>
-    </div>
+    </section>
   );
 }
 
@@ -361,6 +572,9 @@ export function Home() {
 
         {/* Popular Courses & Playlists Section */}
         <PopularCoursesSection />
+
+        {/* Our Network Section */}
+        <OurNetworkSection />
 
         {/* Popular Masterclasses Section */}
         <PopularMasterclassesSection />
