@@ -5,7 +5,7 @@ import { SEO } from '../components/SEO';
 import { PlayCircle, BookOpen, Code, Terminal, Layout, Database, Shield, ArrowRight, Zap, Award, CheckCircle2, ChevronRight, Video, Users, Github, Youtube, Cloud, Search, BarChart3, Star, Layers, Sparkles, Compass } from 'lucide-react';
 import { motion, useScroll, useTransform, useMotionValue, useSpring, useMotionTemplate } from 'motion/react';
 import { useStore } from '../store/useStore';
-import { filterByLanguage, filterPathsByLanguage } from '../lib/utils';
+import { cn, filterByLanguage, filterPathsByLanguage } from '../lib/utils';
 import { HeroSection } from '../components/HeroSection';
 import { ExploreCategoriesSection } from '../components/ExploreCategoriesSection';
 import { WhySkilliqSection } from '../components/WhySkilliqSection';
@@ -99,22 +99,22 @@ function PartnersSection() {
           </p>
         </div>
 
-        {/* VISUAL ARCHITECTURE FLOW DIAGRAM (Inspired by Cloudflare Browser -> Hub -> Origin Diagram) */}
-        <div className="bg-card/90 backdrop-blur-md border border-border/80 rounded-3xl p-6 sm:p-10 shadow-sm">
-          <div
-            dir="ltr"
-            className="flex flex-col md:flex-row items-center justify-between gap-6 md:gap-4 max-w-4xl mx-auto"
-          >
-            {/* NODE 1: LEARNER BROWSER */}
-            <div className="flex flex-col items-center text-center w-full md:w-52 shrink-0 group">
-              <div className="w-28 h-22 sm:w-32 sm:h-24 rounded-2xl bg-blue-500/10 dark:bg-blue-500/15 border-2 border-blue-500/40 flex flex-col overflow-hidden shadow-xs group-hover:scale-105 transition-transform">
+        {/* VISUAL ARCHITECTURE FLOW DIAGRAM (Responsive across Mobile, Tablet, and Laptop + Full RTL/LTR Support) */}
+        <div className="bg-card/90 backdrop-blur-md border border-border/80 rounded-3xl p-5 sm:p-8 lg:p-10 shadow-sm">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 md:gap-3 lg:gap-6 max-w-4xl mx-auto">
+            {/* NODE 1: LEARNER BROWSER (Plain Non-Clickable Text for skilliq1337.online) */}
+            <div className="flex flex-col items-center text-center w-full md:w-48 lg:w-56 shrink-0 select-none">
+              <div
+                dir="ltr"
+                className="w-36 h-24 sm:w-40 sm:h-26 rounded-2xl bg-blue-500/10 dark:bg-blue-500/15 border-2 border-blue-500/40 flex flex-col overflow-hidden shadow-xs"
+              >
                 {/* Browser Top Bar */}
-                <div className="h-5 bg-blue-600 flex items-center gap-1.5 px-2.5">
-                  <span className="w-2 h-2 rounded-full bg-white/90" />
-                  <span className="w-2 h-2 rounded-full bg-white/60" />
-                  <span className="w-2 h-2 rounded-full bg-white/40" />
-                  <span className="ms-auto text-[8px] font-mono text-white/90 font-bold">
-                    skilliq.app
+                <div className="h-5.5 bg-blue-600 flex items-center gap-1 px-2.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white/90 shrink-0" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-white/60 shrink-0" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-white/40 shrink-0" />
+                  <span className="ms-auto text-[8px] sm:text-[8.5px] font-mono text-white font-bold truncate">
+                    skilliq1337.online
                   </span>
                 </div>
                 {/* Browser Wireframe Layout */}
@@ -132,6 +132,9 @@ function PartnersSection() {
               <span className="mt-3 text-sm sm:text-base font-extrabold text-foreground">
                 {isRtl ? 'متصفح المتعلم' : 'Learner Browser'}
               </span>
+              <span className="text-[11px] font-mono font-bold text-primary mt-0.5">
+                skilliq1337.online
+              </span>
               <span className="text-[11px] text-muted-foreground mt-0.5">
                 {isRtl
                   ? 'ملاحظات ذكية، تتبع التقدم، وشهادات'
@@ -140,75 +143,115 @@ function PartnersSection() {
             </div>
 
             {/* CONNECTOR 1: BROWSER <---> SKILLIQ */}
-            <div className="flex md:flex-1 items-center justify-center w-full py-1 md:py-0">
+            <div className="flex md:flex-1 items-center justify-center w-full py-0.5 md:py-0">
+              {/* Tablet & Laptop Horizontal Connector (Respects RTL & LTR) */}
               <div className="hidden md:flex items-center w-full">
-                <div className="h-0.5 flex-1 bg-gradient-to-r from-blue-500/50 to-primary" />
                 <div
-                  className="w-10 h-10 rounded-full bg-primary/10 border-2 border-primary text-primary flex items-center justify-center shadow-xs shrink-0 mx-1.5"
-                  title="Distraction-Free Learning Layer"
+                  className={cn(
+                    'h-0.5 flex-1',
+                    isRtl
+                      ? 'bg-gradient-to-l from-blue-500/50 to-primary'
+                      : 'bg-gradient-to-r from-blue-500/50 to-primary'
+                  )}
+                />
+                <div
+                  className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-primary/10 border-2 border-primary text-primary flex items-center justify-center shadow-xs shrink-0 mx-1.5"
+                  title={isRtl ? 'طبقة التعلم الذكية' : 'Distraction-Free Learning Layer'}
                 >
                   <Award className="w-4 h-4" />
                 </div>
                 <div className="h-0.5 flex-1 bg-primary relative">
-                  <ArrowRight className="w-4 h-4 text-primary absolute -right-2 -top-2" />
+                  <ArrowRight
+                    className={cn(
+                      'w-4 h-4 text-primary absolute -top-2',
+                      isRtl ? '-left-2 rotate-180' : '-right-2'
+                    )}
+                  />
                 </div>
               </div>
 
               {/* Mobile Vertical Connector */}
               <div className="flex md:hidden flex-col items-center">
-                <div className="w-0.5 h-5 bg-blue-500/50" />
-                <div className="w-9 h-9 rounded-full bg-primary/10 border-2 border-primary text-primary flex items-center justify-center">
-                  <Award className="w-4 h-4" />
+                <div className="w-0.5 h-4 bg-blue-500/50" />
+                <div className="w-8 h-8 rounded-full bg-primary/10 border-2 border-primary text-primary flex items-center justify-center">
+                  <Award className="w-3.5 h-3.5" />
                 </div>
-                <div className="w-0.5 h-5 bg-primary" />
+                <div className="w-0.5 h-4 bg-primary" />
               </div>
             </div>
 
             {/* NODE 2: CENTER HUB — SKILLIQ SMART EDUCATION LAYER */}
             <div className="flex flex-col items-center text-center shrink-0 relative">
-              <div className="relative w-36 h-36 sm:w-40 sm:h-40 rounded-full bg-card border-[3px] border-primary shadow-xl flex flex-col items-center justify-center p-4 ring-8 ring-primary/10">
-                <div className="w-14 h-14 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center shadow-md mb-2">
-                  <Layers className="w-8 h-8" />
+              <div className="relative w-32 h-32 sm:w-36 sm:h-36 lg:w-40 lg:h-40 rounded-full bg-card border-[3px] border-primary shadow-xl flex flex-col items-center justify-center p-3 sm:p-4 ring-8 ring-primary/10">
+                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center shadow-md mb-1.5 sm:mb-2 overflow-hidden p-1.5">
+                  <img
+                    src="/images/favicon.png"
+                    alt="Skilliq Favicon"
+                    className="w-full h-full object-contain"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      if (!target.src.includes('/public/images/favicon.png')) {
+                        target.src = '/public/images/favicon.png';
+                      }
+                    }}
+                  />
                 </div>
-                <span className="text-base sm:text-lg font-black tracking-tight text-foreground">
+                <span className="text-sm sm:text-base lg:text-lg font-black tracking-tight text-foreground">
                   SKILLIQ
                 </span>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-primary mt-0.5">
+                <span className="text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider text-primary mt-0.5 leading-tight">
                   {isRtl ? 'بيئة التعلم الذكية' : 'Smart Learning Layer'}
                 </span>
               </div>
             </div>
 
             {/* CONNECTOR 2: SKILLIQ <---> YOUTUBE ORIGIN SERVER */}
-            <div className="flex md:flex-1 items-center justify-center w-full py-1 md:py-0">
+            <div className="flex md:flex-1 items-center justify-center w-full py-0.5 md:py-0">
+              {/* Tablet & Laptop Horizontal Connector (Respects RTL & LTR) */}
               <div className="hidden md:flex items-center w-full">
-                <div className="h-0.5 flex-1 bg-gradient-to-r from-primary to-[#FF0000]" />
                 <div
-                  className="w-10 h-10 rounded-full bg-red-500/10 border-2 border-[#FF0000] text-[#FF0000] flex items-center justify-center shadow-xs shrink-0 mx-1.5"
-                  title="Official YouTube IFrame API & Copyright Safe"
+                  className={cn(
+                    'h-0.5 flex-1',
+                    isRtl
+                      ? 'bg-gradient-to-l from-primary to-[#FF0000]'
+                      : 'bg-gradient-to-r from-primary to-[#FF0000]'
+                  )}
+                />
+                <div
+                  className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-red-500/10 border-2 border-[#FF0000] text-[#FF0000] flex items-center justify-center shadow-xs shrink-0 mx-1.5"
+                  title={
+                    isRtl
+                      ? 'واجهة YouTube الرسمية وحماية حقوق الملكية'
+                      : 'Official YouTube IFrame API & Copyright Safe'
+                  }
                 >
                   <Shield className="w-4 h-4" />
                 </div>
                 <div className="h-0.5 flex-1 bg-[#FF0000] relative">
-                  <ArrowRight className="w-4 h-4 text-[#FF0000] absolute -right-2 -top-2" />
+                  <ArrowRight
+                    className={cn(
+                      'w-4 h-4 text-[#FF0000] absolute -top-2',
+                      isRtl ? '-left-2 rotate-180' : '-right-2'
+                    )}
+                  />
                 </div>
               </div>
 
               {/* Mobile Vertical Connector */}
               <div className="flex md:hidden flex-col items-center">
-                <div className="w-0.5 h-5 bg-primary" />
-                <div className="w-9 h-9 rounded-full bg-red-500/10 border-2 border-[#FF0000] text-[#FF0000] flex items-center justify-center">
-                  <Shield className="w-4 h-4" />
+                <div className="w-0.5 h-4 bg-primary" />
+                <div className="w-8 h-8 rounded-full bg-red-500/10 border-2 border-[#FF0000] text-[#FF0000] flex items-center justify-center">
+                  <Shield className="w-3.5 h-3.5" />
                 </div>
-                <div className="w-0.5 h-5 bg-[#FF0000]" />
+                <div className="w-0.5 h-4 bg-[#FF0000]" />
               </div>
             </div>
 
             {/* NODE 3: YOUTUBE ORIGIN SERVER & ORIGINAL CREATORS */}
-            <div className="flex flex-col items-center text-center w-full md:w-52 shrink-0 group">
-              <div className="w-28 h-22 sm:w-32 sm:h-24 rounded-2xl bg-red-500/10 dark:bg-red-500/15 border-2 border-[#FF0000]/50 flex flex-col items-center justify-center p-3 shadow-xs group-hover:scale-105 transition-transform relative">
+            <div className="flex flex-col items-center text-center w-full md:w-48 lg:w-56 shrink-0 select-none">
+              <div className="w-36 h-24 sm:w-40 sm:h-26 rounded-2xl bg-red-500/10 dark:bg-red-500/15 border-2 border-[#FF0000]/50 flex flex-col items-center justify-center p-3 shadow-xs relative">
                 {/* Official YouTube Play Badge */}
-                <svg className="w-12 h-12 shrink-0 drop-shadow-xs" viewBox="0 0 24 24" fill="none">
+                <svg className="w-11 h-11 sm:w-12 sm:h-12 shrink-0 drop-shadow-xs" viewBox="0 0 24 24" fill="none">
                   <path
                     d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
                     fill="#FF0000"
@@ -216,7 +259,7 @@ function PartnersSection() {
                   <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#FFFFFF" />
                 </svg>
                 <span className="mt-1 text-[10px] font-mono font-bold text-red-600 dark:text-red-400">
-                  YouTube Origin API
+                  {isRtl ? 'واجهة YouTube الرسمية' : 'YouTube Origin API'}
                 </span>
               </div>
 
@@ -225,14 +268,14 @@ function PartnersSection() {
               </span>
               <span className="text-[11px] text-muted-foreground mt-0.5">
                 {isRtl
-                  ? 'المشاهدات والاشتراكات تذهب للمنشئ الأصلي'
+                  ? 'المشاهدات والاشتراكات تذهب للمنشئ الأصلي 100%'
                   : '100% Views & Subs Go to Original Creator'}
               </span>
             </div>
           </div>
 
-          {/* 3 COPYRIGHT & CREATOR RESPECT PILLARS */}
-          <div className="mt-8 pt-6 border-t border-border/70 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* 3 COPYRIGHT & CREATOR RESPECT PILLARS (Responsive 1 col mobile, 3 cols tablet/laptop) */}
+          <div className="mt-8 pt-6 border-t border-border/70 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="p-4 rounded-2xl bg-muted/30 border border-border/60 flex items-start gap-3 text-start">
               <div className="w-9 h-9 rounded-xl bg-red-500/10 text-[#FF0000] flex items-center justify-center shrink-0 mt-0.5">
                 <Youtube className="w-5 h-5" />
@@ -269,7 +312,7 @@ function PartnersSection() {
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-muted/30 border border-border/60 flex items-start gap-3 text-start">
+            <div className="p-4 rounded-2xl bg-muted/30 border border-border/60 flex items-start gap-3 text-start sm:col-span-2 lg:col-span-1">
               <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
@@ -289,7 +332,7 @@ function PartnersSection() {
           </div>
 
           {/* Bottom Link to Full Copyright Policy */}
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs text-muted-foreground px-1">
+          <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] sm:text-xs text-muted-foreground px-1 text-center sm:text-start">
             <span>
               {isRtl
                 ? '🔒 جميع العلامات التجارية وحقوق الفيديوهات محفوظة لأصحابها الأصليين على YouTube.'
@@ -297,7 +340,7 @@ function PartnersSection() {
             </span>
             <Link
               to="/copyright"
-              className="font-bold text-primary hover:underline inline-flex items-center gap-1"
+              className="font-bold text-primary hover:underline inline-flex items-center justify-center sm:justify-start gap-1 shrink-0"
             >
               <span>
                 {isRtl
