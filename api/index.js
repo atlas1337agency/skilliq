@@ -259,28 +259,45 @@ app.get('/api/analytics/oauth/callback', async (req, res) => {
   }
 });
 
-let memoryGaConfig = {
-  measurementId: process.env.VITE_GA_MEASUREMENT_ID || process.env.GA4_MEASUREMENT_ID || 'G-VHQYB5FFPQ',
-  propertyId: process.env.GA4_PROPERTY_ID || '',
-  propertyName: ''
+const parseServiceAccountCredentials = (raw) => {
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.private_key === 'string') {
+        parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+      }
+      return parsed;
+    }
+  } catch {
+    try {
+      const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+      const parsed = JSON.parse(decoded);
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.private_key === 'string') {
+          parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+        }
+        return parsed;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
 };
 
 app.get('/api/analytics/config', (req, res) => {
+  const measurementId = (process.env.VITE_GA_MEASUREMENT_ID || '').trim();
+  const hasPropertyId = Boolean((process.env.GA4_PROPERTY_ID || '').trim());
+  const hasServiceAccount = Boolean(parseServiceAccountCredentials(process.env.GA4_SERVICE_ACCOUNT_JSON));
   res.json({
-    measurementId: memoryGaConfig.measurementId || process.env.VITE_GA_MEASUREMENT_ID || process.env.GA4_MEASUREMENT_ID || 'G-VHQYB5FFPQ',
-    propertyId: memoryGaConfig.propertyId || process.env.GA4_PROPERTY_ID || '',
-    propertyName: memoryGaConfig.propertyName || ''
+    measurementId,
+    configured: hasPropertyId && hasServiceAccount,
+    hasPropertyId,
+    hasServiceAccount
   });
-});
-
-app.post('/api/analytics/config', (req, res) => {
-  memoryGaConfig = {
-    ...memoryGaConfig,
-    ...(req.body?.measurementId !== undefined ? { measurementId: String(req.body.measurementId).trim() } : {}),
-    ...(req.body?.propertyId !== undefined ? { propertyId: String(req.body.propertyId).trim().replace(/^properties\//, '') } : {}),
-    ...(req.body?.propertyName !== undefined ? { propertyName: String(req.body.propertyName).trim() } : {})
-  };
-  res.json({ success: true, config: memoryGaConfig });
 });
 
 const fetchGa4ReportsViaRest = async (accessToken, propId, measurementId) => {
@@ -347,14 +364,17 @@ const fetchGa4ReportsViaRest = async (accessToken, propId, measurementId) => {
 
   if (!trafficRes.ok) {
     const errBody = await trafficRes.json().catch(() => ({}));
-    return { ok: false, error: errBody?.error?.message || `HTTP ${trafficRes.status}` };
+    return {
+      ok: false,
+      status: trafficRes.status,
+      error: errBody?.error?.message || `Google Analytics Data API returned HTTP ${trafficRes.status}`
+    };
   }
 
   return {
     ok: true,
     data: {
       useDemo: false,
-      propertyId: cleanPropId,
       measurementId: measurementId || '',
       traffic: await trafficRes.json(),
       locations: locationRes.ok ? await locationRes.json() : null,
@@ -366,75 +386,64 @@ const fetchGa4ReportsViaRest = async (accessToken, propId, measurementId) => {
   };
 };
 
-// Route 3: Fetch Analytics Data
+// Route 3: Fetch Analytics Data using GA4_PROPERTY_ID and GA4_SERVICE_ACCOUNT_JSON from Vercel runtime environment
 app.get('/api/analytics', async (req, res) => {
   try {
-    const propertyId = String(req.query.propertyId || memoryGaConfig.propertyId || process.env.GA4_PROPERTY_ID || '').replace(/^properties\//, '').trim();
-    const authHeader = req.headers.authorization;
-    const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const propertyId = String(process.env.GA4_PROPERTY_ID || '').replace(/^properties\//, '').trim();
+    const measurementId = String(process.env.VITE_GA_MEASUREMENT_ID || '').trim();
+    const rawServiceAccount = process.env.GA4_SERVICE_ACCOUNT_JSON;
 
-    if (bearerToken && propertyId) {
-      const result = await fetchGa4ReportsViaRest(bearerToken, propertyId, memoryGaConfig.measurementId);
-      if (result.ok) return res.json(result.data);
-    }
-
-    if (!propertyId) {
-      return res.status(200).json({ useDemo: true, needsSetup: true, config: memoryGaConfig });
-    }
-
-    if (process.env.GA4_SERVICE_ACCOUNT_JSON) {
-      try {
-        const credentials = JSON.parse(process.env.GA4_SERVICE_ACCOUNT_JSON);
-        const gAuth = new GoogleAuth({
-          credentials,
-          scopes: ['https://www.googleapis.com/auth/analytics.readonly']
-        });
-        const client = await gAuth.getClient();
-        const tokenRes = await client.getAccessToken();
-        if (tokenRes?.token) {
-          const result = await fetchGa4ReportsViaRest(tokenRes.token, propertyId, memoryGaConfig.measurementId);
-          if (result.ok) return res.json(result.data);
-        }
-      } catch (saErr) {}
-    }
-
-    const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
-    const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
-    const refreshToken = (process.env.GA4_REFRESH_TOKEN || '').trim();
-
-    if (!clientId || !clientSecret || !refreshToken) {
+    if (!propertyId || !rawServiceAccount) {
+      const missing = [];
+      if (!propertyId) missing.push('GA4_PROPERTY_ID');
+      if (!rawServiceAccount) missing.push('GA4_SERVICE_ACCOUNT_JSON');
       return res.status(200).json({
         useDemo: true,
-        needsSetup: !clientId || !clientSecret,
-        needsAuth: !refreshToken,
-        config: memoryGaConfig
+        configured: false,
+        error: `GA4 reporting requires server environment variables (${missing.join(', ')}) to be set.`
       });
     }
 
-    const tokenExchangeRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token'
-      }).toString()
+    const credentials = parseServiceAccountCredentials(rawServiceAccount);
+    if (!credentials || !credentials.client_email || !credentials.private_key) {
+      return res.status(200).json({
+        useDemo: true,
+        configured: false,
+        error: 'GA4_SERVICE_ACCOUNT_JSON is present in the environment but is not a valid Service Account JSON object.'
+      });
+    }
+
+    const gAuth = new GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/analytics.readonly']
     });
+    const client = await gAuth.getClient();
+    const tokenRes = await client.getAccessToken();
 
-    if (!tokenExchangeRes.ok) {
-      return res.status(200).json({ useDemo: true, needsAuth: true, config: memoryGaConfig });
+    if (!tokenRes?.token) {
+      return res.status(200).json({
+        useDemo: true,
+        configured: true,
+        error: 'Failed to obtain an access token using GA4_SERVICE_ACCOUNT_JSON.'
+      });
     }
 
-    const tokenPayload = await tokenExchangeRes.json();
-    if (tokenPayload?.access_token) {
-      const result = await fetchGa4ReportsViaRest(tokenPayload.access_token, propertyId, memoryGaConfig.measurementId);
-      if (result.ok) return res.json(result.data);
+    const result = await fetchGa4ReportsViaRest(tokenRes.token, propertyId, measurementId);
+    if (result.ok) {
+      return res.json(result.data);
     }
 
-    return res.status(200).json({ useDemo: true, needsAuth: true, config: memoryGaConfig });
-  } catch (error) {
-    res.status(200).json({ useDemo: true, needsAuth: true });
+    return res.status(200).json({
+      useDemo: true,
+      configured: true,
+      error: result.error || 'Unable to query Google Analytics Data API for the configured GA4_PROPERTY_ID.'
+    });
+  } catch {
+    res.status(200).json({
+      useDemo: true,
+      configured: false,
+      error: 'Server error while communicating with Google Analytics Data API.'
+    });
   }
 });
 

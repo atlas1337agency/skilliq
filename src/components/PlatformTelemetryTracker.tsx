@@ -22,11 +22,11 @@ declare global {
   }
 }
 
-export function injectAndConfigureGtag(measurementId: string) {
-  const cleanId = (measurementId || '').trim();
+export function injectAndConfigureGtag(measurementId?: string) {
+  const envMeasurementId =
+    (import.meta.env.VITE_GA_MEASUREMENT_ID as string | undefined)?.trim() || '';
+  const cleanId = (measurementId || envMeasurementId || '').trim();
   if (!cleanId || !cleanId.startsWith('G-') || typeof window === 'undefined') return;
-
-  localStorage.setItem('skilliq_ga_measurement_id', cleanId);
 
   if (window.__gaLoadedId === cleanId) return;
   window.__gaLoadedId = cleanId;
@@ -60,30 +60,27 @@ export function PlatformTelemetryTracker() {
   const lastLoggedPathRef = useRef<string>('');
   const lastSyncTimeRef = useRef<number>(0);
   const [gaMeasurementId, setGaMeasurementId] = useState<string>(() => {
-    try {
-      return localStorage.getItem('skilliq_ga_measurement_id') || 'G-VHQYB5FFPQ';
-    } catch {
-      return 'G-VHQYB5FFPQ';
-    }
+    return (import.meta.env.VITE_GA_MEASUREMENT_ID as string | undefined)?.trim() || '';
   });
 
-  // Load GA4 Measurement ID from backend config if set
+  // Initialize GA4 gtag using VITE_GA_MEASUREMENT_ID (or backend /api/analytics/config fallback)
   useEffect(() => {
+    const envId = (import.meta.env.VITE_GA_MEASUREMENT_ID as string | undefined)?.trim() || '';
+    if (envId && envId.startsWith('G-')) {
+      setGaMeasurementId(envId);
+      injectAndConfigureGtag(envId);
+      return;
+    }
+
     fetch('/api/analytics/config')
       .then((r) => (r.ok ? r.json() : null))
       .then((cfg) => {
         if (cfg?.measurementId && cfg.measurementId.startsWith('G-')) {
           setGaMeasurementId(cfg.measurementId);
           injectAndConfigureGtag(cfg.measurementId);
-        } else if (gaMeasurementId && gaMeasurementId.startsWith('G-')) {
-          injectAndConfigureGtag(gaMeasurementId);
         }
       })
-      .catch(() => {
-        if (gaMeasurementId && gaMeasurementId.startsWith('G-')) {
-          injectAndConfigureGtag(gaMeasurementId);
-        }
-      });
+      .catch(() => {});
   }, []);
 
   const buildAndSyncPresence = (forcePath?: string) => {

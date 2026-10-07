@@ -3,17 +3,11 @@ import {
   collection,
   getDocs,
   doc,
-  updateDoc,
-  deleteDoc,
   onSnapshot,
 } from 'firebase/firestore';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { auth, db } from '../firebase';
+import { db } from '../firebase';
 import {
-  Users,
-  BookOpen,
   Award,
-  Activity,
   Clock,
   TrendingUp,
   Search,
@@ -23,7 +17,6 @@ import {
   BarChart3,
   Radio,
   AlertTriangle,
-  Globe,
   X,
   ChevronDown,
   ChevronUp,
@@ -33,11 +26,7 @@ import {
   Smartphone,
   Tablet,
   Navigation,
-  Settings,
   Eye,
-  ShieldCheck,
-  HelpCircle,
-  Copy,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useTranslation } from 'react-i18next';
@@ -123,12 +112,6 @@ export interface RealPlatformEvent {
 type MovementFilter = 'all' | 'traffic' | 'graduations' | 'lessons' | 'enrollments' | 'reports';
 type ChartMetric = 'pageViews' | 'visitors' | 'lessons' | 'graduations';
 
-interface GaPropertyOption {
-  propertyId: string;
-  displayName: string;
-  accountName: string;
-}
-
 export function AdminAnalytics() {
   const { allCourses, language } = useStore();
   const { i18n } = useTranslation();
@@ -143,19 +126,13 @@ export function AdminAnalytics() {
   const [refreshing, setRefreshing] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
 
-  // Google Analytics 4 (GA4) Live Integration States
-  const [gaMeasurementId, setGaMeasurementId] = useState('G-VHQYB5FFPQ');
-  const [gaPropertyId, setGaPropertyId] = useState('');
-  const [gaAccessToken, setGaAccessToken] = useState<string>(() => {
-    try {
-      return sessionStorage.getItem('skilliq_ga4_token') || '';
-    } catch {
-      return '';
-    }
-  });
-  const [gaPropertiesList, setGaPropertiesList] = useState<GaPropertyOption[]>([]);
+  // Google Analytics 4 (GA4) Runtime Integration States
+  // Frontend uses VITE_GA_MEASUREMENT_ID; Server uses GA4_PROPERTY_ID + GA4_SERVICE_ACCOUNT_JSON
+  const [gaMeasurementId, setGaMeasurementId] = useState<string>(
+    () => (import.meta.env.VITE_GA_MEASUREMENT_ID as string | undefined)?.trim() || ''
+  );
   const [gaConnected, setGaConnected] = useState(false);
-  const [gaConnecting, setGaConnecting] = useState(false);
+  const [gaServerError, setGaServerError] = useState<string | null>(null);
   const [gaTrafficRows, setGaTrafficRows] = useState<
     { date: string; visitors: number; pageViews: number; sessions: number }[] | null
   >(null);
@@ -165,10 +142,6 @@ export function AdminAnalytics() {
   );
   const [gaSources, setGaSources] = useState<{ source: string; sessions: number }[]>([]);
   const [gaRealtimeUsers, setGaRealtimeUsers] = useState<number | null>(null);
-  const [showGaSettingsModal, setShowGaSettingsModal] = useState(false);
-  const [showVercelGuideModal, setShowVercelGuideModal] = useState(false);
-  const [gaStatusMsg, setGaStatusMsg] = useState<string | null>(null);
-  const [copiedVar, setCopiedVar] = useState<string | null>(null);
 
   // User Switcher & Movement Drilldown Controls
   const [selectedUserId, setSelectedUserId] = useState<string | 'all'>('all');
@@ -213,14 +186,17 @@ export function AdminAnalytics() {
   const translateMovementDetail = (detail: string, path?: string, actionType?: string) => {
     if (!isRtl) return detail;
     if (actionType === 'session_start') {
-      return `بدأ جلسة تصفح جديدة في المنصة (${ path || '/' })`;
+      return `بدأ جلسة تصفح جديدة في المنصة (${path || '/'})`;
     }
     if (actionType === 'course_view' || detail.startsWith('Opened course player: ')) {
       const cName = detail.replace('Opened course player: ', '');
       return `فتح مشغل دروس الدورة: ${cName}`;
     }
     if (actionType === 'page_view' || detail.startsWith('Navigated to ')) {
-      return `انتقل إلى صفحة ${translatePageLabel(detail.replace('Navigated to ', '').split(' (')[0], path)}`;
+      return `انتقل إلى صفحة ${translatePageLabel(
+        detail.replace('Navigated to ', '').split(' (')[0],
+        path
+      )}`;
     }
     if (detail.startsWith('Completed lesson #')) {
       return detail
@@ -247,9 +223,22 @@ export function AdminAnalytics() {
     } catch {}
   };
 
-  // Parse GA4 response payload into state
+  // Parse server-side GA4 response payload into state
   const applyGa4ResponseData = (data: any) => {
-    if (!data || data.useDemo || !data.traffic) return false;
+    if (!data) return false;
+    if (data.measurementId && !gaMeasurementId) {
+      setGaMeasurementId(data.measurementId);
+      injectAndConfigureGtag(data.measurementId);
+    }
+    if (data.useDemo || !data.traffic) {
+      setGaConnected(false);
+      if (data.error) {
+        setGaServerError(String(data.error));
+      }
+      return false;
+    }
+
+    setGaServerError(null);
     const rows = Array.isArray(data.traffic.rows) ? data.traffic.rows : [];
     rows.sort((a: any, b: any) =>
       String(a.dimensionValues?.[0]?.value || '').localeCompare(
@@ -308,177 +297,39 @@ export function AdminAnalytics() {
     return true;
   };
 
-  // Fetch GA4 Report using token + propertyId
-  const fetchGa4LiveReport = async (token: string, propId: string) => {
-    const cleanProp = (propId || '').replace(/^properties\//, '').trim();
-    if (!cleanProp) return;
-
+  // Query server-side /api/analytics (which uses GA4_PROPERTY_ID and GA4_SERVICE_ACCOUNT_JSON)
+  const fetchServerGa4Report = async () => {
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-
-      const res = await fetch(`/api/analytics?propertyId=${encodeURIComponent(cleanProp)}`, {
-        headers,
-      });
+      const res = await fetch('/api/analytics');
       if (!res.ok) return;
       const data = await res.json();
       applyGa4ResponseData(data);
     } catch {}
   };
 
-  // Discover GA4 properties for authenticated Google user
-  const fetchGa4AccountSummaries = async (token: string) => {
-    try {
-      const res = await fetch('https://analyticsadmin.googleapis.com/v1beta/accountSummaries', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      const props: GaPropertyOption[] = [];
-      if (Array.isArray(data.accountSummaries)) {
-        for (const acc of data.accountSummaries) {
-          const accName = acc.displayName || 'GA4 Account';
-          if (Array.isArray(acc.propertySummaries)) {
-            for (const p of acc.propertySummaries) {
-              const pid = String(p.property || '').replace(/^properties\//, '');
-              if (pid) {
-                props.push({
-                  propertyId: pid,
-                  displayName: p.displayName || pid,
-                  accountName: accName,
-                });
-              }
-            }
-          }
-        }
-      }
-      setGaPropertiesList(props);
-      return props;
-    } catch {
-      return [];
-    }
-  };
-
-  // One-click Connect with Google Analytics via Google OAuth Popup
-  const handleConnectGoogleAnalyticsOAuth = async () => {
-    setGaConnecting(true);
-    setGaStatusMsg(null);
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/analytics.readonly');
-      provider.setCustomParameters({ prompt: 'consent' });
-
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-
-      if (token) {
-        setGaAccessToken(token);
-        try {
-          sessionStorage.setItem('skilliq_ga4_token', token);
-        } catch {}
-
-        const discovered = await fetchGa4AccountSummaries(token);
-        const chosenPropId = gaPropertyId || discovered[0]?.propertyId || '';
-
-        if (chosenPropId) {
-          setGaPropertyId(chosenPropId);
-          await fetch('/api/analytics/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              propertyId: chosenPropId,
-              measurementId: gaMeasurementId,
-            }),
-          });
-          await fetchGa4LiveReport(token, chosenPropId);
-          setGaStatusMsg(
-            isRtl
-              ? 'تم الربط بنجاح مع Google Analytics 4 وجلب الزيارات الحية!'
-              : 'Successfully connected to Google Analytics 4 & synced live traffic!'
-          );
-        } else {
-          setShowGaSettingsModal(true);
-          setGaStatusMsg(
-            isRtl
-              ? 'تمت مصادقة حساب Google! يرجى إدخال معرف Property ID أو Measurement ID.'
-              : 'Google account authorized! Please enter your GA4 Property ID or Measurement ID.'
-          );
-        }
-      }
-    } catch (err: any) {
-      setGaStatusMsg(
-        err?.message ||
-          (isRtl
-            ? 'تعذر إكمال مصادقة Google Analytics.'
-            : 'Could not complete Google Analytics authorization.')
-      );
-    } finally {
-      setGaConnecting(false);
-    }
-  };
-
-  const handleSaveGaConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanMeas = gaMeasurementId.trim();
-    const cleanProp = gaPropertyId.trim().replace(/^properties\//, '');
-
-    if (cleanMeas.startsWith('G-')) {
-      injectAndConfigureGtag(cleanMeas);
-    }
-
-    await fetch('/api/analytics/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        measurementId: cleanMeas,
-        propertyId: cleanProp,
-      }),
-    });
-
-    if (cleanProp) {
-      await fetchGa4LiveReport(gaAccessToken, cleanProp);
-    }
-
-    setGaStatusMsg(
-      isRtl
-        ? 'تم حفظ إعدادات Google Analytics وتفعيل التتبع الحي عبر المنصة!'
-        : 'Google Analytics configuration saved & live tracking activated!'
-    );
-    setTimeout(() => {
-      setShowGaSettingsModal(false);
-      setGaStatusMsg(null);
-    }, 1000);
-  };
-
-  // 1. Setup REAL-TIME listeners for users, progress, presence, movements, and GA4 config
+  // 1. Setup REAL-TIME listeners for users, progress, presence, movements, and server GA4 reports
   useEffect(() => {
     let isMounted = true;
 
+    const envMeasId = (import.meta.env.VITE_GA_MEASUREMENT_ID as string | undefined)?.trim() || '';
+    if (envMeasId) {
+      setGaMeasurementId(envMeasId);
+      injectAndConfigureGtag(envMeasId);
+    } else {
+      fetch('/api/analytics/config')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((cfg) => {
+          if (!isMounted || !cfg) return;
+          if (cfg.measurementId) {
+            setGaMeasurementId(cfg.measurementId);
+            injectAndConfigureGtag(cfg.measurementId);
+          }
+        })
+        .catch(() => {});
+    }
+
     loadTelemetryFromServerAndFirestore();
-
-    fetch('/api/analytics/config')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((cfg) => {
-        if (!isMounted || !cfg) return;
-        if (cfg.measurementId) {
-          setGaMeasurementId(cfg.measurementId);
-          injectAndConfigureGtag(cfg.measurementId);
-        }
-        if (cfg.propertyId) {
-          setGaPropertyId(cfg.propertyId);
-          fetchGa4LiveReport(gaAccessToken, cfg.propertyId);
-        }
-      })
-      .catch(() => {});
-
-    fetch('/api/analytics')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!isMounted || !data) return;
-        applyGa4ResponseData(data);
-      })
-      .catch(() => {});
+    fetchServerGa4Report();
 
     try {
       unsubUsersRef.current = onSnapshot(
@@ -607,8 +458,11 @@ export function AdminAnalytics() {
     }
 
     const pollInterval = setInterval(() => {
-      if (isMounted) loadTelemetryFromServerAndFirestore();
-    }, 15000);
+      if (isMounted) {
+        loadTelemetryFromServerAndFirestore();
+        fetchServerGa4Report();
+      }
+    }, 30000);
 
     return () => {
       isMounted = false;
@@ -1073,19 +927,13 @@ export function AdminAnalytics() {
   const handleManualSync = async () => {
     setRefreshing(true);
     try {
-      await loadTelemetryFromServerAndFirestore();
-      if (gaPropertyId) {
-        await fetchGa4LiveReport(gaAccessToken, gaPropertyId);
-      }
+      await Promise.all([
+        loadTelemetryFromServerAndFirestore(),
+        fetchServerGa4Report(),
+      ]);
     } finally {
       setTimeout(() => setRefreshing(false), 500);
     }
-  };
-
-  const handleCopyText = (val: string) => {
-    navigator.clipboard.writeText(val);
-    setCopiedVar(val);
-    setTimeout(() => setCopiedVar(null), 2000);
   };
 
   if (loading) {
@@ -1096,8 +944,8 @@ export function AdminAnalytics() {
         </div>
         <p className="text-xs sm:text-sm font-bold text-foreground">
           {isRtl
-            ? 'جاري الاتصال بـ Google Analytics و Firestore لتحميل الزيارات والبيانات الحية...'
-            : 'Connecting to Google Analytics & Firestore for 100% Real-Time Traffic & Movements...'}
+            ? 'جاري تحميل بيانات Google Analytics و Firestore الحية...'
+            : 'Loading Google Analytics & Firestore real-time telemetry...'}
         </p>
       </div>
     );
@@ -1105,7 +953,7 @@ export function AdminAnalytics() {
 
   return (
     <div className="space-y-5 sm:space-y-7" dir={isRtl ? 'rtl' : 'ltr'}>
-      {/* 1. TOP STATUS BAR + GOOGLE ANALYTICS 4 CONNECTION HUB */}
+      {/* 1. TOP STATUS BAR */}
       <div className="bg-card border border-border/80 rounded-3xl p-4 sm:p-6 shadow-xs relative overflow-hidden">
         <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 via-primary to-amber-500" />
 
@@ -1119,13 +967,13 @@ export function AdminAnalytics() {
                   : '100% Real-Time Traffic & Platform Telemetry'}
               </span>
 
-              {gaConnected || gaMeasurementId.startsWith('G-') ? (
+              {(gaConnected || gaMeasurementId.startsWith('G-')) && (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
                   <CheckCircle2 className="w-3 h-3" />
                   {isRtl ? 'مرتبط مع Google Analytics 4' : 'Google Analytics 4 Active'}
                   {gaMeasurementId ? ` (${gaMeasurementId})` : ''}
                 </span>
-              ) : null}
+              )}
             </div>
 
             <h1 className="text-lg sm:text-2xl lg:text-3xl font-black text-foreground tracking-tight flex items-center gap-2">
@@ -1139,96 +987,28 @@ export function AdminAnalytics() {
 
             <p className="text-xs sm:text-sm text-muted-foreground mt-1 max-w-2xl leading-relaxed">
               {isRtl
-                ? 'اربط حساب Google Analytics 4 (GA4) بنقرة واحدة، وتابع الزوار المتصلين الآن، مصادر الزيارات، الصفحات الأكثر تصفحاً، وكل حركة داخل المنصة على الكمبيوتر والتابلت والهاتف.'
-                : 'Connect Google Analytics 4 (GA4) in one click, monitor live online visitors, traffic trends, top pages, time spent, and every real user movement across all devices.'}
+                ? 'تقارير الزيارات الحية من Google Analytics 4، الزوار المتصلون الآن، الصفحات الأكثر تصفحاً، وكل حركة داخل المنصة على الكمبيوتر والتابلت والهاتف.'
+                : 'Live Google Analytics 4 (GA4) reporting, active visitors, top routes, time spent, and real-time user movements across laptop, tablet, and mobile.'}
             </p>
           </div>
 
-          {/* Google Analytics Connect, Setup & Vercel Security Guide Controls */}
-          <div className="flex flex-wrap items-center gap-2 self-start xl:self-auto">
-            <button
-              type="button"
-              onClick={handleConnectGoogleAnalyticsOAuth}
-              disabled={gaConnecting}
-              className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-60"
-            >
-              <Globe className="w-4 h-4 shrink-0" />
-              <span>
-                {gaConnecting
-                  ? isRtl
-                    ? 'جاري الربط...'
-                    : 'Connecting GA4...'
-                  : gaConnected
-                  ? isRtl
-                    ? 'تحديث بيانات Google Analytics'
-                    : 'Refresh Google Analytics'
-                  : isRtl
-                  ? 'ربط Google Analytics مباشر'
-                  : 'Connect Google Analytics'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowGaSettingsModal(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-muted/70 hover:bg-muted text-foreground border border-border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Settings className="w-4 h-4 text-primary shrink-0" />
-              <span>{isRtl ? 'إعداد معرف GA4' : 'GA4 ID Setup'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowVercelGuideModal(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span>{isRtl ? 'دليل أمان Vercel و APIs' : 'Vercel & API Security Guide'}</span>
-            </button>
-
+          <div className="flex items-center gap-2 self-start xl:self-auto">
             <button
               type="button"
               onClick={handleManualSync}
               disabled={refreshing}
-              className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-              title={isRtl ? 'مزامنة فورية' : 'Sync Now'}
+              className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
+              <span>{isRtl ? 'تحديث البيانات الآن' : 'Refresh Live Data'}</span>
             </button>
           </div>
         </div>
 
-        {/* If user authenticated multiple GA4 properties, let them switch property right here */}
-        {gaPropertiesList.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-bold text-foreground">
-                {isRtl ? 'خاصية Google Analytics المتصلة:' : 'Active GA4 Property:'}
-              </span>
-              <select
-                value={gaPropertyId}
-                onChange={(e) => {
-                  const nextId = e.target.value;
-                  setGaPropertyId(nextId);
-                  fetch('/api/analytics/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ propertyId: nextId }),
-                  });
-                  fetchGa4LiveReport(gaAccessToken, nextId);
-                }}
-                className="px-3 py-1.5 rounded-xl bg-background border border-border text-xs font-bold text-foreground"
-              >
-                {gaPropertiesList.map((p) => (
-                  <option key={p.propertyId} value={p.propertyId}>
-                    {p.displayName} ({p.accountName} • ID: {p.propertyId})
-                  </option>
-                ))}
-              </select>
-            </div>
-            {gaStatusMsg && (
-              <span className="text-xs font-bold text-emerald-500">{gaStatusMsg}</span>
-            )}
+        {gaServerError && !gaConnected && (
+          <div className="mt-4 pt-3 border-t border-border/60 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{gaServerError}</span>
           </div>
         )}
       </div>
@@ -1837,254 +1617,6 @@ export function AdminAnalytics() {
           )}
         </div>
       </div>
-
-      {/* MODAL 1: GOOGLE ANALYTICS 4 CONFIGURATION */}
-      {showGaSettingsModal && (
-        <div
-          onClick={() => setShowGaSettingsModal(false)}
-          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-card border border-border rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-5 text-start"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
-                  <BarChart3 className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-foreground">
-                    {isRtl
-                      ? 'إعدادات الربط مع Google Analytics 4'
-                      : 'Google Analytics 4 (GA4) Connection'}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {isRtl
-                      ? 'أدخل معرف القياس G-XXXXXXXXXX أو اربط حسابك لجلب تقارير الزيارات'
-                      : 'Configure your GA4 Measurement ID & Property ID for live traffic sync'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowGaSettingsModal(false)}
-                className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveGaConfig} className="space-y-4">
-              <div>
-                <label className="block text-xs font-extrabold text-foreground mb-1.5">
-                  {isRtl
-                    ? 'معرف القياس (GA4 Measurement ID - يبدأ بـ G-)'
-                    : 'GA4 Measurement ID (starts with G-)'}
-                </label>
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={gaMeasurementId}
-                  onChange={(e) => setGaMeasurementId(e.target.value)}
-                  placeholder="G-XXXXXXXXXX"
-                  className="w-full rounded-xl bg-background border border-border px-3.5 py-2.5 text-xs sm:text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  {isRtl
-                    ? 'عند حفظ هذا المعرف، يتم حقن وتفعيل وسم Google Analytics (gtag.js) تلقائياً في جميع صفحات المنصة.'
-                    : 'Automatically activates gtag.js tracking across all pages of your platform.'}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-extrabold text-foreground mb-1.5">
-                  {isRtl
-                    ? 'معرف خاصية GA4 (Property ID - أرقام فقط)'
-                    : 'GA4 Property ID (Numeric ID for Data API Reports)'}
-                </label>
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={gaPropertyId}
-                  onChange={(e) => setGaPropertyId(e.target.value)}
-                  placeholder="e.g. 412345678"
-                  className="w-full rounded-xl bg-background border border-border px-3.5 py-2.5 text-xs sm:text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                />
-              </div>
-
-              {gaStatusMsg && (
-                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold">
-                  {gaStatusMsg}
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={handleConnectGoogleAnalyticsOAuth}
-                  disabled={gaConnecting}
-                  className="px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Globe className="w-4 h-4" />
-                  <span>
-                    {isRtl
-                      ? 'مصادقة حساب Google وجلب الخصائص تلقائياً'
-                      : 'Authorize Google Account & Auto-Detect'}
-                  </span>
-                </button>
-
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 cursor-pointer shadow-sm"
-                >
-                  {isRtl ? 'حفظ وتفعيل' : 'Save & Activate'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: VERCEL & API SECURITY HOSTING GUIDE */}
-      {showVercelGuideModal && (
-        <div
-          onClick={() => setShowVercelGuideModal(false)}
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-card border border-border rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-5 text-start max-h-[90vh] overflow-y-auto"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-border/70 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-foreground">
-                    {isRtl
-                      ? 'دليل استضافة وأمان الـ APIs على Vercel وربط Google Analytics'
-                      : 'How to Host APIs Securely on Vercel & Connect Google Analytics'}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {isRtl
-                      ? 'خطوات عملية لحماية مفاتيحك السرية وتشغيل الـ Backend Serverless على Vercel'
-                      : 'Step-by-step production security checklist for Vercel Serverless & GA4'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowVercelGuideModal(false)}
-                className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs sm:text-sm leading-relaxed text-foreground/90">
-              {/* Step 1 */}
-              <div className="p-4 rounded-2xl bg-muted/40 border border-border/70 space-y-2">
-                <h4 className="font-black text-foreground flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0">
-                    1
-                  </span>
-                  <span>
-                    {isRtl
-                      ? 'كيف تعمل الـ APIs بأمان على Vercel؟'
-                      : 'How Your APIs Run Securely on Vercel'}
-                  </span>
-                </h4>
-                <p className="text-xs text-muted-foreground">
-                  {isRtl
-                    ? 'تم إعداد ملف vercel.json و api/index.js ليعمل كـ Vercel Serverless Function. جميع طلبات /api/* (مثل /api/analytics و /api/youtube و /api/tickets) يتم تنفيذها في السيرفر الخلفي لـ Vercel بحيث لا تظهر أي مفاتيح سرية (API Keys) للمستخدمين في المتصفح.'
-                    : 'Your project includes api/index.js and vercel.json routing all /api/* requests to Vercel Serverless Functions. Secrets stored in Vercel Environment Variables never leak to the browser.'}
-                </p>
-              </div>
-
-              {/* Step 2 */}
-              <div className="p-4 rounded-2xl bg-muted/40 border border-border/70 space-y-2.5">
-                <h4 className="font-black text-foreground flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0">
-                    2
-                  </span>
-                  <span>
-                    {isRtl
-                      ? 'المتغيرات البيئية المطلوب إضافتها في Vercel (Settings → Environment Variables)'
-                      : 'Add These Environment Variables in Vercel Dashboard (Settings → Environment Variables)'}
-                  </span>
-                </h4>
-
-                <div className="space-y-2">
-                  {[
-                    {
-                      name: 'VITE_GA_MEASUREMENT_ID',
-                      descEn: 'Your GA4 Measurement ID (e.g. G-XXXXXXXXXX) from Google Analytics → Admin → Data Streams.',
-                      descAr: 'معرف القياس من Google Analytics (مثل G-XXXXXXXXXX) لتفعيل تتبع الزوار في كل الصفحات.',
-                    },
-                    {
-                      name: 'GA4_PROPERTY_ID',
-                      descEn: 'Your numeric GA4 Property ID (e.g. 412345678) from Google Analytics → Admin → Property Details.',
-                      descAr: 'معرف خاصية GA4 الرقمي (مثل 412345678) من إعدادات الحساب في Google Analytics.',
-                    },
-                    {
-                      name: 'GA4_SERVICE_ACCOUNT_JSON',
-                      descEn: 'Recommended for 24/7 server-side GA4 reports: Paste your Google Cloud Service Account JSON key (grant its client_email "Viewer" access in GA4 Property Access Management).',
-                      descAr: 'الطريقة الأكثر أماناً واستقراراً على Vercel: الصق محتوى ملف JSON لحساب الخدمة (Service Account) بعد إعطائه صلاحية Viewer في Google Analytics.',
-                    },
-                    {
-                      name: 'YOUTUBE_API_KEY',
-                      descEn: 'Server-only YouTube Data API v3 key (keeps your key hidden from client bundle).',
-                      descAr: 'مفتاح YouTube Data API v3 في السيرفر الخلفي فقط لحمايته من الظهور في المتصفح.',
-                    },
-                  ].map((envItem) => (
-                    <div
-                      key={envItem.name}
-                      className="p-3 rounded-xl bg-background border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                    >
-                      <div className="space-y-0.5">
-                        <div className="font-mono font-black text-xs text-primary">
-                          {envItem.name}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {isRtl ? envItem.descAr : envItem.descEn}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText(envItem.name)}
-                        className="px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-foreground text-[11px] font-bold flex items-center gap-1 shrink-0 self-start sm:self-center cursor-pointer"
-                      >
-                        {copiedVar === envItem.name ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-500" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                        <span>{isRtl ? 'نسخ الاسم' : 'Copy'}</span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Step 3 */}
-              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-1.5">
-                <h4 className="font-black text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
-                  {isRtl
-                    ? '💡 نصيحة سريعة: الربط بنقرة واحدة بدون مفاتيح معقدة!'
-                    : '💡 Instant Option: 1-Click OAuth Right Inside This Page'}
-                </h4>
-                <p className="text-xs text-foreground/90">
-                  {isRtl
-                    ? 'يمكنك ببساطة النقر على زر "ربط Google Analytics مباشر" في أعلى هذه الصفحة، واختيار حسابك في Google، وسيقوم النظام تلقائياً باكتشاف خصائص GA4 الخاصة بك وجلب الزيارات فوراً!'
-                    : 'You can also simply click the orange "Connect Google Analytics" button at the top of this page, sign in with your Google account, and it will auto-detect your GA4 properties and pull live reports immediately!'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

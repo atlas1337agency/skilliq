@@ -227,44 +227,49 @@ Level: "${currentLevel}"`;
     }
   });
 
-  // Google Analytics 4 Configuration Storage
-  const gaConfigFilePath = path.join(process.cwd(), 'src', 'data', 'analytics_config.json');
-  const getStoredGaConfig = (): { measurementId?: string; propertyId?: string; propertyName?: string } => {
+  // Google Analytics 4 Configuration Storage (Runtime Environment Variables First)
+  const parseServiceAccountCredentials = (raw?: string): Record<string, any> | null => {
+    if (!raw || typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
     try {
-      if (fs.existsSync(gaConfigFilePath)) {
-        return JSON.parse(fs.readFileSync(gaConfigFilePath, 'utf-8'));
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.private_key === 'string') {
+          parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+        }
+        return parsed;
       }
-    } catch (e) {}
-    return {
-      measurementId: process.env.VITE_GA_MEASUREMENT_ID || 'G-VHQYB5FFPQ',
-      propertyId: process.env.GA4_PROPERTY_ID || '',
-      propertyName: ''
-    };
-  };
-
-  const saveStoredGaConfig = (cfg: { measurementId?: string; propertyId?: string; propertyName?: string }) => {
-    try {
-      fs.writeFileSync(gaConfigFilePath, JSON.stringify(cfg, null, 2), 'utf-8');
-    } catch (e) {}
+    } catch {
+      try {
+        const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+        const parsed = JSON.parse(decoded);
+        if (parsed && typeof parsed === 'object') {
+          if (typeof parsed.private_key === 'string') {
+            parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+          }
+          return parsed;
+        }
+      } catch {
+        return null;
+      }
+    }
+    return null;
   };
 
   app.get('/api/analytics/config', (req, res) => {
-    res.json(getStoredGaConfig());
+    const measurementId = (process.env.VITE_GA_MEASUREMENT_ID || '').trim();
+    const hasPropertyId = Boolean((process.env.GA4_PROPERTY_ID || '').trim());
+    const hasServiceAccount = Boolean(parseServiceAccountCredentials(process.env.GA4_SERVICE_ACCOUNT_JSON));
+    res.json({
+      measurementId,
+      configured: hasPropertyId && hasServiceAccount,
+      hasPropertyId,
+      hasServiceAccount
+    });
   });
 
-  app.post('/api/analytics/config', (req, res) => {
-    const current = getStoredGaConfig();
-    const updated = {
-      ...current,
-      ...(req.body.measurementId !== undefined ? { measurementId: String(req.body.measurementId).trim() } : {}),
-      ...(req.body.propertyId !== undefined ? { propertyId: String(req.body.propertyId).trim().replace(/^properties\//, '') } : {}),
-      ...(req.body.propertyName !== undefined ? { propertyName: String(req.body.propertyName).trim() } : {})
-    };
-    saveStoredGaConfig(updated);
-    res.json({ success: true, config: updated });
-  });
-
-  // Helper: Fetch GA4 Data API Reports via REST (avoids gRPC plugin 401 invalid_client errors)
+  // Helper: Fetch GA4 Data API Reports via REST using Service Account access token
   const fetchGa4ReportsViaRest = async (accessToken: string, propId: string, measurementId?: string) => {
     const cleanPropId = propId.replace(/^properties\//, '').trim();
     const headers = {
@@ -329,7 +334,11 @@ Level: "${currentLevel}"`;
 
     if (!trafficRes.ok) {
       const errBody = await trafficRes.json().catch(() => ({}));
-      return { ok: false, error: errBody?.error?.message || `HTTP ${trafficRes.status}` };
+      return {
+        ok: false,
+        status: trafficRes.status,
+        error: errBody?.error?.message || `Google Analytics Data API returned HTTP ${trafficRes.status}`
+      };
     }
 
     const traffic = await trafficRes.json();
@@ -343,7 +352,6 @@ Level: "${currentLevel}"`;
       ok: true,
       data: {
         useDemo: false,
-        propertyId: cleanPropId,
         measurementId: measurementId || '',
         traffic,
         locations,
@@ -355,102 +363,64 @@ Level: "${currentLevel}"`;
     };
   };
 
-  // Route 3: Fetch Analytics Data
+  // Route 3: Fetch Analytics Data using GA4_PROPERTY_ID and GA4_SERVICE_ACCOUNT_JSON from runtime environment
   app.get('/api/analytics', async (req, res) => {
     try {
-      const storedCfg = getStoredGaConfig();
-      const propertyId = ((req.query.propertyId as string) || storedCfg.propertyId || process.env.GA4_PROPERTY_ID || '').replace(/^properties\//, '').trim();
-      const authHeader = req.headers.authorization;
-      const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const propertyId = (process.env.GA4_PROPERTY_ID || '').replace(/^properties\//, '').trim();
+      const measurementId = (process.env.VITE_GA_MEASUREMENT_ID || '').trim();
+      const rawServiceAccount = process.env.GA4_SERVICE_ACCOUNT_JSON;
 
-      // 1. If client supplied a real Google OAuth Bearer token + propertyId, query GA4 REST API directly
-      if (bearerToken && propertyId) {
-        const result = await fetchGa4ReportsViaRest(bearerToken, propertyId, storedCfg.measurementId);
-        if (result.ok) {
-          return res.json(result.data);
-        }
-      }
-
-      if (!propertyId) {
+      if (!propertyId || !rawServiceAccount) {
+        const missing: string[] = [];
+        if (!propertyId) missing.push('GA4_PROPERTY_ID');
+        if (!rawServiceAccount) missing.push('GA4_SERVICE_ACCOUNT_JSON');
         return res.status(200).json({
           useDemo: true,
-          needsSetup: true,
-          config: storedCfg
+          configured: false,
+          error: `GA4 reporting requires server environment variables (${missing.join(', ')}) to be set.`
         });
       }
 
-      // 2. Check if Service Account JSON is configured in env (GA4_SERVICE_ACCOUNT_JSON)
-      const serviceAccountJson = process.env.GA4_SERVICE_ACCOUNT_JSON;
-      if (serviceAccountJson) {
-        try {
-          const { GoogleAuth } = await import('google-auth-library');
-          const credentials = JSON.parse(serviceAccountJson);
-          const gAuth = new GoogleAuth({
-            credentials,
-            scopes: ['https://www.googleapis.com/auth/analytics.readonly']
-          });
-          const client = await gAuth.getClient();
-          const tokenRes = await client.getAccessToken();
-          if (tokenRes?.token) {
-            const result = await fetchGa4ReportsViaRest(tokenRes.token, propertyId, storedCfg.measurementId);
-            if (result.ok) return res.json(result.data);
-          }
-        } catch (saErr) {
-          // Graceful fallback if service account JSON is malformed
-        }
-      }
-
-      // 3. Check OAuth2 Refresh Token via clean REST exchange (never triggers gRPC plugin crash)
-      const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
-      const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
-      const refreshToken = (process.env.GA4_REFRESH_TOKEN || '').trim();
-
-      if (!clientId || !clientSecret || !refreshToken) {
+      const credentials = parseServiceAccountCredentials(rawServiceAccount);
+      if (!credentials || !credentials.client_email || !credentials.private_key) {
         return res.status(200).json({
           useDemo: true,
-          needsSetup: !clientId || !clientSecret,
-          needsAuth: !refreshToken,
-          config: storedCfg
+          configured: false,
+          error: 'GA4_SERVICE_ACCOUNT_JSON is present in the environment but is not a valid Service Account JSON object.'
         });
       }
 
-      const tokenExchangeRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: refreshToken,
-          grant_type: 'refresh_token'
-        }).toString()
+      const { GoogleAuth } = await import('google-auth-library');
+      const gAuth = new GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/analytics.readonly']
       });
+      const client = await gAuth.getClient();
+      const tokenRes = await client.getAccessToken();
 
-      if (!tokenExchangeRes.ok) {
-        // Do not log noisy 401 invalid_client errors; return clean status to frontend
+      if (!tokenRes?.token) {
         return res.status(200).json({
           useDemo: true,
-          needsAuth: true,
-          config: storedCfg
+          configured: true,
+          error: 'Failed to obtain an access token using GA4_SERVICE_ACCOUNT_JSON.'
         });
       }
 
-      const tokenPayload = await tokenExchangeRes.json();
-      if (tokenPayload?.access_token) {
-        const result = await fetchGa4ReportsViaRest(tokenPayload.access_token, propertyId, storedCfg.measurementId);
-        if (result.ok) {
-          return res.json(result.data);
-        }
+      const result = await fetchGa4ReportsViaRest(tokenRes.token, propertyId, measurementId);
+      if (result.ok) {
+        return res.json(result.data);
       }
 
       return res.status(200).json({
         useDemo: true,
-        needsAuth: true,
-        config: storedCfg
+        configured: true,
+        error: result.error || 'Unable to query Google Analytics Data API for the configured GA4_PROPERTY_ID.'
       });
-    } catch (error: any) {
+    } catch {
       res.status(200).json({
         useDemo: true,
-        needsAuth: true
+        configured: false,
+        error: 'Server error while communicating with Google Analytics Data API.'
       });
     }
   });
