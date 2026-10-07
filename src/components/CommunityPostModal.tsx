@@ -44,8 +44,8 @@ import { cn } from '../lib/utils';
 interface CommunityPostModalProps {
   isOpen: boolean;
   postToEdit?: CommunityPost | null;
-  categoriesTree: CommunityCategoryItem[];
-  onCategoriesUpdated: (tree: CommunityCategoryItem[]) => void;
+  categoriesTree?: CommunityCategoryItem[];
+  onCategoriesUpdated?: (tree: CommunityCategoryItem[]) => void;
   onCategoryDeleted?: (parentName: string, subName?: string) => void;
   onClose: () => void;
   onSaved: (post: CommunityPost) => void;
@@ -54,8 +54,8 @@ interface CommunityPostModalProps {
 export function CommunityPostModal({
   isOpen,
   postToEdit,
-  categoriesTree,
-  onCategoriesUpdated,
+  categoriesTree = [],
+  onCategoriesUpdated = () => {},
   onCategoryDeleted,
   onClose,
   onSaved,

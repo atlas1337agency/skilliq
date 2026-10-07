@@ -4,6 +4,7 @@ import { BottomNav } from './BottomNav';
 import { cn } from '../lib/utils';
 import { Footer } from './Footer';
 import { ScrollToTopButton } from './ScrollToTopButton';
+import { PlatformTelemetryTracker } from './PlatformTelemetryTracker';
 
 export function Layout() {
   const location = useLocation();
@@ -11,6 +12,7 @@ export function Layout() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col font-sans">
+      <PlatformTelemetryTracker />
       {!isCoursePage && <Header />}
       <div className="flex flex-1 overflow-hidden">
         <main className={cn("flex-1 overflow-y-auto flex flex-col", !isCoursePage && "pb-20 md:pb-0")}>

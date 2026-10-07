@@ -225,6 +225,28 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["id", "title", "paragraph", "category", "createdAt"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "A support ticket and conversation thread between a user and an admin, supporting screenshots and .txt file attachments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ticketNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userAvatar": { "type": "string" },
+        "subject": { "type": "string" },
+        "category": { "type": "string" },
+        "priority": { "type": "string" },
+        "status": { "type": "string" },
+        "unreadByAdmin": { "type": "boolean" },
+        "unreadByUser": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "ticketNumber", "userId", "subject", "category", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -263,6 +285,10 @@
     "/community_posts/{postId}": {
       "schema": { "$ref": "#/entities/CommunityPost" },
       "description": "Private community posts visible only to authenticated users."
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicket" },
+      "description": "Support tickets opened by users to converse with admins."
     }
   }
 }

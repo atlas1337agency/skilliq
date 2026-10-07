@@ -32,6 +32,7 @@ import { Copyright } from './pages/Copyright';
 import { Contact } from './pages/Contact';
 import { Creator } from './pages/Creator';
 import { Community } from './pages/Community';
+import { SupportTickets } from './pages/SupportTickets';
 
 export default function App() {
   const { loadContent, language } = useStore();
@@ -75,6 +76,7 @@ export default function App() {
             <Route path="creator/:creatorId" element={<Creator />} />
             <Route path="community" element={<Community />} />
             <Route path="community/:postId" element={<Community />} />
+            <Route path="support" element={<SupportTickets />} />
           </Route>
           <Route path="/course/:courseId" element={<Course />} />
         </Routes>

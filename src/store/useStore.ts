@@ -5,6 +5,7 @@ import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { courses as defaultCourses, learningPaths as defaultPaths, categories as defaultCategories, defaultBanners, defaultBooks, Course, LearningPath, Category, AppNotification, AdBannerData, Book } from '../data/courses';
 import { fetchFirestoreContent } from '../lib/firestoreContent';
 import { PublicProfile, awardXPAndBadges, initializeOrUpdateProfile } from '../lib/gamification';
+import { recordPlatformMovement } from '../lib/telemetry';
 
 interface Progress {
   courseId: string;
@@ -235,6 +236,19 @@ export const useStore = create<StoreState>()(
           }
         }
 
+        if (!exists) {
+          recordPlatformMovement({
+            uid: state.user?.uid || null,
+            userName: state.user?.displayName || 'Guest Visitor',
+            userEmail: state.user?.email || '',
+            userAvatar: state.user?.photoURL || '',
+            actionType: 'favorite_toggled',
+            path: typeof window !== 'undefined' ? window.location.pathname : '/',
+            pageTitle: `Saved ${itemType}`,
+            detail: `Saved ${itemType} (${itemId}) to Favorites`,
+          });
+        }
+
         return !exists;
       },
 
@@ -265,6 +279,20 @@ export const useStore = create<StoreState>()(
             [courseId]: newProgress,
           },
         });
+
+        if (isNewCompletion) {
+          const matchedCourse = state.allCourses.find((c) => c.id === courseId);
+          recordPlatformMovement({
+            uid: state.user?.uid || null,
+            userName: state.user?.displayName || 'Guest Visitor',
+            userEmail: state.user?.email || '',
+            userAvatar: state.user?.photoURL || '',
+            actionType: 'lesson_completed',
+            path: `/course/${courseId}`,
+            pageTitle: matchedCourse?.title || courseId,
+            detail: `Completed lesson #${newCompleted.length} in "${matchedCourse?.title || courseId}"`,
+          });
+        }
 
         if (state.user) {
           try {
@@ -363,6 +391,18 @@ export const useStore = create<StoreState>()(
             ...state.progress,
             [courseId]: newProgress,
           },
+        });
+
+        const matchedCourse = state.allCourses.find((c) => c.id === courseId);
+        recordPlatformMovement({
+          uid: state.user?.uid || null,
+          userName: state.user?.displayName || 'Guest Visitor',
+          userEmail: state.user?.email || '',
+          userAvatar: state.user?.photoURL || '',
+          actionType: 'course_completed',
+          path: `/course/${courseId}`,
+          pageTitle: matchedCourse?.title || courseId,
+          detail: `Graduated and unlocked certificate for "${matchedCourse?.title || courseId}"`,
         });
 
         if (state.user) {

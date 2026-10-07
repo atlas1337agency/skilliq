@@ -12,7 +12,7 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
 
   // AI Smart Learning Path Advisor endpoint
   app.post('/api/ai/smart-path', async (req, res) => {
@@ -227,82 +227,230 @@ Level: "${currentLevel}"`;
     }
   });
 
+  // Google Analytics 4 Configuration Storage
+  const gaConfigFilePath = path.join(process.cwd(), 'src', 'data', 'analytics_config.json');
+  const getStoredGaConfig = (): { measurementId?: string; propertyId?: string; propertyName?: string } => {
+    try {
+      if (fs.existsSync(gaConfigFilePath)) {
+        return JSON.parse(fs.readFileSync(gaConfigFilePath, 'utf-8'));
+      }
+    } catch (e) {}
+    return {
+      measurementId: process.env.VITE_GA_MEASUREMENT_ID || 'G-VHQYB5FFPQ',
+      propertyId: process.env.GA4_PROPERTY_ID || '',
+      propertyName: ''
+    };
+  };
+
+  const saveStoredGaConfig = (cfg: { measurementId?: string; propertyId?: string; propertyName?: string }) => {
+    try {
+      fs.writeFileSync(gaConfigFilePath, JSON.stringify(cfg, null, 2), 'utf-8');
+    } catch (e) {}
+  };
+
+  app.get('/api/analytics/config', (req, res) => {
+    res.json(getStoredGaConfig());
+  });
+
+  app.post('/api/analytics/config', (req, res) => {
+    const current = getStoredGaConfig();
+    const updated = {
+      ...current,
+      ...(req.body.measurementId !== undefined ? { measurementId: String(req.body.measurementId).trim() } : {}),
+      ...(req.body.propertyId !== undefined ? { propertyId: String(req.body.propertyId).trim().replace(/^properties\//, '') } : {}),
+      ...(req.body.propertyName !== undefined ? { propertyName: String(req.body.propertyName).trim() } : {})
+    };
+    saveStoredGaConfig(updated);
+    res.json({ success: true, config: updated });
+  });
+
+  // Helper: Fetch GA4 Data API Reports via REST (avoids gRPC plugin 401 invalid_client errors)
+  const fetchGa4ReportsViaRest = async (accessToken: string, propId: string, measurementId?: string) => {
+    const cleanPropId = propId.replace(/^properties\//, '').trim();
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    };
+
+    const [trafficRes, locationRes, pagesRes, devicesRes, sourcesRes, realtimeRes] = await Promise.all([
+      fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+          dimensions: [{ name: 'date' }],
+          metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }, { name: 'sessions' }, { name: 'averageSessionDuration' }]
+        })
+      }),
+      fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          dateRanges: [{ startDate: '28daysAgo', endDate: 'today' }],
+          dimensions: [{ name: 'country' }],
+          metrics: [{ name: 'activeUsers' }]
+        })
+      }),
+      fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+          dimensions: [{ name: 'pagePath' }],
+          metrics: [{ name: 'screenPageViews' }, { name: 'activeUsers' }]
+        })
+      }),
+      fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          dateRanges: [{ startDate: '28daysAgo', endDate: 'today' }],
+          dimensions: [{ name: 'deviceCategory' }],
+          metrics: [{ name: 'activeUsers' }]
+        })
+      }),
+      fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          dateRanges: [{ startDate: '28daysAgo', endDate: 'today' }],
+          dimensions: [{ name: 'sessionSource' }],
+          metrics: [{ name: 'sessions' }]
+        })
+      }),
+      fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runRealtimeReport`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          metrics: [{ name: 'activeUsers' }]
+        })
+      })
+    ]);
+
+    if (!trafficRes.ok) {
+      const errBody = await trafficRes.json().catch(() => ({}));
+      return { ok: false, error: errBody?.error?.message || `HTTP ${trafficRes.status}` };
+    }
+
+    const traffic = await trafficRes.json();
+    const locations = locationRes.ok ? await locationRes.json() : null;
+    const pages = pagesRes.ok ? await pagesRes.json() : null;
+    const devices = devicesRes.ok ? await devicesRes.json() : null;
+    const sources = sourcesRes.ok ? await sourcesRes.json() : null;
+    const realtime = realtimeRes.ok ? await realtimeRes.json() : null;
+
+    return {
+      ok: true,
+      data: {
+        useDemo: false,
+        propertyId: cleanPropId,
+        measurementId: measurementId || '',
+        traffic,
+        locations,
+        pages,
+        devices,
+        sources,
+        realtime
+      }
+    };
+  };
+
   // Route 3: Fetch Analytics Data
   app.get('/api/analytics', async (req, res) => {
     try {
-      const propertyId = process.env.GA4_PROPERTY_ID;
-      const clientId = process.env.GOOGLE_CLIENT_ID;
-      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-      const refreshToken = process.env.GA4_REFRESH_TOKEN;
+      const storedCfg = getStoredGaConfig();
+      const propertyId = ((req.query.propertyId as string) || storedCfg.propertyId || process.env.GA4_PROPERTY_ID || '').replace(/^properties\//, '').trim();
+      const authHeader = req.headers.authorization;
+      const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
 
-      if (!propertyId || !clientId || !clientSecret) {
-        return res.status(200).json({ 
-          error: 'Missing Credentials', 
-          useDemo: true, 
-          needsSetup: true 
+      // 1. If client supplied a real Google OAuth Bearer token + propertyId, query GA4 REST API directly
+      if (bearerToken && propertyId) {
+        const result = await fetchGa4ReportsViaRest(bearerToken, propertyId, storedCfg.measurementId);
+        if (result.ok) {
+          return res.json(result.data);
+        }
+      }
+
+      if (!propertyId) {
+        return res.status(200).json({
+          useDemo: true,
+          needsSetup: true,
+          config: storedCfg
         });
       }
 
-      if (!refreshToken) {
-        return res.status(200).json({ 
-          error: 'Missing Refresh Token', 
-          useDemo: true, 
-          needsAuth: true 
+      // 2. Check if Service Account JSON is configured in env (GA4_SERVICE_ACCOUNT_JSON)
+      const serviceAccountJson = process.env.GA4_SERVICE_ACCOUNT_JSON;
+      if (serviceAccountJson) {
+        try {
+          const { GoogleAuth } = await import('google-auth-library');
+          const credentials = JSON.parse(serviceAccountJson);
+          const gAuth = new GoogleAuth({
+            credentials,
+            scopes: ['https://www.googleapis.com/auth/analytics.readonly']
+          });
+          const client = await gAuth.getClient();
+          const tokenRes = await client.getAccessToken();
+          if (tokenRes?.token) {
+            const result = await fetchGa4ReportsViaRest(tokenRes.token, propertyId, storedCfg.measurementId);
+            if (result.ok) return res.json(result.data);
+          }
+        } catch (saErr) {
+          // Graceful fallback if service account JSON is malformed
+        }
+      }
+
+      // 3. Check OAuth2 Refresh Token via clean REST exchange (never triggers gRPC plugin crash)
+      const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+      const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+      const refreshToken = (process.env.GA4_REFRESH_TOKEN || '').trim();
+
+      if (!clientId || !clientSecret || !refreshToken) {
+        return res.status(200).json({
+          useDemo: true,
+          needsSetup: !clientId || !clientSecret,
+          needsAuth: !refreshToken,
+          config: storedCfg
         });
       }
 
-      const authClient = new OAuth2Client(clientId, clientSecret);
-      authClient.setCredentials({ refresh_token: refreshToken });
-
-      const analyticsDataClient = new BetaAnalyticsDataClient({ authClient: authClient as any });
-
-      // Fetch Traffic over last 7 days
-      const [trafficResponse] = await analyticsDataClient.runReport({
-        property: `properties/${propertyId}`,
-        dateRanges: [
-          {
-            startDate: '7daysAgo',
-            endDate: 'today',
-          },
-        ],
-        dimensions: [
-          { name: 'date' },
-        ],
-        metrics: [
-          { name: 'activeUsers' },
-          { name: 'screenPageViews' }
-        ],
+      const tokenExchangeRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: 'refresh_token'
+        }).toString()
       });
 
-      // Fetch Top Locations
-      const [locationResponse] = await analyticsDataClient.runReport({
-        property: `properties/${propertyId}`,
-        dateRanges: [
-          {
-            startDate: '7daysAgo',
-            endDate: 'today',
-          },
-        ],
-        dimensions: [
-          { name: 'country' },
-        ],
-        metrics: [
-          { name: 'activeUsers' },
-        ],
-      });
+      if (!tokenExchangeRes.ok) {
+        // Do not log noisy 401 invalid_client errors; return clean status to frontend
+        return res.status(200).json({
+          useDemo: true,
+          needsAuth: true,
+          config: storedCfg
+        });
+      }
 
-      res.json({
-        traffic: trafficResponse,
-        locations: locationResponse
-      });
+      const tokenPayload = await tokenExchangeRes.json();
+      if (tokenPayload?.access_token) {
+        const result = await fetchGa4ReportsViaRest(tokenPayload.access_token, propertyId, storedCfg.measurementId);
+        if (result.ok) {
+          return res.json(result.data);
+        }
+      }
 
-    } catch (error: any) {
-      console.error('Analytics error:', error);
-      const isInvalidGrant = error?.message?.includes('invalid_grant');
-      res.status(200).json({ 
-        error: error?.message || 'Failed to fetch analytics', 
+      return res.status(200).json({
         useDemo: true,
-        needsAuth: isInvalidGrant
+        needsAuth: true,
+        config: storedCfg
+      });
+    } catch (error: any) {
+      res.status(200).json({
+        useDemo: true,
+        needsAuth: true
       });
     }
   });
@@ -550,6 +698,199 @@ Level: "${currentLevel}"`;
     const current = getStoredSubmissions();
     const filtered = current.filter(s => s.id !== id);
     saveStoredSubmissions(filtered);
+    res.json({ success: true });
+  });
+
+  // Support Tickets API Endpoints (User-Admin conversations with screenshot & text attachments)
+  const ticketsFilePath = path.join(process.cwd(), 'src', 'data', 'tickets.json');
+  const getStoredTickets = (): any[] => {
+    try {
+      if (fs.existsSync(ticketsFilePath)) {
+        const raw = fs.readFileSync(ticketsFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.error('Error reading tickets.json:', e);
+    }
+    return [];
+  };
+
+  const saveStoredTickets = (tickets: any[]) => {
+    try {
+      fs.writeFileSync(ticketsFilePath, JSON.stringify(tickets, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing tickets.json:', e);
+    }
+  };
+
+  app.get('/api/tickets', (req, res) => {
+    const userId = req.query.userId as string | undefined;
+    const list = getStoredTickets();
+    if (userId) {
+      return res.json({ tickets: list.filter(t => t.userId === userId) });
+    }
+    res.json({ tickets: list });
+  });
+
+  app.post('/api/tickets', (req, res) => {
+    const ticket = req.body;
+    if (!ticket || !ticket.id) {
+      return res.status(400).json({ error: 'Invalid ticket payload' });
+    }
+    const current = getStoredTickets();
+    const existingIdx = current.findIndex(t => t.id === ticket.id);
+    if (existingIdx !== -1) {
+      current[existingIdx] = { ...current[existingIdx], ...ticket };
+    } else {
+      current.unshift(ticket);
+    }
+    saveStoredTickets(current);
+    res.status(201).json({ success: true, ticket });
+  });
+
+  app.post('/api/tickets/:id/reply', (req, res) => {
+    const { id } = req.params;
+    const { message, status, unreadByAdmin, unreadByUser } = req.body;
+    if (!message || !message.id) {
+      return res.status(400).json({ error: 'Invalid reply message' });
+    }
+    const current = getStoredTickets();
+    const idx = current.findIndex(t => t.id === id);
+    if (idx !== -1) {
+      const existingMsgs = Array.isArray(current[idx].messages) ? current[idx].messages : [];
+      const alreadyExists = existingMsgs.some((m: any) => m.id === message.id);
+      const updatedMsgs = alreadyExists ? existingMsgs : [...existingMsgs, message];
+      current[idx] = {
+        ...current[idx],
+        messages: updatedMsgs,
+        ...(status ? { status } : {}),
+        ...(unreadByAdmin !== undefined ? { unreadByAdmin } : {}),
+        ...(unreadByUser !== undefined ? { unreadByUser } : {}),
+        updatedAt: Date.now()
+      };
+      saveStoredTickets(current);
+      return res.json({ success: true, ticket: current[idx] });
+    }
+    res.json({ success: true });
+  });
+
+  app.patch('/api/tickets/:id/status', (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+    const current = getStoredTickets();
+    const updated = current.map(t => {
+      if (t.id === id) {
+        return {
+          ...t,
+          ...updates,
+          updatedAt: Date.now()
+        };
+      }
+      return t;
+    });
+    saveStoredTickets(updated);
+    res.json({ success: true });
+  });
+
+  app.delete('/api/tickets/:id', (req, res) => {
+    const { id } = req.params;
+    const current = getStoredTickets();
+    const filtered = current.filter(t => t.id !== id);
+    saveStoredTickets(filtered);
+    res.json({ success: true });
+  });
+
+  // --- REAL-TIME PLATFORM TELEMETRY & USER PRESENCE ---
+  const presenceFilePath = path.join(process.cwd(), 'src', 'data', 'presence.json');
+  const movementsFilePath = path.join(process.cwd(), 'src', 'data', 'movements.json');
+  let memoryPresence: any[] = [];
+  let memoryMovements: any[] = [];
+
+  const getStoredPresence = (): any[] => {
+    try {
+      if (fs.existsSync(presenceFilePath)) {
+        const raw = fs.readFileSync(presenceFilePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          memoryPresence = parsed;
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return memoryPresence;
+  };
+
+  const saveStoredPresence = (list: any[]) => {
+    memoryPresence = list;
+    try {
+      fs.writeFileSync(presenceFilePath, JSON.stringify(list.slice(0, 500), null, 2));
+    } catch (e) {}
+  };
+
+  const getStoredMovements = (): any[] => {
+    try {
+      if (fs.existsSync(movementsFilePath)) {
+        const raw = fs.readFileSync(movementsFilePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          memoryMovements = parsed;
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return memoryMovements;
+  };
+
+  const saveStoredMovements = (list: any[]) => {
+    memoryMovements = list.slice(0, 500);
+    try {
+      fs.writeFileSync(movementsFilePath, JSON.stringify(memoryMovements, null, 2));
+    } catch (e) {}
+  };
+
+  app.get('/api/telemetry', (req, res) => {
+    res.json({
+      presence: getStoredPresence(),
+      movements: getStoredMovements()
+    });
+  });
+
+  app.post('/api/telemetry/presence', (req, res) => {
+    const record = req.body;
+    if (!record || !record.id) {
+      return res.status(400).json({ error: 'Invalid presence payload' });
+    }
+    const list = getStoredPresence();
+    const idx = list.findIndex((p: any) => p.id === record.id);
+    if (idx !== -1) {
+      const existing = list[idx];
+      list[idx] = {
+        ...existing,
+        ...record,
+        totalSecondsSpent: Math.max(existing.totalSecondsSpent || 0, record.totalSecondsSpent || 0),
+        visitCount: Math.max(existing.visitCount || 1, record.visitCount || 1),
+        pagesVisitedCount: Math.max(existing.pagesVisitedCount || 1, record.pagesVisitedCount || 1),
+        firstVisitAt: existing.firstVisitAt || record.firstVisitAt || Date.now(),
+        lastSeenAt: record.lastSeenAt || Date.now()
+      };
+    } else {
+      list.unshift(record);
+    }
+    saveStoredPresence(list);
+    res.json({ success: true });
+  });
+
+  app.post('/api/telemetry/movement', (req, res) => {
+    const ev = req.body;
+    if (!ev || !ev.id) {
+      return res.status(400).json({ error: 'Invalid movement payload' });
+    }
+    const list = getStoredMovements();
+    if (!list.some((m: any) => m.id === ev.id)) {
+      list.unshift(ev);
+      saveStoredMovements(list);
+    }
     res.json({ success: true });
   });
 

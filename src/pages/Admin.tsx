@@ -27,7 +27,8 @@ import {
   ShoppingBag,
   Clock,
   ExternalLink,
-  MessageSquareHeart
+  MessageSquareHeart,
+  LifeBuoy
 } from 'lucide-react';
 import { 
   deleteCourseInFirestore, 
@@ -45,6 +46,7 @@ import { AdminUsers } from '../components/AdminUsers';
 import { AdminReports } from '../components/AdminReports';
 import { AdminSubmissions } from '../components/AdminSubmissions';
 import { AdminCommunity } from '../components/AdminCommunity';
+import { AdminTickets } from '../components/AdminTickets';
 import { BookCoverVisual, BookVideoModal, AmazonIcon } from '../components/BookVideoModal';
 import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -76,9 +78,10 @@ export function Admin() {
   const { user, allCourses, allBooks, learningPaths, notifications, banners, loadContent, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  // Active Tab: Analytics, Courses, Books, Users, Notifications (Push Notif), Banners, Reports, Paths, Submissions
-  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'books' | 'community' | 'users' | 'notifications' | 'banners' | 'reports' | 'paths' | 'submissions'>('analytics');
+  // Active Tab: Analytics, Courses, Books, Users, Notifications (Push Notif), Banners, Reports, Paths, Submissions, Tickets
+  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'books' | 'community' | 'tickets' | 'users' | 'notifications' | 'banners' | 'reports' | 'paths' | 'submissions'>('analytics');
   const [pendingSubmissionsCount, setPendingSubmissionsCount] = useState(0);
+  const [openTicketsCount, setOpenTicketsCount] = useState(0);
   
   // Reports state
   const [reports, setReports] = useState<CourseReport[]>([]);
@@ -148,9 +151,20 @@ export function Admin() {
       console.warn("Firestore form_submissions badge listener warning:", err);
     });
 
+    const unsubTickets = onSnapshot(collection(db, 'support_tickets'), (snap) => {
+      const openCount = snap.docs.filter(d => {
+        const data = d.data();
+        return data.status === 'open' || data.unreadByAdmin === true;
+      }).length;
+      setOpenTicketsCount(openCount);
+    }, (err) => {
+      console.warn("Firestore support_tickets badge listener warning:", err);
+    });
+
     return () => {
       unsub();
       unsubSubs();
+      unsubTickets();
     };
   }, [user]);
 
@@ -501,6 +515,22 @@ export function Admin() {
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border">
                   {learningPaths.length}
                 </span>
+              </button>
+
+              <button 
+                onClick={() => setActiveTab('tickets')}
+                className={cn(
+                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
+                  activeTab === 'tickets' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <LifeBuoy className={cn("w-3.5 h-3.5", openTicketsCount > 0 ? "text-rose-500 animate-pulse" : "text-primary")} />
+                <span>{isRtl ? 'تذاكر الدعم الفني' : 'Support Tickets'}</span>
+                {openTicketsCount > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black animate-pulse">
+                    {openTicketsCount}
+                  </span>
+                )}
               </button>
 
               <button 
@@ -1189,6 +1219,11 @@ export function Admin() {
       {/* TAB CONTENT 9: PRIVATE COMMUNITY */}
       {activeTab === 'community' && isAdmin && (
         <AdminCommunity />
+      )}
+
+      {/* TAB CONTENT 10: SUPPORT TICKETS */}
+      {activeTab === 'tickets' && isAdmin && (
+        <AdminTickets />
       )}
 
     </div>

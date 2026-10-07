@@ -81,7 +81,7 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt', 'lastSeenAt', 'totalSecondsSpent', 'sessionSecondsSpent', 'visitCount', 'pagesVisitedCount', 'currentPath', 'currentPageLabel', 'deviceType', 'browser', 'recentTrail']) &&
              data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
              data.email is string && isValidEmail(data.email) &&
              isValidOptionalString('displayName', 0, 100) &&
@@ -345,6 +345,25 @@ service cloud.firestore {
     match /community_categories/{catId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId);
+      allow delete: if isAdmin();
+    }
+
+    match /user_presence/{presenceId} {
+      allow read: if isAdmin() || (isAuthenticated() && presenceId == request.auth.uid);
+      allow create, update: if request.resource.data.id == presenceId;
+      allow delete: if isAdmin();
+    }
+
+    match /platform_movements/{movementId} {
+      allow read: if isAdmin();
+      allow create: if request.resource.data.id == movementId;
+      allow update, delete: if isAdmin();
     }
   }
 }

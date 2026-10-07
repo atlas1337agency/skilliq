@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Plus,
   Edit,
@@ -8,18 +9,20 @@ import {
   ThumbsUp,
   ThumbsDown,
   Search,
-  Globe,
   MessageSquareHeart,
   Loader2,
   ExternalLink,
+  FolderKanban,
+  RefreshCw,
 } from 'lucide-react';
 import {
   CommunityPost,
+  CommunityCategoryItem,
   fetchCommunityPosts,
+  fetchCommunityCategories,
   saveCommunityPost,
   deleteCommunityPost,
   getTextDir,
-  COMMUNITY_CATEGORIES,
 } from '../lib/community';
 import { CommunityPostModal } from './CommunityPostModal';
 import { useStore } from '../store/useStore';
@@ -30,39 +33,71 @@ export function AdminCommunity() {
   const isRtl = language === 'ar';
 
   const [posts, setPosts] = useState<CommunityPost[]>([]);
+  const [categoriesTree, setCategoriesTree] = useState<CommunityCategoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [langFilter, setLangFilter] = useState<'all' | 'ar' | 'en'>('all');
+  const [catFilter, setCatFilter] = useState<string>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<CommunityPost | null>(null);
   const [deletingPost, setDeletingPost] = useState<CommunityPost | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const loadPosts = async () => {
+  const loadPostsAndCategories = async () => {
     setLoading(true);
     try {
-      const list = await fetchCommunityPosts();
-      setPosts(list);
+      const [postList, catList] = await Promise.all([
+        fetchCommunityPosts(),
+        fetchCommunityCategories(),
+      ]);
+      setPosts(Array.isArray(postList) ? postList : []);
+      setCategoriesTree(Array.isArray(catList) ? catList : []);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadPosts();
+    loadPostsAndCategories();
   }, []);
+
+  // Merge stored categories with any categories found on existing posts
+  const effectiveCategoriesTree = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    categoriesTree.forEach((c) => {
+      if (c?.name) {
+        map.set(c.name, new Set(Array.isArray(c.subCategories) ? c.subCategories : []));
+      }
+    });
+    posts.forEach((p) => {
+      if (p?.category) {
+        if (!map.has(p.category)) map.set(p.category, new Set());
+        if (p.subCategory) {
+          map.get(p.category)!.add(p.subCategory);
+        }
+      }
+    });
+    return Array.from(map.entries()).map(([name, subs]) => ({
+      name,
+      subCategories: Array.from(subs),
+    }));
+  }, [categoriesTree, posts]);
 
   const handleSave = async (postData: CommunityPost) => {
     await saveCommunityPost(postData);
-    await loadPosts();
+    await loadPostsAndCategories();
     setIsModalOpen(false);
     setEditingPost(null);
   };
 
   const handleTogglePin = async (post: CommunityPost) => {
-    const updated: CommunityPost = { ...post, isPinned: !post.isPinned, updatedAt: Date.now() };
+    const updated: CommunityPost = {
+      ...post,
+      isPinned: !post.isPinned,
+      updatedAt: Date.now(),
+    };
     await saveCommunityPost(updated);
-    await loadPosts();
+    await loadPostsAndCategories();
   };
 
   const handleConfirmDelete = async () => {
@@ -81,13 +116,17 @@ export function AdminCommunity() {
     if (langFilter !== 'all' && (p.language || 'all') !== langFilter && p.language !== 'all') {
       return false;
     }
+    if (catFilter !== 'all' && p.category !== catFilter) {
+      return false;
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       return (
         (p.title || '').toLowerCase().includes(q) ||
         (p.subtitle || '').toLowerCase().includes(q) ||
         (p.paragraph || '').toLowerCase().includes(q) ||
-        (p.category || '').toLowerCase().includes(q)
+        (p.category || '').toLowerCase().includes(q) ||
+        (p.subCategory || '').toLowerCase().includes(q)
       );
     }
     return true;
@@ -98,6 +137,8 @@ export function AdminCommunity() {
       <CommunityPostModal
         isOpen={isModalOpen}
         postToEdit={editingPost}
+        categoriesTree={effectiveCategoriesTree}
+        onCategoriesUpdated={(nextTree) => setCategoriesTree(nextTree)}
         onClose={() => {
           setIsModalOpen(false);
           setEditingPost(null);
@@ -139,33 +180,52 @@ export function AdminCommunity() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-card border border-border/80 shadow-xs">
         <div>
           <h2 className="text-xl sm:text-2xl font-black text-foreground">
             {isRtl ? 'إدارة المجتمع الخاص (Private Community)' : 'Manage Private Community'}
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             {isRtl
-              ? 'أنشئ وعدّل واحذف منشورات المجتمع الخاص للأعضاء باللغتين العربية والإنجليزية.'
-              : 'Create, edit, pin, and delete private community posts with full Arabic & English support.'}
+              ? 'أنشئ وعدّل وثبّت واحذف منشورات وأقسام المجتمع الخاص للأعضاء باللغتين العربية والإنجليزية.'
+              : 'Create, edit, pin, and organize private community posts and categories in Arabic & English.'}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setEditingPost(null);
-            setIsModalOpen(true);
-          }}
-          className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer w-fit"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{isRtl ? 'منشور جديد' : 'New Community Post'}</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link
+            to="/community"
+            className="px-3.5 py-2.5 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-bold flex items-center gap-1.5 border border-border cursor-pointer"
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-primary" />
+            <span>{isRtl ? 'فتح صفحة المجتمع' : 'View Live Community'}</span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={loadPostsAndCategories}
+            className="p-2.5 rounded-xl bg-muted hover:bg-muted/80 text-foreground border border-border cursor-pointer"
+            title={isRtl ? 'تحديث' : 'Refresh'}
+          >
+            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEditingPost(null);
+              setIsModalOpen(true);
+            }}
+            className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isRtl ? 'منشور جديد' : 'New Community Post'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters Row */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-muted-foreground absolute top-1/2 -translate-y-1/2 start-3.5" />
           <input
@@ -177,22 +237,50 @@ export function AdminCommunity() {
           />
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {(['all', 'ar', 'en'] as const).map((lf) => (
-            <button
-              key={lf}
-              type="button"
-              onClick={() => setLangFilter(lf)}
-              className={cn(
-                'px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer',
-                langFilter === lf
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-card text-muted-foreground border-border hover:text-foreground'
-              )}
-            >
-              {lf === 'all' ? (isRtl ? 'الكل' : 'All') : lf === 'ar' ? 'العربية (AR)' : 'English (EN)'}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Category Filter */}
+          {effectiveCategoriesTree.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-2.5 py-1.5">
+              <FolderKanban className="w-3.5 h-3.5 text-primary shrink-0" />
+              <select
+                value={catFilter}
+                onChange={(e) => setCatFilter(e.target.value)}
+                className="bg-transparent text-xs font-bold text-foreground focus:outline-none cursor-pointer"
+              >
+                <option value="all">{isRtl ? 'جميع الأقسام' : 'All Categories'}</option>
+                {effectiveCategoriesTree.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Language Filter */}
+          <div className="flex items-center gap-1.5">
+            {(['all', 'ar', 'en'] as const).map((lf) => (
+              <button
+                key={lf}
+                type="button"
+                onClick={() => setLangFilter(lf)}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer',
+                  langFilter === lf
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-card text-muted-foreground border-border hover:text-foreground'
+                )}
+              >
+                {lf === 'all'
+                  ? isRtl
+                    ? 'الكل'
+                    : 'All'
+                  : lf === 'ar'
+                  ? 'العربية (AR)'
+                  : 'English (EN)'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -228,11 +316,17 @@ export function AdminCommunity() {
                 className="p-5 rounded-2xl bg-card border border-border/80 flex flex-col justify-between gap-4 shadow-2xs"
               >
                 <div className="space-y-2.5" dir={dir}>
-                  <div className="flex items-center justify-between gap-2" dir={isRtl ? 'rtl' : 'ltr'}>
+                  <div
+                    className="flex items-center justify-between gap-2"
+                    dir={isRtl ? 'rtl' : 'ltr'}
+                  >
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-md">
-                        {post.category}
-                      </span>
+                      {post.category && (
+                        <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-md">
+                          {post.category}
+                          {post.subCategory ? ` • ${post.subCategory}` : ''}
+                        </span>
+                      )}
                       <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-muted text-muted-foreground">
                         {post.language || 'all'}
                       </span>
@@ -247,6 +341,7 @@ export function AdminCommunity() {
                       <button
                         type="button"
                         onClick={() => handleTogglePin(post)}
+                        title={isRtl ? 'تثبيت المنشور' : 'Pin Post'}
                         className={cn(
                           'p-1.5 rounded-lg border cursor-pointer',
                           post.isPinned
@@ -262,6 +357,7 @@ export function AdminCommunity() {
                           setEditingPost(post);
                           setIsModalOpen(true);
                         }}
+                        title={isRtl ? 'تعديل' : 'Edit'}
                         className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-primary cursor-pointer"
                       >
                         <Edit className="w-3.5 h-3.5" />
@@ -269,6 +365,7 @@ export function AdminCommunity() {
                       <button
                         type="button"
                         onClick={() => setDeletingPost(post)}
+                        title={isRtl ? 'حذف' : 'Delete'}
                         className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-rose-500 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -302,7 +399,7 @@ export function AdminCommunity() {
                     </span>
                   </div>
                   <span className="text-[11px]">
-                    {new Date(post.createdAt).toLocaleDateString()}
+                    {post.createdAt ? new Date(post.createdAt).toLocaleDateString() : ''}
                   </span>
                 </div>
               </div>

@@ -257,6 +257,14 @@ export function Footer() {
               </li>
               <li>
                 <Link 
+                  to="/support" 
+                  className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
+                >
+                  {isRtl ? 'تذاكر الدعم الفني (Support Tickets)' : 'Support Tickets & Help Desk'}
+                </Link>
+              </li>
+              <li>
+                <Link 
                   to="/creator" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >

@@ -25,13 +25,14 @@ import {
   Compass,
   Heart,
   LayoutGrid,
-  MessageSquareHeart
+  MessageSquareHeart,
+  LifeBuoy
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState, useRef } from 'react';
 import { auth, db } from '../firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { initializeOrUpdateProfile } from '../lib/gamification';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
@@ -62,6 +63,7 @@ export function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileExploreOpen, setIsMobileExploreOpen] = useState(true);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [unreadSupportCount, setUnreadSupportCount] = useState(0);
 
   const exploreRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -181,6 +183,20 @@ export function Header() {
     });
     return () => unsubscribe();
   }, [setUser, loadProgress, loadFavorites]);
+
+  // Listen for unread support ticket replies from Admin
+  useEffect(() => {
+    if (!user?.uid) {
+      setUnreadSupportCount(0);
+      return;
+    }
+    const q = query(collection(db, 'support_tickets'), where('userId', '==', user.uid));
+    const unsub = onSnapshot(q, (snap) => {
+      const count = snap.docs.filter((d) => d.data().unreadByUser === true).length;
+      setUnreadSupportCount(count);
+    }, () => {});
+    return () => unsub();
+  }, [user?.uid]);
 
   const toggleTheme = () => {
     setTheme(theme === 'light' ? 'dark' : 'light');
@@ -613,6 +629,28 @@ export function Header() {
                               {isRtl ? 'حصري' : 'VIP'}
                             </span>
                           </Link>
+
+                          <Link 
+                            to="/support" 
+                            onClick={() => setIsDropdownOpen(false)}
+                            className="flex items-center justify-between px-3 py-2.5 text-xs font-semibold text-foreground hover:bg-muted/80 rounded-xl transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+                                <LifeBuoy className="w-4 h-4" />
+                              </div>
+                              <span>{isRtl ? 'تذاكر الدعم الفني' : 'Support Tickets'}</span>
+                            </div>
+                            {unreadSupportCount > 0 ? (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white font-black text-[10px] animate-pulse">
+                                {unreadSupportCount} {isRtl ? 'رد' : 'Reply'}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 font-bold text-[10px]">
+                                {isRtl ? 'مباشر' : 'Help'}
+                              </span>
+                            )}
+                          </Link>
                         </>
                       )}
 
@@ -798,24 +836,51 @@ export function Header() {
 
                 {/* PRIVATE COMMUNITY IN MOBILE DRAWER (ONLY VISIBLE WHEN LOGGED IN) */}
                 {user && (
-                  <Link 
-                    to="/community" 
-                    onClick={() => setIsMobileMenuOpen(false)} 
-                    className={cn(
-                      "flex items-center justify-between px-3.5 py-2.5 rounded-xl font-semibold text-sm transition-all",
-                      isNavActive('/community') 
-                        ? "bg-primary/10 text-primary" 
-                        : "text-foreground/80 hover:bg-muted/70 hover:text-foreground"
-                    )}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <MessageSquareHeart className="w-4 h-4 text-emerald-500" />
-                      <span>{isRtl ? 'مجتمع الأعضاء الخاص' : 'Private Community'}</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
-                      {isRtl ? 'حصري' : 'Members'}
-                    </span>
-                  </Link>
+                  <>
+                    <Link 
+                      to="/community" 
+                      onClick={() => setIsMobileMenuOpen(false)} 
+                      className={cn(
+                        "flex items-center justify-between px-3.5 py-2.5 rounded-xl font-semibold text-sm transition-all",
+                        isNavActive('/community') 
+                          ? "bg-primary/10 text-primary" 
+                          : "text-foreground/80 hover:bg-muted/70 hover:text-foreground"
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <MessageSquareHeart className="w-4 h-4 text-emerald-500" />
+                        <span>{isRtl ? 'مجتمع الأعضاء الخاص' : 'Private Community'}</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+                        {isRtl ? 'حصري' : 'Members'}
+                      </span>
+                    </Link>
+
+                    <Link 
+                      to="/support" 
+                      onClick={() => setIsMobileMenuOpen(false)} 
+                      className={cn(
+                        "flex items-center justify-between px-3.5 py-2.5 rounded-xl font-semibold text-sm transition-all",
+                        isNavActive('/support') 
+                          ? "bg-primary/10 text-primary" 
+                          : "text-foreground/80 hover:bg-muted/70 hover:text-foreground"
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <LifeBuoy className="w-4 h-4 text-blue-500" />
+                        <span>{isRtl ? 'تذاكر الدعم الفني' : 'Support Tickets'}</span>
+                      </div>
+                      {unreadSupportCount > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-bold animate-pulse">
+                          {unreadSupportCount} {isRtl ? 'رد جديد' : 'New Reply'}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 text-[10px] font-bold">
+                          {isRtl ? 'مباشر' : 'Help'}
+                        </span>
+                      )}
+                    </Link>
+                  </>
                 )}
 
                 {/* Collapsible Explore Section in Mobile/Tablet Menu */}

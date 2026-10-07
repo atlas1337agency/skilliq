@@ -21,7 +21,8 @@ import {
   Trash2,
   Youtube,
   Play,
-  Bookmark
+  Bookmark,
+  LifeBuoy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
@@ -31,6 +32,7 @@ import { DailyRewardCheckIn } from '../components/DailyRewardCheckIn';
 import { DailyTechQuest } from '../components/DailyTechQuest';
 import { AchievementsShowcase } from '../components/AchievementsShowcase';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { SupportTickets } from './SupportTickets';
 import { 
   BookVideoModal, 
   BookCoverVisual, 
@@ -234,6 +236,15 @@ export function Dashboard() {
               <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
                 {t('track_your_progress', 'Track your daily progress, solve challenges, and continue learning.')}
               </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <a
+                  href="#user-support-tickets-section"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 text-xs font-bold transition-colors"
+                >
+                  <LifeBuoy className="w-3.5 h-3.5" />
+                  <span>{isRtl ? 'تذاكر الدعم الفني والمساعدة' : 'Support Tickets & Help Desk'}</span>
+                </a>
+              </div>
             </div>
           </div>
 
@@ -918,6 +929,11 @@ export function Dashboard() {
             )}
           </div>
         )}
+      </section>
+
+      {/* 6. LIVE SUPPORT TICKETS & HELP DESK SECTION INSIDE USER PROFILE */}
+      <section id="user-support-tickets-section" className="pt-4 scroll-mt-24">
+        <SupportTickets embedded />
       </section>
 
       {/* Review Modal */}

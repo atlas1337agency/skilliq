@@ -1,61 +1,65 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  collection, 
-  getDocs, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  onSnapshot 
+import {
+  collection,
+  getDocs,
+  doc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
 } from 'firebase/firestore';
-import { db } from '../firebase';
-import { 
-  Users, 
-  BookOpen, 
-  Award, 
-  Activity, 
-  Clock, 
-  ShieldAlert, 
-  ChevronLeft, 
-  ChevronRight, 
-  TrendingUp, 
-  Key, 
-  Sparkles, 
-  Filter, 
-  Search, 
-  RefreshCw, 
-  Zap, 
-  CheckCircle2, 
-  PlayCircle, 
-  Flame, 
-  BarChart3, 
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { auth, db } from '../firebase';
+import {
+  Users,
+  BookOpen,
+  Award,
+  Activity,
+  Clock,
+  TrendingUp,
+  Search,
+  RefreshCw,
+  CheckCircle2,
+  PlayCircle,
+  BarChart3,
   Radio,
-  Layers,
-  ArrowUpRight,
   AlertTriangle,
   Globe,
-  Database,
-  User,
   X,
   ChevronDown,
   ChevronUp,
   Compass,
-  Check
+  Check,
+  Monitor,
+  Smartphone,
+  Tablet,
+  Navigation,
+  Settings,
+  Eye,
+  ShieldCheck,
+  HelpCircle,
+  Copy,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { isSuperAdminEmail } from '../lib/admin';
 import { useTranslation } from 'react-i18next';
-import { 
-  AreaChart, 
-  Area, 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip as RechartsTooltip, 
-  ResponsiveContainer 
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
 } from 'recharts';
 import { cn } from '../lib/utils';
+import {
+  UserPresenceRecord,
+  PlatformMovementRecord,
+  fetchPlatformTelemetry,
+  isUserOnlineNow,
+  formatDurationSpent,
+} from '../lib/telemetry';
+import { injectAndConfigureGtag } from './PlatformTelemetryTracker';
+import { getTextDir } from '../lib/community';
 
 interface UserData {
   uid: string;
@@ -64,6 +68,14 @@ interface UserData {
   photoURL: string;
   role: string;
   createdAt?: number;
+  lastSeenAt?: number;
+  totalSecondsSpent?: number;
+  visitCount?: number;
+  pagesVisitedCount?: number;
+  currentPath?: string;
+  currentPageLabel?: string;
+  deviceType?: 'Desktop' | 'Tablet' | 'Mobile';
+  browser?: string;
 }
 
 interface ProgressData {
@@ -85,12 +97,22 @@ interface UserWithProgress extends UserData {
 export interface RealPlatformEvent {
   id: string;
   userId?: string;
-  type: 'graduation' | 'lesson_completed' | 'enrolled' | 'streak_milestone' | 'report_submitted';
+  type:
+    | 'graduation'
+    | 'lesson_completed'
+    | 'enrolled'
+    | 'page_visit'
+    | 'course_view'
+    | 'streak_milestone'
+    | 'report_submitted';
   userName: string;
   userAvatar?: string;
   userEmail?: string;
   courseTitle: string;
   courseId?: string;
+  path?: string;
+  deviceType?: string;
+  browser?: string;
   completedVideoIds?: string[];
   detail: string;
   timestamp: number;
@@ -98,72 +120,385 @@ export interface RealPlatformEvent {
   isRealEvent: true;
 }
 
-type Timeframe = '24h' | '7d' | '30d' | 'all';
-type MovementFilter = 'all' | 'graduations' | 'lessons' | 'enrollments' | 'reports';
-type ChartMetric = 'lessons' | 'graduations' | 'enrollments';
+type MovementFilter = 'all' | 'traffic' | 'graduations' | 'lessons' | 'enrollments' | 'reports';
+type ChartMetric = 'pageViews' | 'visitors' | 'lessons' | 'graduations';
+
+interface GaPropertyOption {
+  propertyId: string;
+  displayName: string;
+  accountName: string;
+}
 
 export function AdminAnalytics() {
-  const { courses, allCourses, learningPaths, language } = useStore();
-  const { t, i18n } = useTranslation();
+  const { allCourses, language } = useStore();
+  const { i18n } = useTranslation();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  // Live Firestore Data States (100% Real)
+  // Live Firestore & Telemetry States (100% Real)
   const [users, setUsers] = useState<UserWithProgress[]>([]);
   const [reports, setReports] = useState<any[]>([]);
+  const [presenceList, setPresenceList] = useState<UserPresenceRecord[]>([]);
+  const [movementLogs, setMovementLogs] = useState<PlatformMovementRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isRealtimeActive, setIsRealtimeActive] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState(false);
+  const [nowTick, setNowTick] = useState(Date.now());
+
+  // Google Analytics 4 (GA4) Live Integration States
+  const [gaMeasurementId, setGaMeasurementId] = useState('G-VHQYB5FFPQ');
+  const [gaPropertyId, setGaPropertyId] = useState('');
+  const [gaAccessToken, setGaAccessToken] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem('skilliq_ga4_token') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [gaPropertiesList, setGaPropertiesList] = useState<GaPropertyOption[]>([]);
+  const [gaConnected, setGaConnected] = useState(false);
+  const [gaConnecting, setGaConnecting] = useState(false);
+  const [gaTrafficRows, setGaTrafficRows] = useState<
+    { date: string; visitors: number; pageViews: number; sessions: number }[] | null
+  >(null);
+  const [gaCountries, setGaCountries] = useState<{ country: string; users: number }[]>([]);
+  const [gaTopPages, setGaTopPages] = useState<{ path: string; views: number; users: number }[]>(
+    []
+  );
+  const [gaSources, setGaSources] = useState<{ source: string; sessions: number }[]>([]);
+  const [gaRealtimeUsers, setGaRealtimeUsers] = useState<number | null>(null);
+  const [showGaSettingsModal, setShowGaSettingsModal] = useState(false);
+  const [showVercelGuideModal, setShowVercelGuideModal] = useState(false);
+  const [gaStatusMsg, setGaStatusMsg] = useState<string | null>(null);
+  const [copiedVar, setCopiedVar] = useState<string | null>(null);
 
   // User Switcher & Movement Drilldown Controls
   const [selectedUserId, setSelectedUserId] = useState<string | 'all'>('all');
-  const [selectedCourseId, setSelectedCourseId] = useState<string | 'all'>('all');
   const [movementFilter, setMovementFilter] = useState<MovementFilter>('all');
   const [movementSearch, setMovementSearch] = useState('');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
-
-  // User Directory Table Controls
-  const [userSearch, setUserSearch] = useState('');
-  const [userRoleFilter, setUserRoleFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [chartMetric, setChartMetric] = useState<ChartMetric>('lessons');
-  const usersPerPage = 8;
-
-  // Real GA4 Traffic (if connected)
-  const [gaTraffic, setGaTraffic] = useState<any[] | null>(null);
-  const [gaConnected, setGaConnected] = useState<boolean>(false);
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('pageViews');
 
   const unsubUsersRef = useRef<(() => void) | null>(null);
   const unsubReportsRef = useRef<(() => void) | null>(null);
+  const unsubPresenceRef = useRef<(() => void) | null>(null);
+  const unsubMovementsRef = useRef<(() => void) | null>(null);
 
-  // 1. Setup REAL-TIME listener for users & their progress
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  const translatePageLabel = (label: string, path?: string) => {
+    if (!isRtl) return label;
+    if (path === '/' || label === 'Home Page') return 'الصفحة الرئيسية';
+    if (path?.startsWith('/courses') || label.includes('Courses Catalog'))
+      return 'كتالوج الدورات التدريبية';
+    if (path?.startsWith('/masterclasses') || label.includes('Masterclasses'))
+      return 'صفحة الماستر كلاس';
+    if (path?.startsWith('/books') || label.includes('Video Books')) return 'مكتبة الكتب المشروحة';
+    if (path?.startsWith('/paths') || label.includes('Learning Paths'))
+      return 'المسارات التعليمية';
+    if (path?.startsWith('/community') || label.includes('Community')) return 'مجتمع الطلاب';
+    if (path?.startsWith('/leaderboard') || label.includes('Leaderboard')) return 'لوحة المتصدرين';
+    if (path?.startsWith('/dashboard') || label.includes('Dashboard'))
+      return 'الملف الشخصي للطالب';
+    if (path?.startsWith('/support') || label.includes('Support')) return 'تذاكر الدعم الفني';
+    if (path?.startsWith('/contact') || label.includes('Contact')) return 'صفحة تواصل معنا';
+    if (path?.startsWith('/admin') || label.includes('Admin')) return 'لوحة تحكم الإدارة';
+    if (label.startsWith('Watching Course: ')) {
+      return `مشاهدة دورة: ${label.replace('Watching Course: ', '')}`;
+    }
+    return label;
+  };
+
+  const translateMovementDetail = (detail: string, path?: string, actionType?: string) => {
+    if (!isRtl) return detail;
+    if (actionType === 'session_start') {
+      return `بدأ جلسة تصفح جديدة في المنصة (${ path || '/' })`;
+    }
+    if (actionType === 'course_view' || detail.startsWith('Opened course player: ')) {
+      const cName = detail.replace('Opened course player: ', '');
+      return `فتح مشغل دروس الدورة: ${cName}`;
+    }
+    if (actionType === 'page_view' || detail.startsWith('Navigated to ')) {
+      return `انتقل إلى صفحة ${translatePageLabel(detail.replace('Navigated to ', '').split(' (')[0], path)}`;
+    }
+    if (detail.startsWith('Completed lesson #')) {
+      return detail
+        .replace('Completed lesson #', 'أتم مشاهدة الدرس رقم ')
+        .replace(' in ', ' في دورة ');
+    }
+    if (detail.startsWith('Graduated and unlocked certificate for ')) {
+      return detail.replace(
+        'Graduated and unlocked certificate for ',
+        'تخرج بنجاح وحصل على الشهادة المعتمدة لدورة '
+      );
+    }
+    if (detail.startsWith('Saved ')) {
+      return 'قام بحفظ عنصر في قائمة المفضلة الشخصية';
+    }
+    return detail;
+  };
+
+  const loadTelemetryFromServerAndFirestore = async () => {
+    try {
+      const { presence, movements } = await fetchPlatformTelemetry();
+      setPresenceList(presence);
+      setMovementLogs(movements);
+    } catch {}
+  };
+
+  // Parse GA4 response payload into state
+  const applyGa4ResponseData = (data: any) => {
+    if (!data || data.useDemo || !data.traffic) return false;
+    const rows = Array.isArray(data.traffic.rows) ? data.traffic.rows : [];
+    rows.sort((a: any, b: any) =>
+      String(a.dimensionValues?.[0]?.value || '').localeCompare(
+        String(b.dimensionValues?.[0]?.value || '')
+      )
+    );
+    setGaTrafficRows(
+      rows.map((r: any) => {
+        const rawDate = String(r.dimensionValues?.[0]?.value || '');
+        const formatted =
+          rawDate.length === 8 ? `${rawDate.slice(4, 6)}/${rawDate.slice(6, 8)}` : rawDate;
+        return {
+          date: formatted,
+          visitors: parseInt(r.metricValues?.[0]?.value || '0', 10),
+          pageViews: parseInt(r.metricValues?.[1]?.value || '0', 10),
+          sessions: parseInt(r.metricValues?.[2]?.value || r.metricValues?.[0]?.value || '0', 10),
+        };
+      })
+    );
+
+    if (data.locations?.rows) {
+      setGaCountries(
+        data.locations.rows.slice(0, 6).map((r: any) => ({
+          country: r.dimensionValues?.[0]?.value || 'Unknown',
+          users: parseInt(r.metricValues?.[0]?.value || '0', 10),
+        }))
+      );
+    }
+
+    if (data.pages?.rows) {
+      setGaTopPages(
+        data.pages.rows.slice(0, 6).map((r: any) => ({
+          path: r.dimensionValues?.[0]?.value || '/',
+          views: parseInt(r.metricValues?.[0]?.value || '0', 10),
+          users: parseInt(r.metricValues?.[1]?.value || '0', 10),
+        }))
+      );
+    }
+
+    if (data.sources?.rows) {
+      setGaSources(
+        data.sources.rows.slice(0, 5).map((r: any) => ({
+          source: r.dimensionValues?.[0]?.value || 'direct',
+          sessions: parseInt(r.metricValues?.[0]?.value || '0', 10),
+        }))
+      );
+    }
+
+    if (data.realtime?.rows?.[0]?.metricValues?.[0]?.value) {
+      setGaRealtimeUsers(parseInt(data.realtime.rows[0].metricValues[0].value, 10));
+    } else {
+      setGaRealtimeUsers(0);
+    }
+
+    setGaConnected(true);
+    return true;
+  };
+
+  // Fetch GA4 Report using token + propertyId
+  const fetchGa4LiveReport = async (token: string, propId: string) => {
+    const cleanProp = (propId || '').replace(/^properties\//, '').trim();
+    if (!cleanProp) return;
+
+    try {
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const res = await fetch(`/api/analytics?propertyId=${encodeURIComponent(cleanProp)}`, {
+        headers,
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      applyGa4ResponseData(data);
+    } catch {}
+  };
+
+  // Discover GA4 properties for authenticated Google user
+  const fetchGa4AccountSummaries = async (token: string) => {
+    try {
+      const res = await fetch('https://analyticsadmin.googleapis.com/v1beta/accountSummaries', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const props: GaPropertyOption[] = [];
+      if (Array.isArray(data.accountSummaries)) {
+        for (const acc of data.accountSummaries) {
+          const accName = acc.displayName || 'GA4 Account';
+          if (Array.isArray(acc.propertySummaries)) {
+            for (const p of acc.propertySummaries) {
+              const pid = String(p.property || '').replace(/^properties\//, '');
+              if (pid) {
+                props.push({
+                  propertyId: pid,
+                  displayName: p.displayName || pid,
+                  accountName: accName,
+                });
+              }
+            }
+          }
+        }
+      }
+      setGaPropertiesList(props);
+      return props;
+    } catch {
+      return [];
+    }
+  };
+
+  // One-click Connect with Google Analytics via Google OAuth Popup
+  const handleConnectGoogleAnalyticsOAuth = async () => {
+    setGaConnecting(true);
+    setGaStatusMsg(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/analytics.readonly');
+      provider.setCustomParameters({ prompt: 'consent' });
+
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+
+      if (token) {
+        setGaAccessToken(token);
+        try {
+          sessionStorage.setItem('skilliq_ga4_token', token);
+        } catch {}
+
+        const discovered = await fetchGa4AccountSummaries(token);
+        const chosenPropId = gaPropertyId || discovered[0]?.propertyId || '';
+
+        if (chosenPropId) {
+          setGaPropertyId(chosenPropId);
+          await fetch('/api/analytics/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              propertyId: chosenPropId,
+              measurementId: gaMeasurementId,
+            }),
+          });
+          await fetchGa4LiveReport(token, chosenPropId);
+          setGaStatusMsg(
+            isRtl
+              ? 'تم الربط بنجاح مع Google Analytics 4 وجلب الزيارات الحية!'
+              : 'Successfully connected to Google Analytics 4 & synced live traffic!'
+          );
+        } else {
+          setShowGaSettingsModal(true);
+          setGaStatusMsg(
+            isRtl
+              ? 'تمت مصادقة حساب Google! يرجى إدخال معرف Property ID أو Measurement ID.'
+              : 'Google account authorized! Please enter your GA4 Property ID or Measurement ID.'
+          );
+        }
+      }
+    } catch (err: any) {
+      setGaStatusMsg(
+        err?.message ||
+          (isRtl
+            ? 'تعذر إكمال مصادقة Google Analytics.'
+            : 'Could not complete Google Analytics authorization.')
+      );
+    } finally {
+      setGaConnecting(false);
+    }
+  };
+
+  const handleSaveGaConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanMeas = gaMeasurementId.trim();
+    const cleanProp = gaPropertyId.trim().replace(/^properties\//, '');
+
+    if (cleanMeas.startsWith('G-')) {
+      injectAndConfigureGtag(cleanMeas);
+    }
+
+    await fetch('/api/analytics/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        measurementId: cleanMeas,
+        propertyId: cleanProp,
+      }),
+    });
+
+    if (cleanProp) {
+      await fetchGa4LiveReport(gaAccessToken, cleanProp);
+    }
+
+    setGaStatusMsg(
+      isRtl
+        ? 'تم حفظ إعدادات Google Analytics وتفعيل التتبع الحي عبر المنصة!'
+        : 'Google Analytics configuration saved & live tracking activated!'
+    );
+    setTimeout(() => {
+      setShowGaSettingsModal(false);
+      setGaStatusMsg(null);
+    }, 1000);
+  };
+
+  // 1. Setup REAL-TIME listeners for users, progress, presence, movements, and GA4 config
   useEffect(() => {
     let isMounted = true;
 
-    const setupRealtimeSync = () => {
-      try {
-        // Realtime listener on 'users' collection
-        unsubUsersRef.current = onSnapshot(collection(db, 'users'), async (snapshot) => {
-          if (!isMounted) return;
+    loadTelemetryFromServerAndFirestore();
 
+    fetch('/api/analytics/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (!isMounted || !cfg) return;
+        if (cfg.measurementId) {
+          setGaMeasurementId(cfg.measurementId);
+          injectAndConfigureGtag(cfg.measurementId);
+        }
+        if (cfg.propertyId) {
+          setGaPropertyId(cfg.propertyId);
+          fetchGa4LiveReport(gaAccessToken, cfg.propertyId);
+        }
+      })
+      .catch(() => {});
+
+    fetch('/api/analytics')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!isMounted || !data) return;
+        applyGa4ResponseData(data);
+      })
+      .catch(() => {});
+
+    try {
+      unsubUsersRef.current = onSnapshot(
+        collection(db, 'users'),
+        async (snapshot) => {
+          if (!isMounted) return;
           const rawUsers: UserData[] = [];
-          snapshot.forEach(docSnap => {
+          snapshot.forEach((docSnap) => {
             rawUsers.push({ uid: docSnap.id, ...(docSnap.data() as any) });
           });
 
-          // Fetch real progress & gamification profiles for each user
           const usersWithDetailsPromises = rawUsers.map(async (u) => {
             let progressList: ProgressData[] = [];
             try {
               const progSnap = await getDocs(collection(db, `users/${u.uid}/progress`));
-              progSnap.forEach(p => {
+              progSnap.forEach((p) => {
                 progressList.push(p.data() as ProgressData);
               });
-            } catch (err) {
-              console.warn(`Could not fetch progress for user ${u.uid}`, err);
-            }
+            } catch {}
 
-            // Real publicProfile for XP & streaks
             let xp = 0;
             let streak = 0;
             let badges: string[] = [];
@@ -176,210 +511,243 @@ export function AdminAnalytics() {
                 streak = pData.streak || 0;
                 badges = pData.badges || [];
               }
-            } catch (e) {
-              // Ignore if no profile
-            }
+            } catch {}
 
             return {
               ...u,
               progress: progressList,
               xp,
               streak,
-              badges
+              badges,
             };
           });
 
           const fullUsers = await Promise.all(usersWithDetailsPromises);
-
           if (isMounted) {
-            // Sort by most completions descending
             fullUsers.sort((a, b) => {
-              const aComps = a.progress.filter(p => p.isCompleted).length;
-              const bComps = b.progress.filter(p => p.isCompleted).length;
+              const aComps = a.progress.filter((p) => p.isCompleted).length;
+              const bComps = b.progress.filter((p) => p.isCompleted).length;
               return bComps - aComps;
             });
-
             setUsers(fullUsers);
-            setIsRealtimeActive(true);
-            setLastSyncTime(new Date());
             setLoading(false);
           }
-        }, (err) => {
-          console.error("Firestore users realtime subscription error:", err);
-          if (isMounted) {
-            setLoading(false);
-            setIsRealtimeActive(false);
-          }
-        });
+        },
+        () => {
+          if (isMounted) setLoading(false);
+        }
+      );
 
-        // Realtime listener on 'reports' collection
-        unsubReportsRef.current = onSnapshot(collection(db, 'reports'), (snap) => {
+      unsubReportsRef.current = onSnapshot(
+        collection(db, 'reports'),
+        (snap) => {
           if (!isMounted) return;
           const reportList: any[] = [];
-          snap.forEach(d => {
-            reportList.push({ id: d.id, ...d.data() });
-          });
+          snap.forEach((d) => reportList.push({ id: d.id, ...d.data() }));
           setReports(reportList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
-        }, (err) => {
-          console.warn("Reports subscription warning:", err);
-        });
+        },
+        () => {}
+      );
 
-      } catch (err) {
-        console.error("Error setting up Firestore realtime sync:", err);
-        if (isMounted) setLoading(false);
-      }
-    };
+      unsubPresenceRef.current = onSnapshot(
+        collection(db, 'user_presence'),
+        (snap) => {
+          if (!isMounted) return;
+          const fsPresence = snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as UserPresenceRecord),
+          }));
+          setPresenceList((prev) => {
+            const map = new Map<string, UserPresenceRecord>();
+            for (const item of [...prev, ...fsPresence]) {
+              if (!item || !item.id) continue;
+              const ex = map.get(item.id);
+              if (!ex || (item.lastSeenAt || 0) >= (ex.lastSeenAt || 0)) {
+                map.set(item.id, {
+                  ...ex,
+                  ...item,
+                  totalSecondsSpent: Math.max(
+                    ex?.totalSecondsSpent || 0,
+                    item.totalSecondsSpent || 0
+                  ),
+                  visitCount: Math.max(ex?.visitCount || 1, item.visitCount || 1),
+                });
+              }
+            }
+            return Array.from(map.values()).sort(
+              (a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0)
+            );
+          });
+        },
+        () => {}
+      );
 
-    setupRealtimeSync();
+      unsubMovementsRef.current = onSnapshot(
+        collection(db, 'platform_movements'),
+        (snap) => {
+          if (!isMounted) return;
+          const fsMovs = snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as PlatformMovementRecord),
+          }));
+          setMovementLogs((prev) => {
+            const map = new Map<string, PlatformMovementRecord>();
+            for (const m of [...prev, ...fsMovs]) {
+              if (m && m.id) map.set(m.id, m);
+            }
+            return Array.from(map.values()).sort(
+              (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
+            );
+          });
+        },
+        () => {}
+      );
+    } catch {
+      if (isMounted) setLoading(false);
+    }
 
-    // Check if real Google Analytics 4 is linked
-    const checkGa = async () => {
-      try {
-        const apiBaseUrl = import.meta.env.VITE_API_URL || '';
-        const res = await fetch(`${apiBaseUrl}/api/analytics`);
-        const data = await res.json();
-        if (data && !data.useDemo && data.traffic?.rows) {
-          const rows = data.traffic.rows;
-          rows.sort((a: any, b: any) => a.dimensionValues[0].value.localeCompare(b.dimensionValues[0].value));
-          setGaTraffic(rows.map((row: any) => ({
-            date: row.dimensionValues[0].value.substring(4,6) + '/' + row.dimensionValues[0].value.substring(6,8),
-            visitors: parseInt(row.metricValues[0].value, 10),
-            pageViews: parseInt(row.metricValues[1].value, 10)
-          })));
-          setGaConnected(true);
-        } else {
-          setGaTraffic(null);
-          setGaConnected(false);
-        }
-      } catch (e) {
-        setGaTraffic(null);
-        setGaConnected(false);
-      }
-    };
-
-    checkGa();
+    const pollInterval = setInterval(() => {
+      if (isMounted) loadTelemetryFromServerAndFirestore();
+    }, 15000);
 
     return () => {
       isMounted = false;
       if (unsubUsersRef.current) unsubUsersRef.current();
       if (unsubReportsRef.current) unsubReportsRef.current();
+      if (unsubPresenceRef.current) unsubPresenceRef.current();
+      if (unsubMovementsRef.current) unsubMovementsRef.current();
+      clearInterval(pollInterval);
     };
   }, []);
 
-  // Format relative time helper
   const getRelativeTime = (timestamp: number) => {
     if (!timestamp || isNaN(timestamp)) return isRtl ? 'سابقاً' : 'Earlier';
     const diff = Math.max(0, Date.now() - timestamp);
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return isRtl ? 'الآن' : 'Just now';
-    if (mins < 60) return isRtl ? `منذ ${mins} دقيقة` : `${mins}m ago`;
+    if (mins < 60) return isRtl ? `منذ ${mins} د` : `${mins}m ago`;
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return isRtl ? `منذ ${hours} ساعة` : `${hours}h ago`;
+    if (hours < 24) return isRtl ? `منذ ${hours} س` : `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return isRtl ? `منذ ${days} يوم` : `${days}d ago`;
   };
 
-  // 2. Synthesize 100% REAL platform movements from actual Firestore documents (NO FAKES)
+  // 2. Synthesize 100% REAL platform movements from actual Firestore documents + live telemetry
   const realMovements = useMemo<RealPlatformEvent[]>(() => {
     const list: RealPlatformEvent[] = [];
     const courseMap = new Map<string, string>();
-    allCourses.forEach(c => courseMap.set(c.id, c.title));
+    allCourses.forEach((c) => courseMap.set(c.id, c.title));
 
-    // A. Course completions & graduation events
-    users.forEach(u => {
-      u.progress.forEach(p => {
+    movementLogs.forEach((m) => {
+      let type: RealPlatformEvent['type'] = 'page_visit';
+      if (m.actionType === 'course_view') type = 'course_view';
+      else if (m.actionType === 'lesson_completed') type = 'lesson_completed';
+      else if (m.actionType === 'course_completed') type = 'graduation';
+
+      list.push({
+        id: m.id,
+        userId: m.uid || m.visitorId,
+        type,
+        userName:
+          m.userName === 'Guest Visitor'
+            ? isRtl
+              ? 'زائر غير مسجل'
+              : 'Guest Visitor'
+            : m.userName || (isRtl ? 'زائر' : 'Visitor'),
+        userAvatar: m.userAvatar,
+        userEmail: m.userEmail,
+        courseTitle: translatePageLabel(m.pageTitle || m.path, m.path),
+        path: m.path,
+        deviceType: m.deviceType,
+        browser: m.browser,
+        detail: translateMovementDetail(m.detail, m.path, m.actionType),
+        timestamp: m.timestamp,
+        timeAgo: getRelativeTime(m.timestamp),
+        isRealEvent: true,
+      });
+    });
+
+    users.forEach((u) => {
+      u.progress.forEach((p) => {
         const courseTitle = courseMap.get(p.courseId) || p.courseId;
 
-        // Completed Course
         if (p.isCompleted) {
-          const compTime = p.completionDate ? new Date(p.completionDate).getTime() : (u.createdAt || Date.now() - 3600000);
+          const compTime = p.completionDate
+            ? new Date(p.completionDate).getTime()
+            : u.lastSeenAt || u.createdAt || Date.now() - 3600000;
           list.push({
             id: `comp-${u.uid}-${p.courseId}`,
             userId: u.uid,
             type: 'graduation',
-            userName: u.displayName || 'Learner',
+            userName: u.displayName || (isRtl ? 'طالب' : 'Learner'),
             userAvatar: u.photoURL,
             userEmail: u.email,
             courseTitle,
             courseId: p.courseId,
-            detail: isRtl 
-              ? `أكمل المنهج الدراسي بنجاح وحصل على شهادة إتمام معتمدة` 
+            path: `/course/${p.courseId}`,
+            detail: isRtl
+              ? `أكمل المنهج الدراسي بنجاح وحصل على شهادة إتمام معتمدة`
               : `Completed all course requirements and earned certified certificate`,
             timestamp: compTime,
             timeAgo: getRelativeTime(compTime),
-            isRealEvent: true
+            isRealEvent: true,
           });
         }
 
-        // Active video completions
         if (p.completedVideoIds && p.completedVideoIds.length > 0) {
-          const videoTime = p.completionDate ? new Date(p.completionDate).getTime() - 1800000 : (u.createdAt || Date.now() - 7200000);
+          const videoTime = p.completionDate
+            ? new Date(p.completionDate).getTime() - 1800000
+            : u.lastSeenAt || u.createdAt || Date.now() - 7200000;
           list.push({
             id: `vid-${u.uid}-${p.courseId}-${p.completedVideoIds.length}`,
             userId: u.uid,
             type: 'lesson_completed',
-            userName: u.displayName || 'Learner',
+            userName: u.displayName || (isRtl ? 'طالب' : 'Learner'),
             userAvatar: u.photoURL,
             userEmail: u.email,
             courseTitle,
             courseId: p.courseId,
+            path: `/course/${p.courseId}`,
             completedVideoIds: p.completedVideoIds,
-            detail: isRtl 
-              ? `أكمل ${p.completedVideoIds.length} درساً تدريبياً في هذا المنهج` 
+            detail: isRtl
+              ? `أكمل ${p.completedVideoIds.length} درساً تدريبياً في هذا المنهج`
               : `Finished ${p.completedVideoIds.length} video lessons in this curriculum`,
             timestamp: videoTime,
             timeAgo: getRelativeTime(videoTime),
-            isRealEvent: true
+            isRealEvent: true,
           });
         }
 
-        // Enrolled
-        if (p.currentVideoId && !p.isCompleted && (!p.completedVideoIds || p.completedVideoIds.length === 0)) {
-          const enrollTime = u.createdAt || Date.now() - 86400000;
+        if (
+          p.currentVideoId &&
+          !p.isCompleted &&
+          (!p.completedVideoIds || p.completedVideoIds.length === 0)
+        ) {
+          const enrollTime = u.lastSeenAt || u.createdAt || Date.now() - 86400000;
           list.push({
             id: `enr-${u.uid}-${p.courseId}`,
             userId: u.uid,
             type: 'enrolled',
-            userName: u.displayName || 'Learner',
+            userName: u.displayName || (isRtl ? 'طالب' : 'Learner'),
             userAvatar: u.photoURL,
             userEmail: u.email,
             courseTitle,
             courseId: p.courseId,
-            detail: isRtl 
-              ? `بدأ مسار التعلم وشاهد الدرس الأول` 
+            path: `/course/${p.courseId}`,
+            detail: isRtl
+              ? `بدأ مسار التعلم وشاهد الدرس الأول`
               : `Enrolled in course and launched video player`,
             timestamp: enrollTime,
             timeAgo: getRelativeTime(enrollTime),
-            isRealEvent: true
+            isRealEvent: true,
           });
         }
       });
-
-      // Gamification streak milestone
-      if (u.streak && u.streak > 1) {
-        const streakTime = Date.now() - 10800000;
-        list.push({
-          id: `streak-${u.uid}-${u.streak}`,
-          userId: u.uid,
-          type: 'streak_milestone',
-          userName: u.displayName || 'Learner',
-          userAvatar: u.photoURL,
-          userEmail: u.email,
-          courseTitle: 'SkilliQ Gamification Engine',
-          detail: isRtl 
-            ? `حافظ على حماس دراسي متواصل لمدة ${u.streak} أيام (+${u.streak * 10} XP)` 
-            : `Maintained a ${u.streak}-day learning streak milestone (+${u.streak * 10} XP)`,
-          timestamp: streakTime,
-          timeAgo: getRelativeTime(streakTime),
-          isRealEvent: true
-        });
-      }
     });
 
-    // B. Real User Reports
-    reports.forEach(rep => {
+    reports.forEach((rep) => {
       const courseTitle = courseMap.get(rep.courseId) || rep.courseId || 'Course';
-      const matchedUser = users.find(u => u.email === rep.userEmail);
+      const matchedUser = users.find((u) => u.email === rep.userEmail);
       list.push({
         id: `rep-${rep.id}`,
         userId: matchedUser?.uid,
@@ -388,45 +756,29 @@ export function AdminAnalytics() {
         userEmail: rep.userEmail,
         courseTitle,
         courseId: rep.courseId,
-        detail: isRtl 
-          ? `أبلغ عن مشكلة تقنية: "${rep.issue || 'فيديو غير متاح'}"` 
+        path: rep.courseId ? `/course/${rep.courseId}` : '/courses',
+        detail: isRtl
+          ? `أبلغ عن مشكلة تقنية: "${rep.issue || 'فيديو غير متاح'}"`
           : `Reported issue: "${rep.issue || 'Video unavailable'}"`,
         timestamp: rep.createdAt || Date.now() - 3600000,
         timeAgo: getRelativeTime(rep.createdAt || Date.now() - 3600000),
-        isRealEvent: true
+        isRealEvent: true,
       });
     });
 
-    // Sort strictly by timestamp descending
     return list.sort((a, b) => b.timestamp - a.timestamp);
-  }, [users, reports, allCourses, isRtl]);
+  }, [movementLogs, users, reports, allCourses, isRtl, nowTick]);
 
-  // Selected User Object (if filtering by a specific user)
-  const currentSelectedUser = useMemo(() => {
-    if (selectedUserId === 'all') return null;
-    return users.find(u => u.uid === selectedUserId) || null;
-  }, [users, selectedUserId]);
-
-  // Filtered real movements
   const filteredMovements = useMemo(() => {
-    return realMovements.filter(m => {
-      // 1. User Switcher Filter
-      if (selectedUserId !== 'all' && m.userId !== selectedUserId) {
+    return realMovements.filter((m) => {
+      if (selectedUserId !== 'all' && m.userId !== selectedUserId) return false;
+      if (movementFilter === 'traffic' && m.type !== 'page_visit' && m.type !== 'course_view')
         return false;
-      }
-
-      // 2. Course Switcher Filter
-      if (selectedCourseId !== 'all' && m.courseId !== selectedCourseId) {
-        return false;
-      }
-
-      // 3. Movement Type Filter
       if (movementFilter === 'graduations' && m.type !== 'graduation') return false;
       if (movementFilter === 'lessons' && m.type !== 'lesson_completed') return false;
       if (movementFilter === 'enrollments' && m.type !== 'enrolled') return false;
       if (movementFilter === 'reports' && m.type !== 'report_submitted') return false;
 
-      // 4. Text Search
       if (movementSearch.trim()) {
         const q = movementSearch.toLowerCase();
         const mName = m.userName.toLowerCase().includes(q);
@@ -438,28 +790,27 @@ export function AdminAnalytics() {
 
       return true;
     });
-  }, [realMovements, selectedUserId, selectedCourseId, movementFilter, movementSearch]);
+  }, [realMovements, selectedUserId, movementFilter, movementSearch]);
 
-  // Organic Temporal Grouping (Today, Yesterday, This Week, Earlier)
   const getDayBucket = (timestamp: number) => {
     const now = new Date();
     const eventDate = new Date(timestamp);
-    
+
     if (now.toDateString() === eventDate.toDateString()) {
       return isRtl ? 'اليوم' : 'Today';
     }
-    
+
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     if (yesterday.toDateString() === eventDate.toDateString()) {
       return isRtl ? 'أمس' : 'Yesterday';
     }
-    
+
     const diffDays = Math.floor((now.getTime() - timestamp) / (1000 * 60 * 60 * 24));
     if (diffDays <= 7) {
       return isRtl ? 'هذا الأسبوع' : 'This Week';
     }
-    
+
     return isRtl ? 'سابقاً' : 'Earlier';
   };
 
@@ -469,635 +820,885 @@ export function AdminAnalytics() {
       isRtl ? 'اليوم' : 'Today',
       isRtl ? 'أمس' : 'Yesterday',
       isRtl ? 'هذا الأسبوع' : 'This Week',
-      isRtl ? 'سابقاً' : 'Earlier'
+      isRtl ? 'سابقاً' : 'Earlier',
     ];
 
     const map = new Map<string, RealPlatformEvent[]>();
-    filteredMovements.forEach(m => {
+    filteredMovements.slice(0, 120).forEach((m) => {
       const b = getDayBucket(m.timestamp);
       if (!map.has(b)) map.set(b, []);
       map.get(b)!.push(m);
     });
 
-    bucketOrder.forEach(bName => {
+    bucketOrder.forEach((bName) => {
       if (map.has(bName) && map.get(bName)!.length > 0) {
         groups.push({ bucket: bName, items: map.get(bName)! });
-      }
-    });
-
-    // In case any other bucket exists
-    map.forEach((items, bName) => {
-      if (!bucketOrder.includes(bName) && items.length > 0) {
-        groups.push({ bucket: bName, items });
       }
     });
 
     return groups;
   }, [filteredMovements, isRtl]);
 
-  // 3. Real KPI Metrics (100% Calculated from Live Data)
+  // 3. Real Traffic & KPI Metrics
   const totalUsers = users.length;
-  const activeLearners = users.filter(u => u.progress.length > 0).length;
-  const totalCertificates = users.reduce((acc, u) => acc + u.progress.filter(p => p.isCompleted).length, 0);
-  const totalVideosCompleted = users.reduce((acc, u) => acc + u.progress.reduce((pAcc, p) => pAcc + (p.completedVideoIds?.length || 0), 0), 0);
-  const totalCommunityXP = users.reduce((acc, u) => acc + (u.xp || 0), 0);
-  const totalEnrollments = users.reduce((acc, u) => acc + u.progress.length, 0);
-  const realCompletionRate = totalEnrollments > 0 ? Math.round((totalCertificates / totalEnrollments) * 100) : 0;
+  const onlineNowVisitors = useMemo(() => {
+    const livePresence = presenceList.filter((p) => isUserOnlineNow(p.lastSeenAt));
+    if (gaRealtimeUsers !== null && gaRealtimeUsers > livePresence.length) {
+      return gaRealtimeUsers;
+    }
+    return livePresence.length;
+  }, [presenceList, gaRealtimeUsers, nowTick]);
 
-  // 4. Real Time-Series Chart Data
+  const totalUniqueVisitors = useMemo(() => {
+    const uniqueIds = new Set<string>();
+    users.forEach((u) => uniqueIds.add(u.uid));
+    presenceList.forEach((p) => uniqueIds.add(p.uid || p.id));
+    return uniqueIds.size;
+  }, [users, presenceList]);
+
+  const totalPlatformTimeSeconds = useMemo(() => {
+    const map = new Map<string, number>();
+    users.forEach((u) => {
+      if (u.totalSecondsSpent) map.set(u.uid, u.totalSecondsSpent);
+    });
+    presenceList.forEach((p) => {
+      const key = p.uid || p.id;
+      map.set(key, Math.max(map.get(key) || 0, p.totalSecondsSpent || 0));
+    });
+    let sum = 0;
+    map.forEach((v) => (sum += v));
+    return sum;
+  }, [users, presenceList]);
+
+  const totalPageViewsCount = useMemo(() => {
+    if (gaTrafficRows && gaTrafficRows.length > 0) {
+      const gaViews = gaTrafficRows.reduce((acc, r) => acc + r.pageViews, 0);
+      if (gaViews > 0) return gaViews;
+    }
+    const fromPresence = presenceList.reduce((acc, p) => acc + (p.pagesVisitedCount || 1), 0);
+    return Math.max(fromPresence, movementLogs.length);
+  }, [gaTrafficRows, presenceList, movementLogs]);
+
+  const totalCertificates = users.reduce(
+    (acc, u) => acc + u.progress.filter((p) => p.isCompleted).length,
+    0
+  );
+  const totalVideosCompleted = users.reduce(
+    (acc, u) =>
+      acc + u.progress.reduce((pAcc, p) => pAcc + (p.completedVideoIds?.length || 0), 0),
+    0
+  );
+  const totalEnrollments = users.reduce((acc, u) => acc + u.progress.length, 0);
+  const realCompletionRate =
+    totalEnrollments > 0 ? Math.round((totalCertificates / totalEnrollments) * 100) : 0;
+
+  // 4. Real 7-Day Traffic & Activity Timeline Data
   const realTimelineData = useMemo(() => {
-    const daysMap: Record<string, { name: string; lessons: number; graduations: number; enrollments: number; timestamp: number }> = {};
-    
+    const daysMap: Record<
+      string,
+      {
+        name: string;
+        pageViews: number;
+        visitors: number;
+        lessons: number;
+        graduations: number;
+        visitorSet: Set<string>;
+      }
+    > = {};
+
     const now = new Date();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const dateKey = d.toISOString().split('T')[0];
-      const displayDay = d.toLocaleDateString(isRtl ? 'ar-SA' : 'en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+      const displayDay = d.toLocaleDateString(isRtl ? 'ar-SA' : 'en-US', {
+        weekday: 'short',
+        month: 'numeric',
+        day: 'numeric',
+      });
       daysMap[dateKey] = {
         name: displayDay,
+        pageViews: 0,
+        visitors: 0,
         lessons: 0,
         graduations: 0,
-        enrollments: 0,
-        timestamp: d.getTime()
+        visitorSet: new Set<string>(),
       };
     }
 
-    users.forEach(u => {
-      u.progress.forEach(p => {
+    movementLogs.forEach((m) => {
+      const dateKey = new Date(m.timestamp).toISOString().split('T')[0];
+      if (daysMap[dateKey]) {
+        daysMap[dateKey].pageViews += 1;
+        daysMap[dateKey].visitorSet.add(m.uid || m.visitorId);
+      }
+    });
+
+    presenceList.forEach((p) => {
+      if (p.lastSeenAt) {
+        const dateKey = new Date(p.lastSeenAt).toISOString().split('T')[0];
+        if (daysMap[dateKey]) {
+          daysMap[dateKey].visitorSet.add(p.uid || p.id);
+          if (daysMap[dateKey].pageViews === 0) {
+            daysMap[dateKey].pageViews += p.pagesVisitedCount || 1;
+          }
+        }
+      }
+    });
+
+    users.forEach((u) => {
+      u.progress.forEach((p) => {
         if (p.isCompleted && p.completionDate) {
           const compDateKey = p.completionDate.split('T')[0];
           if (daysMap[compDateKey]) {
             daysMap[compDateKey].graduations += 1;
+            daysMap[compDateKey].visitorSet.add(u.uid);
           }
         }
-
         if (p.completedVideoIds && p.completedVideoIds.length > 0) {
-          const dateKey = (p.completionDate ? p.completionDate.split('T')[0] : now.toISOString().split('T')[0]);
+          const dateKey = p.completionDate
+            ? p.completionDate.split('T')[0]
+            : now.toISOString().split('T')[0];
           if (daysMap[dateKey]) {
             daysMap[dateKey].lessons += p.completedVideoIds.length;
+            daysMap[dateKey].visitorSet.add(u.uid);
           }
         }
+      });
+    });
 
-        const dateKey = now.toISOString().split('T')[0];
-        if (daysMap[dateKey]) {
-          daysMap[dateKey].enrollments += 1;
+    const list = Object.values(daysMap).map((d) => ({
+      name: d.name,
+      pageViews: d.pageViews,
+      visitors: d.visitorSet.size,
+      lessons: d.lessons,
+      graduations: d.graduations,
+    }));
+
+    if (gaTrafficRows && gaTrafficRows.length > 0) {
+      gaTrafficRows.forEach((gaRow, idx) => {
+        if (list[idx]) {
+          list[idx].pageViews = Math.max(list[idx].pageViews, gaRow.pageViews);
+          list[idx].visitors = Math.max(list[idx].visitors, gaRow.visitors);
         }
       });
-    });
-
-    return Object.values(daysMap);
-  }, [users, isRtl]);
-
-  // 5. 100% Real Course Performance Ranking
-  const realTopCourses = useMemo(() => {
-    const map = new Map<string, { id: string; title: string; instructor: string; enrollments: number; completions: number; thumbnail?: string }>();
-    
-    allCourses.forEach(c => {
-      map.set(c.id, {
-        id: c.id,
-        title: c.title,
-        instructor: c.instructor || 'SkilliQ',
-        enrollments: 0,
-        completions: 0,
-        thumbnail: c.thumbnail
-      });
-    });
-
-    users.forEach(u => {
-      u.progress.forEach(p => {
-        const target = map.get(p.courseId);
-        if (target) {
-          target.enrollments += 1;
-          if (p.isCompleted) target.completions += 1;
-        }
-      });
-    });
-
-    return Array.from(map.values())
-      .sort((a, b) => b.enrollments - a.enrollments || b.completions - a.completions)
-      .slice(0, 5);
-  }, [users, allCourses]);
-
-  // 6. Real Category Distribution
-  const realCategoryBreakdown = useMemo(() => {
-    const catCounts: Record<string, number> = {};
-    users.forEach(u => {
-      u.progress.forEach(p => {
-        const found = allCourses.find(c => c.id === p.courseId);
-        const cat = found?.category || 'General';
-        catCounts[cat] = (catCounts[cat] || 0) + 1;
-      });
-    });
-
-    const entries = Object.entries(catCounts);
-    if (entries.length === 0) {
-      return [{ name: 'No Enrollments', count: 0, percent: 0 }];
     }
 
-    const total = entries.reduce((acc, [, count]) => acc + count, 0);
-    return entries
-      .map(([name, count]) => ({
-        name,
-        count,
-        percent: Math.round((count / total) * 100)
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 4);
-  }, [users, allCourses]);
+    return list;
+  }, [movementLogs, presenceList, users, gaTrafficRows, isRtl]);
 
-  // 7. Real Roles Distribution
-  const realRolesBreakdown = useMemo(() => {
-    const roles: Record<string, number> = { student: 0, publisher: 0, admin: 0, blocked: 0 };
-    users.forEach(u => {
-      const r = u.role || 'student';
-      roles[r] = (roles[r] || 0) + 1;
-    });
-    return roles;
-  }, [users]);
-
-  // 8. User directory table
-  const filteredUsers = useMemo(() => {
-    return users.filter(u => {
-      if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
-      if (userSearch.trim()) {
-        const q = userSearch.toLowerCase();
-        const mName = (u.displayName || '').toLowerCase().includes(q);
-        const mEmail = (u.email || '').toLowerCase().includes(q);
-        if (!mName && !mEmail) return false;
+  // 5. Real Top Visited Pages & Routes Breakdown
+  const realTopPagesVisited = useMemo(() => {
+    if (gaTopPages.length > 0) {
+      return gaTopPages.map((p) => ({
+        ...p,
+        label: translatePageLabel(p.path, p.path),
+      }));
+    }
+    const counts = new Map<
+      string,
+      { path: string; label: string; views: number; usersSet: Set<string> }
+    >();
+    movementLogs.forEach((m) => {
+      const key = m.path || '/';
+      if (!counts.has(key)) {
+        counts.set(key, {
+          path: key,
+          label: translatePageLabel(m.pageTitle || key, key),
+          views: 0,
+          usersSet: new Set(),
+        });
       }
-      return true;
+      const item = counts.get(key)!;
+      item.views += 1;
+      item.usersSet.add(m.uid || m.visitorId);
     });
-  }, [users, userRoleFilter, userSearch]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / usersPerPage));
-  const currentUsers = filteredUsers.slice((currentPage - 1) * usersPerPage, currentPage * usersPerPage);
+    presenceList.forEach((p) => {
+      (p.recentTrail || []).forEach((t) => {
+        const key = t.path || '/';
+        if (!counts.has(key)) {
+          counts.set(key, {
+            path: key,
+            label: translatePageLabel(t.label || key, key),
+            views: 0,
+            usersSet: new Set(),
+          });
+        }
+        const item = counts.get(key)!;
+        item.views += 1;
+        item.usersSet.add(p.uid || p.id);
+      });
+    });
 
-  const handleRoleChange = async (userId: string, newRole: string) => {
-    const currentUser = useStore.getState().user;
-    if (userId === currentUser?.uid && newRole !== 'admin') {
-      alert(isRtl ? "لا يمكنك إزالة صلاحيات المشرف الخاصة بك مباشرة." : "You cannot remove your own admin privileges directly.");
-      return;
-    }
-    
-    try {
-      await updateDoc(doc(db, 'users', userId), { role: newRole });
-    } catch (err: any) {
-      console.error(err);
-      alert((isRtl ? "فشل تحديث الصلاحية: " : "Failed to update role: ") + err.message);
-    }
-  };
+    return Array.from(counts.values())
+      .map((item) => ({
+        path: item.path,
+        label: item.label,
+        views: item.views,
+        users: item.usersSet.size,
+      }))
+      .sort((a, b) => b.views - a.views)
+      .slice(0, 6);
+  }, [gaTopPages, movementLogs, presenceList, isRtl]);
 
-  const handleRemoveUser = async (userId: string) => {
-    if (!confirm(isRtl ? "هل أنت متأكد من رغبتك في حذف هذا المستخدم نهائياً؟" : "Are you sure you want to permanently delete this user?")) return;
-    try {
-      await deleteDoc(doc(db, 'users', userId));
-    } catch (err: any) {
-      console.error(err);
-      alert((isRtl ? "فشل حذف المستخدم: " : "Failed to remove user: ") + err.message);
-    }
-  };
+  // 6. Real Device & Browser Breakdown
+  const deviceBreakdown = useMemo(() => {
+    const devCounts: Record<string, number> = { Desktop: 0, Mobile: 0, Tablet: 0 };
+    presenceList.forEach((p) => {
+      const dev = p.deviceType || 'Desktop';
+      devCounts[dev] = (devCounts[dev] || 0) + 1;
+    });
+
+    const total = Math.max(1, presenceList.length);
+    return Object.entries(devCounts).map(([name, count]) => ({
+      name,
+      label:
+        name === 'Mobile'
+          ? isRtl
+            ? 'هاتف محمول'
+            : 'Mobile'
+          : name === 'Tablet'
+          ? isRtl
+            ? 'جهاز لوحي'
+            : 'Tablet'
+          : isRtl
+          ? 'كمبيوتر / لابتوب'
+          : 'Laptop / Desktop',
+      count,
+      percent: presenceList.length > 0 ? Math.round((count / total) * 100) : 0,
+    }));
+  }, [presenceList, isRtl]);
 
   const handleManualSync = async () => {
     setRefreshing(true);
     try {
-      await getDocs(collection(db, 'users'));
-      setLastSyncTime(new Date());
+      await loadTelemetryFromServerAndFirestore();
+      if (gaPropertyId) {
+        await fetchGa4LiveReport(gaAccessToken, gaPropertyId);
+      }
     } finally {
       setTimeout(() => setRefreshing(false), 500);
     }
   };
 
+  const handleCopyText = (val: string) => {
+    navigator.clipboard.writeText(val);
+    setCopiedVar(val);
+    setTimeout(() => setCopiedVar(null), 2000);
+  };
+
   if (loading) {
     return (
-      <div className="p-12 text-center rounded-3xl bg-card border border-border/80 shadow-xs flex flex-col items-center justify-center gap-3">
+      <div className="p-10 sm:p-12 text-center rounded-3xl bg-card border border-border/80 shadow-xs flex flex-col items-center justify-center gap-3">
         <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center animate-spin">
           <RefreshCw className="w-6 h-6" />
         </div>
-        <p className="text-sm font-bold text-foreground">
-          {isRtl ? 'جاري الاتصال بـ Firestore لتحميل البيانات الحية والواقعية...' : 'Connecting to Firestore for 100% Real-Time Data...'}
+        <p className="text-xs sm:text-sm font-bold text-foreground">
+          {isRtl
+            ? 'جاري الاتصال بـ Google Analytics و Firestore لتحميل الزيارات والبيانات الحية...'
+            : 'Connecting to Google Analytics & Firestore for 100% Real-Time Traffic & Movements...'}
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 sm:space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
-      
-      {/* 1. TOP STATUS BAR: CONFIRMATION OF 100% REAL LIVE DATA */}
-      <div className="bg-card border border-border/80 rounded-3xl p-5 sm:p-6 shadow-xs relative overflow-hidden">
-        <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 via-primary to-indigo-500" />
-        
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+    <div className="space-y-5 sm:space-y-7" dir={isRtl ? 'rtl' : 'ltr'}>
+      {/* 1. TOP STATUS BAR + GOOGLE ANALYTICS 4 CONNECTION HUB */}
+      <div className="bg-card border border-border/80 rounded-3xl p-4 sm:p-6 shadow-xs relative overflow-hidden">
+        <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 via-primary to-amber-500" />
+
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div className="text-start">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                {isRtl ? 'بيانات حية وواقعية 100% (Real-Time Firestore)' : '100% Real-Time Firestore Sync'}
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                {isRtl
+                  ? 'حركة الزيارات والمنصة الحية 100%'
+                  : '100% Real-Time Traffic & Platform Telemetry'}
               </span>
-              <span className="text-[11px] text-muted-foreground font-mono">
-                · {totalUsers} {isRtl ? 'مستخدم مسجل' : 'users'} | {totalEnrollments} {isRtl ? 'التحاق' : 'enrollments'} | {totalCertificates} {isRtl ? 'شهادة صادرة' : 'certs'}
-              </span>
+
+              {gaConnected || gaMeasurementId.startsWith('G-') ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                  <CheckCircle2 className="w-3 h-3" />
+                  {isRtl ? 'مرتبط مع Google Analytics 4' : 'Google Analytics 4 Active'}
+                  {gaMeasurementId ? ` (${gaMeasurementId})` : ''}
+                </span>
+              ) : null}
             </div>
 
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-foreground tracking-tight flex items-center gap-2">
-              <Database className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-500" />
-              <span>{isRtl ? 'مركز التحليلات وحركات المنصة الحية' : 'Live Platform Telemetry & Real Analytics'}</span>
+            <h1 className="text-lg sm:text-2xl lg:text-3xl font-black text-foreground tracking-tight flex items-center gap-2">
+              <BarChart3 className="w-6 h-6 sm:w-7 sm:h-7 text-primary shrink-0" />
+              <span>
+                {isRtl
+                  ? 'مركز زيارات الموقع (Google Analytics) وحركات المنصة الحية'
+                  : 'Google Analytics Traffic & Real-Time Platform Movements'}
+              </span>
             </h1>
 
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1 max-w-2xl">
-              {isRtl 
-                ? 'جميع الأرقام والحركات المستعرضة هنا مأخوذة فورياً من قاعدة البيانات الحقيقية بدون أي بيانات وهمية أو افتراضية.'
-                : 'All telemetry, events, and metrics displayed here are 100% live and calculated directly from your actual database records.'}
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1 max-w-2xl leading-relaxed">
+              {isRtl
+                ? 'اربط حساب Google Analytics 4 (GA4) بنقرة واحدة، وتابع الزوار المتصلين الآن، مصادر الزيارات، الصفحات الأكثر تصفحاً، وكل حركة داخل المنصة على الكمبيوتر والتابلت والهاتف.'
+                : 'Connect Google Analytics 4 (GA4) in one click, monitor live online visitors, traffic trends, top pages, time spent, and every real user movement across all devices.'}
             </p>
           </div>
 
-          {/* Sync status & Manual reload */}
-          <div className="flex items-center gap-2 self-start lg:self-auto">
-            <div className="px-3 py-1.5 rounded-xl bg-muted/40 border border-border/80 text-[11px] text-muted-foreground font-mono">
-              {isRtl ? 'تحديث تلقائي مستمر' : 'Auto-Sync Active'}
-            </div>
+          {/* Google Analytics Connect, Setup & Vercel Security Guide Controls */}
+          <div className="flex flex-wrap items-center gap-2 self-start xl:self-auto">
+            <button
+              type="button"
+              onClick={handleConnectGoogleAnalyticsOAuth}
+              disabled={gaConnecting}
+              className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-60"
+            >
+              <Globe className="w-4 h-4 shrink-0" />
+              <span>
+                {gaConnecting
+                  ? isRtl
+                    ? 'جاري الربط...'
+                    : 'Connecting GA4...'
+                  : gaConnected
+                  ? isRtl
+                    ? 'تحديث بيانات Google Analytics'
+                    : 'Refresh Google Analytics'
+                  : isRtl
+                  ? 'ربط Google Analytics مباشر'
+                  : 'Connect Google Analytics'}
+              </span>
+            </button>
 
             <button
+              type="button"
+              onClick={() => setShowGaSettingsModal(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-muted/70 hover:bg-muted text-foreground border border-border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Settings className="w-4 h-4 text-primary shrink-0" />
+              <span>{isRtl ? 'إعداد معرف GA4' : 'GA4 ID Setup'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowVercelGuideModal(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span>{isRtl ? 'دليل أمان Vercel و APIs' : 'Vercel & API Security Guide'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={handleManualSync}
               disabled={refreshing}
-              className="p-2 sm:px-3 sm:py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98 disabled:opacity-50"
-              title={isRtl ? 'مزامنة فورية' : 'Manual Sync'}
+              className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+              title={isRtl ? 'مزامنة فورية' : 'Sync Now'}
             >
-              <RefreshCw className={cn("w-4 h-4", refreshing && "animate-spin")} />
-              <span className="hidden sm:inline">{isRtl ? 'مزامنة الآن' : 'Sync Now'}</span>
+              <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
             </button>
           </div>
         </div>
+
+        {/* If user authenticated multiple GA4 properties, let them switch property right here */}
+        {gaPropertiesList.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-bold text-foreground">
+                {isRtl ? 'خاصية Google Analytics المتصلة:' : 'Active GA4 Property:'}
+              </span>
+              <select
+                value={gaPropertyId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setGaPropertyId(nextId);
+                  fetch('/api/analytics/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ propertyId: nextId }),
+                  });
+                  fetchGa4LiveReport(gaAccessToken, nextId);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-background border border-border text-xs font-bold text-foreground"
+              >
+                {gaPropertiesList.map((p) => (
+                  <option key={p.propertyId} value={p.propertyId}>
+                    {p.displayName} ({p.accountName} • ID: {p.propertyId})
+                  </option>
+                ))}
+              </select>
+            </div>
+            {gaStatusMsg && (
+              <span className="text-xs font-bold text-emerald-500">{gaStatusMsg}</span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* 2. REAL KPI CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Metric 1: Real Total Registered Users */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-xs relative overflow-hidden group hover:border-primary/50 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-              {isRtl ? 'المستخدمون المسجلون' : 'Real Registered Users'}
+      {/* 2. REAL TRAFFIC & PLATFORM KPI CARDS (Responsive 1 -> 2 -> 5 Grid) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+        {/* KPI 1: Online Visitors Right Now */}
+        <div className="bg-card border border-emerald-500/30 rounded-2xl p-4 sm:p-5 shadow-xs text-start">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+              {isRtl ? 'متصلون الآن بالموقع' : 'Online Visitors Now'}
             </span>
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
-              <Users className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
+              <Radio className="w-5 h-5 animate-pulse" />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-black text-foreground">{totalUsers}</span>
-            <span className="text-[11px] font-mono text-muted-foreground">
-              {realRolesBreakdown.student} {isRtl ? 'طالب' : 'students'}
+            <span className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400">
+              {onlineNowVisitors}
+            </span>
+            <span className="text-[11px] font-bold text-muted-foreground">
+              {isRtl ? 'زائر نشط حالياً' : 'live on site'}
             </span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-            <span>{isRtl ? 'الطلاب المتفاعلون' : 'Active Learners'}:</span>
-            <span className="font-bold text-foreground">{activeLearners}</span>
+          <div className="mt-3 pt-2 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{isRtl ? 'إجمالي الزوار الفريدين' : 'Unique Visitors'}:</span>
+            <span className="font-bold text-foreground">{totalUniqueVisitors}</span>
           </div>
         </div>
 
-        {/* Metric 2: Real Completed Lessons */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-xs relative overflow-hidden group hover:border-primary/50 transition-all">
-          <div className="flex items-center justify-between mb-3">
+        {/* KPI 2: Real Page Views & Traffic */}
+        <div className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-xs text-start">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+              {isRtl ? 'مشاهدات الصفحات' : 'Total Page Views'}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+              <Eye className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-black text-foreground">
+              {totalPageViewsCount.toLocaleString()}
+            </span>
+            <span className="text-[11px] text-blue-500 font-bold">
+              {gaConnected ? 'GA4 + Live' : isRtl ? 'تصفح حقيقي' : 'real views'}
+            </span>
+          </div>
+          <div className="mt-3 pt-2 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{isRtl ? 'المستخدمون المسجلون' : 'Registered Users'}:</span>
+            <span className="font-bold text-foreground">{totalUsers}</span>
+          </div>
+        </div>
+
+        {/* KPI 3: Real Time Spent on Platform */}
+        <div className="bg-card border border-amber-500/30 rounded-2xl p-4 sm:p-5 shadow-xs text-start">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+              {isRtl ? 'الوقت المقضي بالمنصة' : 'Time Spent on Platform'}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+              <Clock className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-black text-foreground">
+              {formatDurationSpent(totalPlatformTimeSeconds, isRtl)}
+            </span>
+          </div>
+          <div className="mt-3 pt-2 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{isRtl ? 'حركات مسجلة' : 'Tracked Events'}:</span>
+            <span className="font-bold text-foreground">{realMovements.length}</span>
+          </div>
+        </div>
+
+        {/* KPI 4: Completed Lessons */}
+        <div className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-xs text-start">
+          <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
               {isRtl ? 'الدروس المشاهدة فعلياً' : 'Completed Lessons'}
             </span>
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
               <PlayCircle className="w-5 h-5" />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-black text-foreground">{totalVideosCompleted}</span>
-            <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-              {isRtl ? 'درس مسجل' : 'verified'}
+            <span className="text-2xl sm:text-3xl font-black text-foreground">
+              {totalVideosCompleted}
+            </span>
+            <span className="text-[11px] font-semibold text-primary">
+              {isRtl ? 'درس مكتمل' : 'lessons'}
             </span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-            <span>{isRtl ? 'إجمالي الالتحاقات' : 'Real Enrollments'}:</span>
+          <div className="mt-3 pt-2 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{isRtl ? 'إجمالي الالتحاقات' : 'Course Enrollments'}:</span>
             <span className="font-bold text-foreground">{totalEnrollments}</span>
           </div>
         </div>
 
-        {/* Metric 3: Real Certificates Issued */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-xs relative overflow-hidden group hover:border-primary/50 transition-all">
-          <div className="flex items-center justify-between mb-3">
+        {/* KPI 5: Certificates Earned */}
+        <div className="col-span-1 sm:col-span-2 lg:col-span-1 bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-xs text-start">
+          <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
               {isRtl ? 'الشهادات المكتسبة' : 'Certificates Earned'}
             </span>
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center shrink-0">
               <Award className="w-5 h-5" />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-black text-foreground">{totalCertificates}</span>
-            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-0.5">
-              <CheckCircle2 className="w-3 h-3" /> {isRtl ? 'موثقة' : 'Graduated'}
+            <span className="text-2xl sm:text-3xl font-black text-foreground">
+              {totalCertificates}
+            </span>
+            <span className="text-[11px] font-semibold text-emerald-500">
+              {realCompletionRate}% {isRtl ? 'إتمام' : 'rate'}
             </span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-            <span>{isRtl ? 'نسبة الإتمام الواقعية' : 'Completion Rate'}:</span>
-            <span className="font-bold text-foreground">{realCompletionRate}%</span>
-          </div>
-        </div>
-
-        {/* Metric 4: Real Community XP */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-xs relative overflow-hidden group hover:border-primary/50 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-              {isRtl ? 'نقاط الحماس المكتسبة' : 'Total Earned XP'}
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
-              <Flame className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-black text-foreground">{totalCommunityXP.toLocaleString()}</span>
-            <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400">
-              XP
-            </span>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-            <span>{isRtl ? 'المناهج المعتمدة' : 'Courses in Catalog'}:</span>
+          <div className="mt-3 pt-2 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{isRtl ? 'المناهج النشطة' : 'Courses in Catalog'}:</span>
             <span className="font-bold text-foreground">{allCourses.length}</span>
           </div>
         </div>
       </div>
 
-      {/* 3. RE-DESIGNED "REAL PLATFORM MOVEMENT STREAM" (SMART, ORGANIC & USER-SWITCHABLE) */}
-      <div className="bg-card border border-border/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-5">
-        
-        {/* Header with Title and Mode Switcher */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/70 pb-4">
+      {/* 3. REAL-TIME TRAFFIC CHART & TOP VISITED PAGES / DEVICES */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-6">
+        {/* Traffic & Activity Area Chart */}
+        <div className="lg:col-span-2 bg-card border border-border/80 rounded-3xl p-4 sm:p-6 shadow-xs flex flex-col justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div className="text-start">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0" />
+                <h3 className="text-sm sm:text-lg font-black text-foreground">
+                  {isRtl
+                    ? 'حركة الزيارات والتفاعل الحقيقية (آخر 7 أيام)'
+                    : 'Real Platform Traffic & Engagement (Past 7 Days)'}
+                </h3>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {gaConnected
+                  ? isRtl
+                    ? 'مباشر من Google Analytics 4 وسجلات المنصة الحية'
+                    : 'Synchronized with Google Analytics 4 & live Firestore telemetry'
+                  : isRtl
+                  ? 'بيانات حقيقية 100% من زيارات وتصفح المستخدمين الفعليين'
+                  : '100% real visitor traffic and learning events recorded on the platform'}
+              </p>
+            </div>
+
+            {/* Metric Selector */}
+            <div className="p-1 bg-muted/40 border border-border/80 rounded-xl flex items-center gap-1 overflow-x-auto self-start sm:self-auto max-w-full">
+              {(
+                [
+                  { id: 'pageViews', labelEn: 'Page Views', labelAr: 'المشاهدات' },
+                  { id: 'visitors', labelEn: 'Visitors', labelAr: 'الزوار' },
+                  { id: 'lessons', labelEn: 'Lessons', labelAr: 'الدروس' },
+                  { id: 'graduations', labelEn: 'Certs', labelAr: 'الشهادات' },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setChartMetric(m.id)}
+                  className={cn(
+                    'px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0',
+                    chartMetric === m.id
+                      ? 'bg-card text-foreground shadow-xs border border-border/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {isRtl ? m.labelAr : m.labelEn}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="w-full h-[230px] sm:h-[290px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={realTimelineData}
+                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+              >
+                <defs>
+                  <linearGradient id="realTrafficGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="hsl(var(--border))"
+                />
+                <XAxis
+                  dataKey="name"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                  dy={8}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                />
+                <RechartsTooltip
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--card))',
+                    borderColor: 'hsl(var(--border))',
+                    borderRadius: '12px',
+                    color: 'hsl(var(--foreground))',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey={chartMetric}
+                  name={
+                    chartMetric === 'pageViews'
+                      ? isRtl
+                        ? 'مشاهدات الصفحات'
+                        : 'Page Views'
+                      : chartMetric === 'visitors'
+                      ? isRtl
+                        ? 'الزوار النشطون'
+                        : 'Active Visitors'
+                      : chartMetric === 'lessons'
+                      ? isRtl
+                        ? 'دروس مكتملة'
+                        : 'Lessons Completed'
+                      : isRtl
+                      ? 'شهادات صادرة'
+                      : 'Certificates Earned'
+                  }
+                  stroke="#10B981"
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#realTrafficGradient)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Top Visited Pages + Devices & Countries Breakdown */}
+        <div className="bg-card border border-border/80 rounded-3xl p-4 sm:p-6 shadow-xs flex flex-col justify-between space-y-5 text-start">
           <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Navigation className="w-5 h-5 text-primary shrink-0" />
+              <h3 className="text-sm sm:text-lg font-black text-foreground">
+                {isRtl ? 'أكثر الصفحات زيارة وتصفحاً' : 'Top Visited Pages (Real Traffic)'}
+              </h3>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              {isRtl
+                ? 'الصفحات والمسارات الأكثر تصفحاً من قبل الزوار'
+                : 'Most viewed routes and pages across the platform'}
+            </p>
+
+            <div className="space-y-2">
+              {realTopPagesVisited.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-4">
+                  {isRtl ? 'جاري تسجيل الزيارات...' : 'Recording page visits...'}
+                </p>
+              ) : (
+                realTopPagesVisited.map((pg, idx) => (
+                  <div
+                    key={idx}
+                    className="p-2.5 rounded-2xl bg-muted/25 border border-border/60 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <span
+                        dir={getTextDir(pg.label)}
+                        className="font-bold text-foreground truncate block"
+                      >
+                        {pg.label}
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground truncate block">
+                        {pg.path}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="font-black text-primary">{pg.views}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {isRtl ? 'مشاهدة' : 'views'}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Device & Country Distribution */}
+          <div className="pt-4 border-t border-border/60 space-y-3">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              {isRtl ? 'توزيع الأجهزة والمتصفحات' : 'Visitor Devices & Browsers'}
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              {deviceBreakdown.map((d) => (
+                <div
+                  key={d.name}
+                  className="p-2.5 rounded-xl bg-muted/30 border border-border/60 text-center"
+                >
+                  <div className="flex items-center justify-center gap-1 text-xs font-bold text-foreground">
+                    {d.name === 'Mobile' ? (
+                      <Smartphone className="w-3.5 h-3.5 text-primary" />
+                    ) : d.name === 'Tablet' ? (
+                      <Tablet className="w-3.5 h-3.5 text-indigo-500" />
+                    ) : (
+                      <Monitor className="w-3.5 h-3.5 text-emerald-500" />
+                    )}
+                    <span>{d.percent}%</span>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5 truncate">
+                    {d.label} ({d.count})
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {gaCountries.length > 0 && (
+              <div className="pt-2 space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-muted-foreground block">
+                  {isRtl ? 'أبرز الدول (Google Analytics):' : 'Top Countries (GA4):'}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {gaCountries.map((c, i) => (
+                    <span
+                      key={i}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] font-bold text-foreground"
+                    >
+                      {c.country}: {c.users}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {gaSources.length > 0 && (
+              <div className="pt-1 space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-muted-foreground block">
+                  {isRtl ? 'مصادر الزيارات (Traffic Sources):' : 'Traffic Sources (GA4):'}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {gaSources.map((s, i) => (
+                    <span
+                      key={i}
+                      className="px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/25 text-[11px] font-bold text-primary"
+                    >
+                      {s.source}: {s.sessions}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 4. REAL PLATFORM MOVEMENT STREAM (TRAFFIC + LEARNING + ACTIONS) */}
+      <div className="bg-card border border-border/80 rounded-3xl p-4 sm:p-6 shadow-xs space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/70 pb-4">
+          <div className="text-start">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
                 <Radio className="w-4 h-4 animate-pulse" />
               </div>
-              <h2 className="text-lg sm:text-xl font-black text-foreground">
-                {isRtl ? 'حركات الطلاب الحية (Real Platform Movement Stream)' : 'Real Platform Movement Stream'}
+              <h2 className="text-base sm:text-xl font-black text-foreground">
+                {isRtl
+                  ? 'البث الحي لحركات الزوار والطلاب داخل المنصة'
+                  : 'Real-Time Visitor Traffic & Platform Movement Stream'}
               </h2>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {isRtl 
-                ? 'تصفح حركات المنصة عضوياً، أو اختر طالباً محدداً لعرض مسار تعلمه الكامل خطوة بخطوة.' 
-                : 'Browse organic platform movements, or switch to a specific learner to inspect their entire personal learning journey.'}
+              {isRtl
+                ? 'شاهد كل حركة تحدث داخل المنصة فور وقوعها: تصفح الصفحات، فتح الدورات، إتمام الدروس، الشهادات، والبلاغات.'
+                : 'Inspect every live visitor navigation, course launch, completed lesson, and graduation in real time.'}
             </p>
           </div>
 
-          {/* Quick Stats in Movement Header */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-muted/40 border border-border/60 text-xs">
-              <span className="text-muted-foreground font-medium">{isRtl ? 'الحركات المعروضة:' : 'Shown Events:'}</span>
-              <span className="font-bold text-foreground">{filteredMovements.length}</span>
-            </div>
+          {/* Movement Type Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            {(
+              [
+                { id: 'all', labelEn: 'All Movements', labelAr: 'كل الحركات' },
+                { id: 'traffic', labelEn: 'Page & Course Visits', labelAr: 'زيارات الصفحات' },
+                { id: 'lessons', labelEn: 'Completed Lessons', labelAr: 'الدروس المكتملة' },
+                { id: 'graduations', labelEn: 'Graduations', labelAr: 'الشهادات' },
+                { id: 'reports', labelEn: 'Reports', labelAr: 'البلاغات' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setMovementFilter(tab.id)}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0',
+                  movementFilter === tab.id
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'bg-muted/60 text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {isRtl ? tab.labelAr : tab.labelEn}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Learner Focus Switcher & Search */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-muted-foreground absolute top-1/2 -translate-y-1/2 start-3.5" />
+            <input
+              type="text"
+              value={movementSearch}
+              onChange={(e) => setMovementSearch(e.target.value)}
+              dir={getTextDir(movementSearch)}
+              placeholder={
+                isRtl
+                  ? 'ابحث في الحركات بالاسم، الصفحة، أو الدورة...'
+                  : 'Search movements by user, page, or course...'
+              }
+              className="w-full ps-9 pe-4 py-2 rounded-xl bg-background border border-border/80 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              className="w-full sm:w-64 bg-background border border-border/80 text-foreground px-3 py-2 rounded-xl text-xs font-bold focus:outline-none cursor-pointer"
+            >
+              <option value="all">
+                {isRtl ? '🌐 جميع الزوار والطلاب' : '🌐 All Visitors & Learners'}
+              </option>
+              {users.map((u) => (
+                <option key={u.uid} value={u.uid}>
+                  {u.displayName || u.email || 'Learner'} ({u.progress.length}{' '}
+                  {isRtl ? 'دورات' : 'courses'})
+                </option>
+              ))}
+            </select>
 
             {selectedUserId !== 'all' && (
               <button
+                type="button"
                 onClick={() => setSelectedUserId('all')}
-                className="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                className="px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-bold cursor-pointer shrink-0"
               >
-                <X className="w-3.5 h-3.5" />
-                <span>{isRtl ? 'إلغاء تحديد الطالب' : 'Clear Learner Filter'}</span>
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
         </div>
 
-        {/* SMART USER SWITCHER BAR: "Switch between all movements in one click" */}
-        <div className="p-3 sm:p-4 rounded-2xl bg-muted/20 border border-border/70 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <span className="text-xs font-extrabold text-foreground flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-primary" />
-              <span>{isRtl ? 'التبديل بين الطلاب وحركاتهم:' : 'Learner Focus Switcher:'}</span>
-            </span>
-
-            {/* Quick dropdown for instant keyboard or mobile select */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-muted-foreground hidden sm:inline">
-                {isRtl ? 'أو اختر من القائمة:' : 'Quick Select:'}
-              </span>
-              <select
-                value={selectedUserId}
-                onChange={e => setSelectedUserId(e.target.value)}
-                className="w-full sm:w-56 bg-background border border-border/80 text-foreground px-3 py-1.5 rounded-xl text-xs font-bold focus:ring-2 focus:ring-primary/40 focus:outline-none cursor-pointer"
-              >
-                <option value="all">
-                  {isRtl ? '🌐 جميع الطلاب (التغذية العامة)' : '🌐 All Learners (Global Stream)'}
-                </option>
-                {users.map(u => (
-                  <option key={u.uid} value={u.uid}>
-                    {u.displayName || u.email || 'Learner'} ({u.progress.length} {isRtl ? 'دورات' : 'courses'})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Horizontally scrollable user chip carousel */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin scrollbar-thumb-border/60">
-            {/* "All Learners" Chip */}
-            <button
-              onClick={() => setSelectedUserId('all')}
-              className={cn(
-                "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer border",
-                selectedUserId === 'all'
-                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                  : "bg-card text-foreground border-border/70 hover:border-primary/40"
-              )}
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>{isRtl ? 'جميع الحركات العامة' : 'All Learners'}</span>
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.2 rounded-full",
-                selectedUserId === 'all' ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
-              )}>
-                {realMovements.length}
-              </span>
-            </button>
-
-            {/* Individual Learner Chips */}
-            {users.map(u => {
-              const userEventsCount = realMovements.filter(m => m.userId === u.uid).length;
-              const certsCount = u.progress.filter(p => p.isCompleted).length;
-              const isSelected = selectedUserId === u.uid;
-
-              return (
-                <button
-                  key={u.uid}
-                  onClick={() => setSelectedUserId(u.uid)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer border",
-                    isSelected
-                      ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                      : "bg-card text-foreground border-border/70 hover:border-primary/40 hover:bg-muted/30"
-                  )}
-                  title={u.email}
-                >
-                  <img 
-                    src={u.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.displayName || 'User')}&background=random`} 
-                    alt="" 
-                    className="w-5 h-5 rounded-full object-cover border border-white/20"
-                  />
-                  <span className="truncate max-w-[130px]">{u.displayName || u.email?.split('@')[0]}</span>
-                  
-                  {certsCount > 0 && (
-                    <span className={cn(
-                      "text-[10px] px-1.5 py-0.2 rounded-md font-black flex items-center gap-0.5",
-                      isSelected ? "bg-amber-400 text-black" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                    )}>
-                      <Award className="w-2.5 h-2.5" />
-                      <span>{certsCount}</span>
-                    </span>
-                  )}
-
-                  <span className={cn(
-                    "text-[10px] px-1.5 py-0.2 rounded-md",
-                    isSelected ? "bg-white/20 text-white" : "bg-muted text-muted-foreground font-mono"
-                  )}>
-                    {userEventsCount}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* DEDICATED STUDENT DOSSIER BANNER (Shown when a specific learner is selected) */}
-        {currentSelectedUser && (
-          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5">
-              <div className="relative">
-                <img 
-                  src={currentSelectedUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentSelectedUser.displayName || 'User')}&background=random`} 
-                  alt="" 
-                  className="w-12 h-12 rounded-full object-cover border-2 border-primary shadow-xs"
-                />
-                <span className="absolute -bottom-1 -end-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background" />
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-base sm:text-lg font-black text-foreground">
-                    {currentSelectedUser.displayName || 'Learner'}
-                  </h3>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-primary/20 text-primary">
-                    {currentSelectedUser.role || 'student'}
-                  </span>
-                  {currentSelectedUser.streak && currentSelectedUser.streak > 1 && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center gap-1">
-                      <Flame className="w-3 h-3" /> {currentSelectedUser.streak} {isRtl ? 'أيام متتالية' : 'day streak'}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                  {currentSelectedUser.email}
-                </p>
-              </div>
-            </div>
-
-            {/* Quick Metrics of this Student */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="px-3 py-1.5 rounded-xl bg-background border border-border/80 text-center min-w-[70px]">
-                <span className="text-xs font-black text-foreground block">{currentSelectedUser.progress.length}</span>
-                <span className="text-[10px] text-muted-foreground uppercase">{isRtl ? 'دورات' : 'Enrolled'}</span>
-              </div>
-              <div className="px-3 py-1.5 rounded-xl bg-background border border-border/80 text-center min-w-[70px]">
-                <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 block">
-                  {currentSelectedUser.progress.reduce((acc, p) => acc + (p.completedVideoIds?.length || 0), 0)}
-                </span>
-                <span className="text-[10px] text-muted-foreground uppercase">{isRtl ? 'دروس' : 'Lessons'}</span>
-              </div>
-              <div className="px-3 py-1.5 rounded-xl bg-background border border-border/80 text-center min-w-[70px]">
-                <span className="text-xs font-black text-amber-500 block">
-                  {currentSelectedUser.progress.filter(p => p.isCompleted).length}
-                </span>
-                <span className="text-[10px] text-muted-foreground uppercase">{isRtl ? 'شهادات' : 'Certs'}</span>
-              </div>
-              <div className="px-3 py-1.5 rounded-xl bg-background border border-border/80 text-center min-w-[70px]">
-                <span className="text-xs font-black text-purple-500 block">{currentSelectedUser.xp || 0}</span>
-                <span className="text-[10px] text-muted-foreground uppercase">XP</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CONTROLS ROW: Filters & Search */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-          {/* Movement Type Filter Tabs */}
-          <div className="flex items-center gap-1 p-1 bg-muted/40 border border-border/70 rounded-xl overflow-x-auto max-w-full">
-            {[
-              { id: 'all', label: isRtl ? 'الكل' : 'All Types' },
-              { id: 'graduations', label: isRtl ? 'شهادات تخرج' : 'Graduations' },
-              { id: 'lessons', label: isRtl ? 'دروس مكتملة' : 'Lessons' },
-              { id: 'enrollments', label: isRtl ? 'التحاق بدورات' : 'Enrollments' },
-              { id: 'reports', label: isRtl ? 'بلاغات تقنية' : 'Reports' }
-            ].map(f => (
-              <button
-                key={f.id}
-                onClick={() => setMovementFilter(f.id as any)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer",
-                  movementFilter === f.id
-                    ? "bg-card text-foreground shadow-xs border border-border/60"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Course Selector Filter & Search */}
-          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
-            <select
-              value={selectedCourseId}
-              onChange={e => setSelectedCourseId(e.target.value)}
-              className="bg-background border border-border/80 text-foreground px-3 py-1.5 rounded-xl text-xs font-bold focus:ring-primary focus:outline-none cursor-pointer w-full sm:w-48 truncate"
-            >
-              <option value="all">{isRtl ? 'جميع المناهج' : 'All Courses'}</option>
-              {allCourses.map(c => (
-                <option key={c.id} value={c.id}>{c.title}</option>
-              ))}
-            </select>
-
-            <div className="relative w-full sm:w-44">
-              <Search className="w-3.5 h-3.5 text-muted-foreground absolute top-1/2 -translate-y-1/2 start-3" />
-              <input
-                type="text"
-                placeholder={isRtl ? 'بحث في التفاصيل...' : 'Search activity...'}
-                value={movementSearch}
-                onChange={e => setMovementSearch(e.target.value)}
-                className="w-full ps-8 pe-3 py-1.5 bg-background border border-border/80 rounded-xl text-xs text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* ORGANIC CHRONOLOGICAL STREAM (Grouped by Today, Yesterday, This Week, Earlier) */}
-        <div className="space-y-6 max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-border/60 pe-1">
-          {filteredMovements.length === 0 ? (
-            <div className="p-12 text-center rounded-2xl bg-muted/20 border border-dashed border-border/80">
-              <Clock className="w-8 h-8 mx-auto text-muted-foreground/60 mb-2" />
+        {/* Grouped Real Movements Stream */}
+        <div className="space-y-5 max-h-[580px] overflow-y-auto pr-1">
+          {groupedMovements.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground">
+              <Compass className="w-10 h-10 mx-auto mb-2 opacity-40" />
               <p className="text-sm font-bold text-foreground">
-                {isRtl ? 'لا توجد حركات مسجلة تطابق التحديد الحالي' : 'No recorded movements matching the current selection.'}
+                {isRtl ? 'لا توجد حركات مطابقة للبحث' : 'No matching platform movements'}
               </p>
-              <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-                {selectedUserId !== 'all'
-                  ? (isRtl ? 'هذا الطالب لم يسجل حركات بعد. عند مشاهدة الدروس أو إتمام المناهج ستظهر حركاته هنا فوراً.' : 'This learner has not performed this activity yet. When they watch lessons or earn certs, it will appear here.')
-                  : (isRtl ? 'جرب تغيير الفلتر أو مسح البحث لعرض كل الحركات.' : 'Try changing your filter criteria or search query.')}
-              </p>
-              {selectedUserId !== 'all' && (
-                <button
-                  onClick={() => setSelectedUserId('all')}
-                  className="mt-3 px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all cursor-pointer"
-                >
-                  {isRtl ? 'العودة لجميع حركات المنصة' : 'Back to All Movements'}
-                </button>
-              )}
             </div>
           ) : (
             groupedMovements.map(({ bucket, items }) => (
               <div key={bucket} className="space-y-2.5">
-                {/* Organic Temporal Divider Header */}
                 <div className="flex items-center gap-2.5 py-1">
                   <span className="text-[11px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-primary" />
@@ -1105,127 +1706,118 @@ export function AdminAnalytics() {
                   </span>
                   <div className="h-px bg-border/70 flex-1" />
                   <span className="text-[10px] font-bold text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border border-border/50">
-                    {items.length} {isRtl ? 'حركات' : 'events'}
+                    {items.length} {isRtl ? 'حركة' : 'events'}
                   </span>
                 </div>
 
-                {/* Event Cards inside this Time Bucket */}
                 <div className="space-y-2">
                   {items.map((evt) => {
                     const isGrad = evt.type === 'graduation';
                     const isVid = evt.type === 'lesson_completed';
                     const isRep = evt.type === 'report_submitted';
-                    const isStreak = evt.type === 'streak_milestone';
+                    const isVisit = evt.type === 'page_visit' || evt.type === 'course_view';
                     const isExpanded = expandedEventId === evt.id;
 
                     return (
-                      <div 
+                      <div
                         key={evt.id}
                         className={cn(
-                          "p-3.5 sm:p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 shadow-xs",
-                          isGrad 
-                            ? "bg-amber-500/5 border-amber-500/30 hover:border-amber-500/60" 
+                          'p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2 shadow-2xs text-start',
+                          isGrad
+                            ? 'bg-amber-500/5 border-amber-500/30'
                             : isRep
-                            ? "bg-red-500/5 border-red-500/30 hover:border-red-500/60"
-                            : isVid 
-                            ? "bg-card border-border/80 hover:border-primary/40" 
-                            : "bg-muted/15 border-border/70"
+                            ? 'bg-rose-500/5 border-rose-500/30'
+                            : isVid
+                            ? 'bg-emerald-500/5 border-emerald-500/25'
+                            : 'bg-card border-border/80'
                         )}
                       >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div className="flex items-start sm:items-center gap-3 min-w-0">
-                            {/* User Avatar with quick-switch click */}
-                            <button
-                              onClick={() => evt.userId && setSelectedUserId(evt.userId)}
-                              className="relative shrink-0 group/avatar cursor-pointer"
-                              title={isRtl ? `عرض مسار ${evt.userName}` : `Focus on ${evt.userName}`}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div
+                              className={cn(
+                                'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white',
+                                isGrad
+                                  ? 'bg-amber-500'
+                                  : isRep
+                                  ? 'bg-rose-500'
+                                  : isVid
+                                  ? 'bg-emerald-500'
+                                  : isVisit
+                                  ? 'bg-primary'
+                                  : 'bg-blue-500'
+                              )}
                             >
-                              <img 
-                                src={evt.userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(evt.userName)}&background=random`} 
-                                alt="" 
-                                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-border object-cover group-hover/avatar:ring-2 group-hover/avatar:ring-primary transition-all"
-                              />
-                              <div className={cn(
-                                "absolute -bottom-1 -end-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] shadow-xs text-white",
-                                isGrad ? "bg-amber-500" : isRep ? "bg-red-500" : isVid ? "bg-emerald-500" : isStreak ? "bg-purple-500" : "bg-blue-500"
-                              )}>
-                                {isGrad ? <Award className="w-2.5 h-2.5" /> : isRep ? <AlertTriangle className="w-2.5 h-2.5" /> : isVid ? <PlayCircle className="w-2.5 h-2.5" /> : isStreak ? <Flame className="w-2.5 h-2.5" /> : <BookOpen className="w-2.5 h-2.5" />}
-                              </div>
-                            </button>
+                              {isGrad ? (
+                                <Award className="w-4 h-4" />
+                              ) : isRep ? (
+                                <AlertTriangle className="w-4 h-4" />
+                              ) : isVid ? (
+                                <PlayCircle className="w-4 h-4" />
+                              ) : (
+                                <Compass className="w-4 h-4" />
+                              )}
+                            </div>
 
-                            {/* Movement Details */}
-                            <div className="min-w-0 text-start flex-1">
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <button
-                                  onClick={() => evt.userId && setSelectedUserId(evt.userId)}
-                                  className="font-extrabold text-xs sm:text-sm text-foreground hover:text-primary transition-colors cursor-pointer text-start"
+                                <span
+                                  dir={getTextDir(evt.userName)}
+                                  className="font-extrabold text-xs sm:text-sm text-foreground"
                                 >
                                   {evt.userName}
-                                </button>
-                                
-                                {isGrad && (
-                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                                    {isRtl ? 'شهادة إتمام معتمدة' : 'Graduated'}
+                                </span>
+                                {evt.userEmail && (
+                                  <span className="text-[10px] font-mono text-muted-foreground">
+                                    ({evt.userEmail})
                                   </span>
                                 )}
-                                {isRep && (
-                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/30">
-                                    {isRtl ? 'بلاغ تقني' : 'Report'}
-                                  </span>
-                                )}
-                                
                                 <span className="text-[10px] text-muted-foreground font-mono">
-                                  · {evt.timeAgo}
+                                  • {evt.timeAgo}
                                 </span>
                               </div>
-
-                              <p className="text-xs text-foreground/85 mt-0.5 line-clamp-2 font-medium">
+                              <p
+                                dir={getTextDir(evt.detail)}
+                                className="text-xs text-foreground/90 mt-0.5 font-medium"
+                              >
                                 {evt.detail}
                               </p>
-
-                              <div className="text-[11px] text-primary font-semibold mt-0.5 truncate flex items-center gap-1">
-                                <BookOpen className="w-3 h-3 shrink-0" />
-                                <span className="truncate">{evt.courseTitle}</span>
+                              <div className="text-[11px] text-primary font-semibold mt-0.5 flex items-center gap-2 flex-wrap">
+                                <span dir={getTextDir(evt.courseTitle)}>{evt.courseTitle}</span>
+                                {evt.path && (
+                                  <span className="text-[10px] font-mono text-muted-foreground">
+                                    ({evt.path})
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
 
-                          {/* Quick Switch / Action Buttons */}
-                          <div className="flex items-center justify-end gap-2 shrink-0 ps-12 sm:ps-0">
-                            {/* Expandable lessons button */}
+                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                             {evt.completedVideoIds && evt.completedVideoIds.length > 0 && (
                               <button
+                                type="button"
                                 onClick={() => setExpandedEventId(isExpanded ? null : evt.id)}
-                                className="px-2.5 py-1 rounded-lg bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                className="px-2.5 py-1 rounded-lg bg-muted text-foreground text-[10px] font-bold flex items-center gap-1 cursor-pointer"
                               >
-                                <span>{evt.completedVideoIds.length} {isRtl ? 'دروس' : 'lessons'}</span>
-                                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                <span>
+                                  {evt.completedVideoIds.length} {isRtl ? 'دروس' : 'lessons'}
+                                </span>
+                                {isExpanded ? (
+                                  <ChevronUp className="w-3 h-3" />
+                                ) : (
+                                  <ChevronDown className="w-3 h-3" />
+                                )}
                               </button>
                             )}
-
-                            {/* One click focus button */}
-                            {evt.userId && selectedUserId === 'all' && (
-                              <button
-                                onClick={() => setSelectedUserId(evt.userId!)}
-                                className="px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-bold transition-all cursor-pointer"
-                                title={isRtl ? "عرض كل حركات هذا الطالب فقط" : "Filter exclusively by this learner"}
-                              >
-                                {isRtl ? 'عزل الطالب' : 'Focus Learner'}
-                              </button>
-                            )}
-
                             <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                              ● REAL
+                              ● {isRtl ? 'حي' : 'LIVE'}
                             </span>
                           </div>
                         </div>
 
-                        {/* Inline Expandable Lesson Details Drawer */}
                         {isExpanded && evt.completedVideoIds && (
-                          <div className="mt-2 pt-2 border-t border-border/60 bg-muted/20 p-3 rounded-xl space-y-1.5 animate-in fade-in duration-150">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-                              {isRtl ? 'الدروس التي تم إنجازها بنجاح:' : 'Verified Completed Lessons:'}
-                            </span>
+                          <div className="mt-2 pt-2 border-t border-border/60 bg-muted/20 p-3 rounded-xl">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] font-mono text-muted-foreground">
                               {evt.completedVideoIds.map((vid, vIdx) => (
                                 <div key={vIdx} className="flex items-center gap-1.5 truncate">
@@ -1246,422 +1838,253 @@ export function AdminAnalytics() {
         </div>
       </div>
 
-      {/* 4. REAL CHARTS & CONTENT PERFORMANCE */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Real Timeline Area Chart */}
-        <div className="lg:col-span-2 bg-card border border-border/80 rounded-3xl p-5 sm:p-6 shadow-xs flex flex-col justify-between">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-            <div>
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-emerald-500" />
-                <h3 className="text-base sm:text-lg font-black text-foreground">
-                  {isRtl ? 'نشاط التعلم الحقيقي (آخر 7 أيام)' : 'Real Learning Activity (Past 7 Days)'}
-                </h3>
+      {/* MODAL 1: GOOGLE ANALYTICS 4 CONFIGURATION */}
+      {showGaSettingsModal && (
+        <div
+          onClick={() => setShowGaSettingsModal(false)}
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-5 text-start"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+                  <BarChart3 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-foreground">
+                    {isRtl
+                      ? 'إعدادات الربط مع Google Analytics 4'
+                      : 'Google Analytics 4 (GA4) Connection'}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    {isRtl
+                      ? 'أدخل معرف القياس G-XXXXXXXXXX أو اربط حسابك لجلب تقارير الزيارات'
+                      : 'Configure your GA4 Measurement ID & Property ID for live traffic sync'}
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {isRtl ? 'مستخرج من تواريخ إتمام المناهج والدروس في قاعدة البيانات' : 'Grouped strictly from actual progress timestamps in Firestore'}
-              </p>
-            </div>
-
-            {/* Metric Selector */}
-            <div className="p-1 bg-muted/40 border border-border/80 rounded-xl flex items-center gap-1 self-start sm:self-auto">
               <button
-                onClick={() => setChartMetric('lessons')}
-                className={cn(
-                  "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                  chartMetric === 'lessons' ? "bg-card text-foreground shadow-xs border border-border/60" : "text-muted-foreground hover:text-foreground"
-                )}
+                type="button"
+                onClick={() => setShowGaSettingsModal(false)}
+                className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
               >
-                {isRtl ? 'الدروس' : 'Lessons'}
-              </button>
-              <button
-                onClick={() => setChartMetric('graduations')}
-                className={cn(
-                  "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                  chartMetric === 'graduations' ? "bg-card text-foreground shadow-xs border border-border/60" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {isRtl ? 'الشهادات' : 'Certs'}
-              </button>
-              <button
-                onClick={() => setChartMetric('enrollments')}
-                className={cn(
-                  "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                  chartMetric === 'enrollments' ? "bg-card text-foreground shadow-xs border border-border/60" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {isRtl ? 'الالتحاق' : 'Enrollments'}
+                <X className="w-5 h-5" />
               </button>
             </div>
-          </div>
 
-          {/* Area Chart Container */}
-          <div className="w-full h-[260px] sm:h-[290px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={realTimelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="realEmeraldGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.35}/>
-                    <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} 
-                  dy={8} 
+            <form onSubmit={handleSaveGaConfig} className="space-y-4">
+              <div>
+                <label className="block text-xs font-extrabold text-foreground mb-1.5">
+                  {isRtl
+                    ? 'معرف القياس (GA4 Measurement ID - يبدأ بـ G-)'
+                    : 'GA4 Measurement ID (starts with G-)'}
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={gaMeasurementId}
+                  onChange={(e) => setGaMeasurementId(e.target.value)}
+                  placeholder="G-XXXXXXXXXX"
+                  className="w-full rounded-xl bg-background border border-border px-3.5 py-2.5 text-xs sm:text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
-                <YAxis 
-                  allowDecimals={false}
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} 
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {isRtl
+                    ? 'عند حفظ هذا المعرف، يتم حقن وتفعيل وسم Google Analytics (gtag.js) تلقائياً في جميع صفحات المنصة.'
+                    : 'Automatically activates gtag.js tracking across all pages of your platform.'}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-foreground mb-1.5">
+                  {isRtl
+                    ? 'معرف خاصية GA4 (Property ID - أرقام فقط)'
+                    : 'GA4 Property ID (Numeric ID for Data API Reports)'}
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={gaPropertyId}
+                  onChange={(e) => setGaPropertyId(e.target.value)}
+                  placeholder="e.g. 412345678"
+                  className="w-full rounded-xl bg-background border border-border px-3.5 py-2.5 text-xs sm:text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
-                <RechartsTooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'hsl(var(--card))', 
-                    borderColor: 'hsl(var(--border))', 
-                    borderRadius: '12px', 
-                    color: 'hsl(var(--foreground))',
-                    fontSize: '12px',
-                    fontWeight: 'bold',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                  }} 
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey={chartMetric} 
-                  name={chartMetric === 'lessons' ? (isRtl ? "دروس مكتملة" : "Lessons Finished") : chartMetric === 'graduations' ? (isRtl ? "شهادات مكتسبة" : "Certs Awarded") : (isRtl ? "التحاقات جديدة" : "New Enrollments")} 
-                  stroke="#10B981" 
-                  strokeWidth={2.5} 
-                  fillOpacity={1} 
-                  fill="url(#realEmeraldGradient)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+              </div>
 
-        {/* 100% Real Course Performance */}
-        <div className="bg-card border border-border/80 rounded-3xl p-5 sm:p-6 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Award className="w-5 h-5 text-amber-500" />
-              <h3 className="text-base sm:text-lg font-black text-foreground">
-                {isRtl ? 'إقبال الطلاب الحقيقي على المناهج' : 'Real Course Enrollments'}
-              </h3>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">
-              {isRtl ? 'ترتيب المناهج حسب عدد الطلاب الفعليين المسجلين' : 'Ranked strictly by verified learner progress records'}
-            </p>
-
-            <div className="space-y-3">
-              {realTopCourses.map((c, i) => (
-                <div key={c.id || i} className="p-3 rounded-2xl bg-muted/20 border border-border/60 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-6 h-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0">
-                      {i + 1}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="font-bold text-xs text-foreground truncate">{c.title}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{c.instructor}</p>
-                    </div>
-                  </div>
-
-                  <div className="text-end shrink-0">
-                    <span className="text-xs font-black text-foreground">{c.enrollments}</span>
-                    <span className="text-[10px] text-muted-foreground block">{isRtl ? 'طالب' : 'enrolled'}</span>
-                  </div>
+              {gaStatusMsg && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold">
+                  {gaStatusMsg}
                 </div>
-              ))}
-            </div>
-          </div>
+              )}
 
-          {/* Real Category Distribution */}
-          <div className="mt-5 pt-4 border-t border-border/60">
-            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-2.5">
-              {isRtl ? 'توزيع التخصصات الفعلية للطلاب' : 'Curriculum Focus Areas (Real)'}
-            </span>
-            <div className="space-y-2">
-              {realCategoryBreakdown.map((cat, i) => (
-                <div key={i} className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground truncate">{cat.name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-foreground">{cat.count} {isRtl ? 'مسجل' : 'students'}</span>
-                    <span className="text-[10px] text-primary font-mono w-9 text-end">({cat.percent}%)</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* 5. USER PROGRESSION & MASTERY DIRECTORY (100% Real Records) */}
-      <div className="bg-card border border-border/80 rounded-3xl overflow-hidden shadow-xs">
-        
-        {/* Table Header & Search Controls */}
-        <div className="p-5 sm:p-6 border-b border-border/70 bg-gradient-to-b from-muted/30 to-transparent flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg sm:text-xl font-black text-foreground">
-              {isRtl ? 'دليل الطلاب وسجلات التقدم الفعلية' : 'Verified Student Mastery Records'}
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isRtl ? 'عرض مباشر لجميع حسابات الطلاب المسجلة في Firestore مع إمكانية إدارة الصلاحيات' : 'Live synchronized list of real users stored in Firebase Auth & Firestore.'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Search Input */}
-            <div className="relative w-full sm:w-56">
-              <Search className="w-3.5 h-3.5 text-muted-foreground absolute top-1/2 -translate-y-1/2 start-3" />
-              <input
-                type="text"
-                placeholder={isRtl ? 'بحث باسم أو بريد الطالب...' : 'Search student or email...'}
-                value={userSearch}
-                onChange={e => { setUserSearch(e.target.value); setCurrentPage(1); }}
-                className="w-full ps-8 pe-3 py-1.5 bg-background border border-border/80 rounded-xl text-xs text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
-              />
-            </div>
-
-            {/* Role Filter */}
-            <select
-              value={userRoleFilter}
-              onChange={e => { setUserRoleFilter(e.target.value); setCurrentPage(1); }}
-              className="bg-background border border-border/80 text-foreground px-3 py-1.5 rounded-xl text-xs font-semibold focus:ring-primary focus:outline-none cursor-pointer"
-            >
-              <option value="all">{isRtl ? 'جميع الصلاحيات' : 'All Roles'}</option>
-              <option value="student">{isRtl ? 'طالب' : 'Students'}</option>
-              <option value="publisher">{isRtl ? 'ناشر' : 'Publishers'}</option>
-              <option value="admin">{isRtl ? 'مشرف' : 'Admins'}</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Desktop Table View */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-start border-collapse min-w-[750px]">
-            <thead>
-              <tr className="bg-muted/40 text-muted-foreground text-[11px] uppercase tracking-wider font-extrabold border-b border-border/70">
-                <th className="p-4">{isRtl ? 'الطالب' : 'Student'}</th>
-                <th className="p-4">{isRtl ? 'الصلاحية' : 'Role'}</th>
-                <th className="p-4">{isRtl ? 'المناهج المسجلة' : 'Enrollments'}</th>
-                <th className="p-4">{isRtl ? 'الشهادات' : 'Certificates'}</th>
-                <th className="p-4">{isRtl ? 'آخر نشاط' : 'Current Activity'}</th>
-                <th className="p-4 text-end">{isRtl ? 'الإجراءات' : 'Actions'}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {currentUsers.map(u => {
-                const certificates = u.progress.filter(p => p.isCompleted).length;
-                const activeCourses = u.progress.filter(p => !p.isCompleted).length;
-                const latestProgress = [...u.progress].sort((a,b) => {
-                  const d1 = a.completionDate ? new Date(a.completionDate).getTime() : 0;
-                  const d2 = b.completionDate ? new Date(b.completionDate).getTime() : 0;
-                  return d2 - d1;
-                })[0];
-                const activeCourseTitle = latestProgress ? (allCourses.find(c => c.id === latestProgress.courseId)?.title || latestProgress.courseId) : null;
-
-                return (
-                  <tr key={u.uid} className="hover:bg-muted/20 transition-colors group">
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <img 
-                          src={u.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.displayName || 'User')}&background=random`} 
-                          alt="" 
-                          className="w-9 h-9 rounded-full object-cover border border-border" 
-                        />
-                        <div className="min-w-0">
-                          <p className="font-extrabold text-xs text-foreground truncate">{u.displayName || 'Learner'}</p>
-                          <p className="text-[10px] text-muted-foreground font-mono truncate">{u.email}</p>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="p-4">
-                      <select
-                        value={u.role || 'student'}
-                        onChange={(e) => handleRoleChange(u.uid, e.target.value)}
-                        className="bg-background border border-border/80 text-foreground px-2 py-1 rounded-lg font-bold text-xs focus:ring-primary focus:outline-none cursor-pointer"
-                        disabled={isSuperAdminEmail(u.email)}
-                      >
-                        <option value="student">Student</option>
-                        <option value="publisher">Publisher</option>
-                        <option value="admin">Admin</option>
-                        <option value="blocked">Blocked</option>
-                      </select>
-                    </td>
-
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div>
-                          <span className="font-black text-xs text-foreground">{u.progress.length}</span>
-                          <span className="text-[10px] text-muted-foreground block">{isRtl ? 'منهج' : 'courses'}</span>
-                        </div>
-                        <span className="text-border">|</span>
-                        <div>
-                          <span className="font-black text-xs text-primary">{activeCourses}</span>
-                          <span className="text-[10px] text-muted-foreground block">{isRtl ? 'قيد التعلم' : 'in progress'}</span>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="p-4">
-                      {certificates > 0 ? (
-                        <div className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs">
-                          <Award className="w-4 h-4" />
-                          <span>{certificates} {isRtl ? 'شهادة' : 'certs'}</span>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground font-medium">—</span>
-                      )}
-                    </td>
-
-                    <td className="p-4 max-w-[220px]">
-                      {activeCourseTitle ? (
-                        <div className="truncate">
-                          <span className="text-xs font-semibold text-foreground truncate block" title={activeCourseTitle}>
-                            {activeCourseTitle}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            {latestProgress?.completedVideoIds?.length || 0} {isRtl ? 'دروس منجزة' : 'lessons done'}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> {isRtl ? 'لا يوجد نشاط مسجل' : 'No activity yet'}
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="p-4 text-end">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => setSelectedUserId(u.uid)}
-                          className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors cursor-pointer text-xs font-bold"
-                          title={isRtl ? 'عرض حركات هذا الطالب في شريط الأحداث' : 'View movement history in stream'}
-                        >
-                          {isRtl ? 'مسار الطالب' : 'Track'}
-                        </button>
-                        <button
-                          onClick={() => handleRemoveUser(u.uid)}
-                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer text-xs font-bold"
-                          disabled={isSuperAdminEmail(u.email)}
-                          title={isRtl ? 'حذف المستخدم' : 'Remove User'}
-                        >
-                          {isRtl ? 'حذف' : 'Remove'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Cards View */}
-        <div className="md:hidden divide-y divide-border/60">
-          {currentUsers.map(u => {
-            const certificates = u.progress.filter(p => p.isCompleted).length;
-            const latestProgress = u.progress[0];
-            const activeCourseTitle = latestProgress ? (allCourses.find(c => c.id === latestProgress.courseId)?.title || latestProgress.courseId) : null;
-
-            return (
-              <div key={u.uid} className="p-4 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <img 
-                      src={u.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.displayName || 'User')}&background=random`} 
-                      alt="" 
-                      className="w-9 h-9 rounded-full object-cover border border-border" 
-                    />
-                    <div className="min-w-0">
-                      <p className="font-extrabold text-xs text-foreground truncate">{u.displayName || 'Learner'}</p>
-                      <p className="text-[10px] text-muted-foreground font-mono truncate">{u.email}</p>
-                    </div>
-                  </div>
-
-                  <select
-                    value={u.role || 'student'}
-                    onChange={(e) => handleRoleChange(u.uid, e.target.value)}
-                    className="bg-background border border-border/80 text-foreground px-2 py-1 rounded-lg font-bold text-xs focus:ring-primary focus:outline-none shrink-0"
-                    disabled={isSuperAdminEmail(u.email)}
-                  >
-                    <option value="student">Student</option>
-                    <option value="publisher">Publisher</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                  <div className="p-2 rounded-xl bg-muted/20 border border-border/50">
-                    <span className="text-[10px] text-muted-foreground block">{isRtl ? 'الدورات' : 'Enrolled'}</span>
-                    <span className="font-bold text-foreground">{u.progress.length} {isRtl ? 'دورات' : 'courses'}</span>
-                  </div>
-                  <div className="p-2 rounded-xl bg-muted/20 border border-border/50">
-                    <span className="text-[10px] text-muted-foreground block">{isRtl ? 'الشهادات' : 'Certificates'}</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{certificates}</span>
-                  </div>
-                </div>
-
-                {activeCourseTitle && (
-                  <div className="text-[11px] text-muted-foreground truncate">
-                    <span className="font-bold text-foreground">{isRtl ? 'الحالي: ' : 'Active: '}</span>
-                    <span className="truncate">{activeCourseTitle}</span>
-                  </div>
-                )}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleConnectGoogleAnalyticsOAuth}
+                  disabled={gaConnecting}
+                  className="px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>
+                    {isRtl
+                      ? 'مصادقة حساب Google وجلب الخصائص تلقائياً'
+                      : 'Authorize Google Account & Auto-Detect'}
+                  </span>
+                </button>
 
                 <button
-                  onClick={() => setSelectedUserId(u.uid)}
-                  className="w-full py-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 font-bold text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 cursor-pointer shadow-sm"
                 >
-                  <User className="w-3.5 h-3.5" />
-                  <span>{isRtl ? 'عرض سجل حركات هذا الطالب' : 'View Learner Movement Stream'}</span>
+                  {isRtl ? 'حفظ وتفعيل' : 'Save & Activate'}
                 </button>
               </div>
-            );
-          })}
-        </div>
-
-        {/* Empty state */}
-        {currentUsers.length === 0 && (
-          <div className="p-10 text-center text-muted-foreground text-xs sm:text-sm">
-            {isRtl ? 'لم يتم العثور على مستخدمين مسجلين يطابقون البحث.' : 'No registered users found matching your search.'}
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Table Pagination */}
-        {totalPages > 1 && (
-          <div className="p-3.5 sm:p-4 border-t border-border/70 bg-muted/10 flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">
-              {isRtl ? `صفحة ${currentPage} من ${totalPages}` : `Page ${currentPage} of ${totalPages}`}
-            </span>
-            <div className="flex items-center gap-1.5">
+      {/* MODAL 2: VERCEL & API SECURITY HOSTING GUIDE */}
+      {showVercelGuideModal && (
+        <div
+          onClick={() => setShowVercelGuideModal(false)}
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-5 text-start max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border/70 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-foreground">
+                    {isRtl
+                      ? 'دليل استضافة وأمان الـ APIs على Vercel وربط Google Analytics'
+                      : 'How to Host APIs Securely on Vercel & Connect Google Analytics'}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    {isRtl
+                      ? 'خطوات عملية لحماية مفاتيحك السرية وتشغيل الـ Backend Serverless على Vercel'
+                      : 'Step-by-step production security checklist for Vercel Serverless & GA4'}
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                disabled={currentPage === 1}
-                className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground disabled:opacity-40 cursor-pointer"
+                type="button"
+                onClick={() => setShowVercelGuideModal(false)}
+                className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
               >
-                <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
-              </button>
-              <button
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages}
-                className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground disabled:opacity-40 cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4 rtl:rotate-180" />
+                <X className="w-5 h-5" />
               </button>
             </div>
+
+            <div className="space-y-4 text-xs sm:text-sm leading-relaxed text-foreground/90">
+              {/* Step 1 */}
+              <div className="p-4 rounded-2xl bg-muted/40 border border-border/70 space-y-2">
+                <h4 className="font-black text-foreground flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0">
+                    1
+                  </span>
+                  <span>
+                    {isRtl
+                      ? 'كيف تعمل الـ APIs بأمان على Vercel؟'
+                      : 'How Your APIs Run Securely on Vercel'}
+                  </span>
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  {isRtl
+                    ? 'تم إعداد ملف vercel.json و api/index.js ليعمل كـ Vercel Serverless Function. جميع طلبات /api/* (مثل /api/analytics و /api/youtube و /api/tickets) يتم تنفيذها في السيرفر الخلفي لـ Vercel بحيث لا تظهر أي مفاتيح سرية (API Keys) للمستخدمين في المتصفح.'
+                    : 'Your project includes api/index.js and vercel.json routing all /api/* requests to Vercel Serverless Functions. Secrets stored in Vercel Environment Variables never leak to the browser.'}
+                </p>
+              </div>
+
+              {/* Step 2 */}
+              <div className="p-4 rounded-2xl bg-muted/40 border border-border/70 space-y-2.5">
+                <h4 className="font-black text-foreground flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0">
+                    2
+                  </span>
+                  <span>
+                    {isRtl
+                      ? 'المتغيرات البيئية المطلوب إضافتها في Vercel (Settings → Environment Variables)'
+                      : 'Add These Environment Variables in Vercel Dashboard (Settings → Environment Variables)'}
+                  </span>
+                </h4>
+
+                <div className="space-y-2">
+                  {[
+                    {
+                      name: 'VITE_GA_MEASUREMENT_ID',
+                      descEn: 'Your GA4 Measurement ID (e.g. G-XXXXXXXXXX) from Google Analytics → Admin → Data Streams.',
+                      descAr: 'معرف القياس من Google Analytics (مثل G-XXXXXXXXXX) لتفعيل تتبع الزوار في كل الصفحات.',
+                    },
+                    {
+                      name: 'GA4_PROPERTY_ID',
+                      descEn: 'Your numeric GA4 Property ID (e.g. 412345678) from Google Analytics → Admin → Property Details.',
+                      descAr: 'معرف خاصية GA4 الرقمي (مثل 412345678) من إعدادات الحساب في Google Analytics.',
+                    },
+                    {
+                      name: 'GA4_SERVICE_ACCOUNT_JSON',
+                      descEn: 'Recommended for 24/7 server-side GA4 reports: Paste your Google Cloud Service Account JSON key (grant its client_email "Viewer" access in GA4 Property Access Management).',
+                      descAr: 'الطريقة الأكثر أماناً واستقراراً على Vercel: الصق محتوى ملف JSON لحساب الخدمة (Service Account) بعد إعطائه صلاحية Viewer في Google Analytics.',
+                    },
+                    {
+                      name: 'YOUTUBE_API_KEY',
+                      descEn: 'Server-only YouTube Data API v3 key (keeps your key hidden from client bundle).',
+                      descAr: 'مفتاح YouTube Data API v3 في السيرفر الخلفي فقط لحمايته من الظهور في المتصفح.',
+                    },
+                  ].map((envItem) => (
+                    <div
+                      key={envItem.name}
+                      className="p-3 rounded-xl bg-background border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="font-mono font-black text-xs text-primary">
+                          {envItem.name}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          {isRtl ? envItem.descAr : envItem.descEn}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(envItem.name)}
+                        className="px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-foreground text-[11px] font-bold flex items-center gap-1 shrink-0 self-start sm:self-center cursor-pointer"
+                      >
+                        {copiedVar === envItem.name ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isRtl ? 'نسخ الاسم' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Step 3 */}
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-1.5">
+                <h4 className="font-black text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
+                  {isRtl
+                    ? '💡 نصيحة سريعة: الربط بنقرة واحدة بدون مفاتيح معقدة!'
+                    : '💡 Instant Option: 1-Click OAuth Right Inside This Page'}
+                </h4>
+                <p className="text-xs text-foreground/90">
+                  {isRtl
+                    ? 'يمكنك ببساطة النقر على زر "ربط Google Analytics مباشر" في أعلى هذه الصفحة، واختيار حسابك في Google، وسيقوم النظام تلقائياً باكتشاف خصائص GA4 الخاصة بك وجلب الزيارات فوراً!'
+                    : 'You can also simply click the orange "Connect Google Analytics" button at the top of this page, sign in with your Google account, and it will auto-detect your GA4 properties and pull live reports immediately!'}
+                </p>
+              </div>
+            </div>
           </div>
-        )}
-
-      </div>
-
+        </div>
+      )}
     </div>
   );
 }

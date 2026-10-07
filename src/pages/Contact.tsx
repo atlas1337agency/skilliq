@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { 
   Mail, 
@@ -14,7 +15,10 @@ import {
   Loader2,
   Headphones,
   BookOpen,
-  Users
+  Users,
+  LifeBuoy,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
@@ -32,6 +36,7 @@ export function Contact() {
   const [message, setMessage] = useState('');
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success'>('idle');
   const [copiedEmail, setCopiedEmail] = useState(false);
+  const [selectedEmailModal, setSelectedEmailModal] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = isRtl 
@@ -179,11 +184,32 @@ export function Contact() {
             {isRtl ? 'تواصل مع فريق SkilliQ' : 'Contact the SkilliQ Team'}
           </h1>
 
-          <p className="text-sm sm:text-base text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+          <p className="text-sm sm:text-base text-muted-foreground max-w-2xl mx-auto leading-relaxed mb-6">
             {isRtl 
               ? 'لديك استفسار، اقتراح لدورة جديدة، أو فكرة شراكة؟ فريقنا متاح للإجابة على جميع رسائلكم واستفساراتكم بكل اهتمام.'
               : 'Whether you have a technical question, feedback on your learning experience, a course recommendation, or a partnership inquiry — we are here to support you.'}
           </p>
+
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Link
+              to="/support"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-primary text-primary-foreground font-bold text-xs sm:text-sm hover:bg-primary/90 transition-all shadow-md"
+            >
+              <LifeBuoy className="w-4 h-4" />
+              <span>
+                {isRtl ? 'فتح تذكرة دعم مباشر' : 'Open Live Support Ticket '}
+              </span>
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => setSelectedEmailModal('support@skilliq1337.online')}
+              className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-card hover:bg-muted text-foreground border border-border/80 font-bold text-xs sm:text-sm transition-all shadow-xs cursor-pointer"
+            >
+              <Mail className="w-4 h-4 text-primary" />
+              <span className="font-mono">support@skilliq1337.online</span>
+            </button>
+          </div>
 
         </div>
       </section>
@@ -211,14 +237,18 @@ export function Contact() {
                 </div>
 
                 <div className="pt-3 border-t border-border/60 flex items-center justify-between gap-2">
-                  <a 
-                    href={`mailto:${ch.email}`}
-                    className="text-xs font-mono font-bold text-primary hover:underline truncate"
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEmailModal(ch.email)}
+                    className="text-xs font-mono font-bold text-primary hover:underline truncate cursor-pointer text-start"
                   >
                     {ch.email}
-                  </a>
+                  </button>
                   <button
-                    onClick={() => handleCopyEmail(ch.email)}
+                    onClick={() => {
+                      handleCopyEmail(ch.email);
+                      setSelectedEmailModal(ch.email);
+                    }}
                     className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     title={isRtl ? "نسخ البريد" : "Copy Email"}
                   >
@@ -434,6 +464,88 @@ export function Contact() {
           ))}
         </div>
       </section>
+
+      {/* EMAIL SPAM / GMAIL CHECK NOTICE MODAL */}
+      {selectedEmailModal && (
+        <div
+          onClick={() => setSelectedEmailModal(null)}
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 text-start"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-foreground">
+                    {isRtl ? 'التواصل عبر البريد الإلكتروني' : 'Email Support Notice'}
+                  </h3>
+                  <p className="text-xs font-mono font-bold text-primary">
+                    {selectedEmailModal}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEmailModal(null)}
+                className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-extrabold text-xs">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>
+                  {isRtl
+                    ? 'تنبيه هام بخصوص رسائل Gmail والرسائل غير المرغوب فيها (Spam)'
+                    : 'Important Notice: Please Check Your Gmail Spam Folder'}
+                </span>
+              </div>
+              <p className="text-xs text-foreground/90 leading-relaxed">
+                {isRtl
+                  ? 'أحياناً قد تذهب رسالة الرد الخاصة بنا إلى مجلد الرسائل غير المرغوب فيها (Spam / Junk) في Gmail. يرجى التحقق من مجلد Spam بعد مراسلتنا، وسنقوم بالتواصل معك والرد عليك في أقرب وقت ممكن.'
+                  : 'Sometimes our reply message may go to your Gmail Spam or Promotions folder. Please make sure to check your Spam folder after contacting us — we will contact you back shortly!'}
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => handleCopyEmail(selectedEmailModal)}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-bold text-xs flex items-center justify-center gap-1.5 border border-border cursor-pointer transition-colors"
+              >
+                {copiedEmail ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-500" />
+                    <span className="text-emerald-500">
+                      {isRtl ? 'تم نسخ البريد!' : 'Email Copied!'}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>{isRtl ? 'نسخ البريد الإلكتروني' : 'Copy Email Address'}</span>
+                  </>
+                )}
+              </button>
+
+              <a
+                href={`mailto:${selectedEmailModal}`}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+              >
+                <Mail className="w-4 h-4" />
+                <span>{isRtl ? 'فتح تطبيق البريد' : 'Send Email Now'}</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

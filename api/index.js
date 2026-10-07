@@ -1,14 +1,13 @@
 import express from 'express';
 import cors from 'cors';
-import { BetaAnalyticsDataClient } from '@google-analytics/data';
-import { OAuth2Client } from 'google-auth-library';
+import { OAuth2Client, GoogleAuth } from 'google-auth-library';
 import fs from 'fs';
 import path from 'path';
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const getBaseOrigin = (req) => {
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, '');
@@ -260,82 +259,255 @@ app.get('/api/analytics/oauth/callback', async (req, res) => {
   }
 });
 
+let memoryGaConfig = {
+  measurementId: process.env.VITE_GA_MEASUREMENT_ID || process.env.GA4_MEASUREMENT_ID || 'G-VHQYB5FFPQ',
+  propertyId: process.env.GA4_PROPERTY_ID || '',
+  propertyName: ''
+};
+
+app.get('/api/analytics/config', (req, res) => {
+  res.json({
+    measurementId: memoryGaConfig.measurementId || process.env.VITE_GA_MEASUREMENT_ID || process.env.GA4_MEASUREMENT_ID || 'G-VHQYB5FFPQ',
+    propertyId: memoryGaConfig.propertyId || process.env.GA4_PROPERTY_ID || '',
+    propertyName: memoryGaConfig.propertyName || ''
+  });
+});
+
+app.post('/api/analytics/config', (req, res) => {
+  memoryGaConfig = {
+    ...memoryGaConfig,
+    ...(req.body?.measurementId !== undefined ? { measurementId: String(req.body.measurementId).trim() } : {}),
+    ...(req.body?.propertyId !== undefined ? { propertyId: String(req.body.propertyId).trim().replace(/^properties\//, '') } : {}),
+    ...(req.body?.propertyName !== undefined ? { propertyName: String(req.body.propertyName).trim() } : {})
+  };
+  res.json({ success: true, config: memoryGaConfig });
+});
+
+const fetchGa4ReportsViaRest = async (accessToken, propId, measurementId) => {
+  const cleanPropId = String(propId || '').replace(/^properties\//, '').trim();
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  };
+
+  const [trafficRes, locationRes, pagesRes, devicesRes, sourcesRes, realtimeRes] = await Promise.all([
+    fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+        dimensions: [{ name: 'date' }],
+        metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }, { name: 'sessions' }, { name: 'averageSessionDuration' }]
+      })
+    }),
+    fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dateRanges: [{ startDate: '28daysAgo', endDate: 'today' }],
+        dimensions: [{ name: 'country' }],
+        metrics: [{ name: 'activeUsers' }]
+      })
+    }),
+    fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+        dimensions: [{ name: 'pagePath' }],
+        metrics: [{ name: 'screenPageViews' }, { name: 'activeUsers' }]
+      })
+    }),
+    fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dateRanges: [{ startDate: '28daysAgo', endDate: 'today' }],
+        dimensions: [{ name: 'deviceCategory' }],
+        metrics: [{ name: 'activeUsers' }]
+      })
+    }),
+    fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runReport`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dateRanges: [{ startDate: '28daysAgo', endDate: 'today' }],
+        dimensions: [{ name: 'sessionSource' }],
+        metrics: [{ name: 'sessions' }]
+      })
+    }),
+    fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${cleanPropId}:runRealtimeReport`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        metrics: [{ name: 'activeUsers' }]
+      })
+    })
+  ]);
+
+  if (!trafficRes.ok) {
+    const errBody = await trafficRes.json().catch(() => ({}));
+    return { ok: false, error: errBody?.error?.message || `HTTP ${trafficRes.status}` };
+  }
+
+  return {
+    ok: true,
+    data: {
+      useDemo: false,
+      propertyId: cleanPropId,
+      measurementId: measurementId || '',
+      traffic: await trafficRes.json(),
+      locations: locationRes.ok ? await locationRes.json() : null,
+      pages: pagesRes.ok ? await pagesRes.json() : null,
+      devices: devicesRes.ok ? await devicesRes.json() : null,
+      sources: sourcesRes.ok ? await sourcesRes.json() : null,
+      realtime: realtimeRes.ok ? await realtimeRes.json() : null
+    }
+  };
+};
+
 // Route 3: Fetch Analytics Data
 app.get('/api/analytics', async (req, res) => {
   try {
-    const propertyId = process.env.GA4_PROPERTY_ID;
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const refreshToken = process.env.GA4_REFRESH_TOKEN;
+    const propertyId = String(req.query.propertyId || memoryGaConfig.propertyId || process.env.GA4_PROPERTY_ID || '').replace(/^properties\//, '').trim();
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
 
-    if (!propertyId || !clientId || !clientSecret) {
-      return res.status(200).json({ 
-        error: 'Missing Credentials', 
-        useDemo: true, 
-        needsSetup: true 
+    if (bearerToken && propertyId) {
+      const result = await fetchGa4ReportsViaRest(bearerToken, propertyId, memoryGaConfig.measurementId);
+      if (result.ok) return res.json(result.data);
+    }
+
+    if (!propertyId) {
+      return res.status(200).json({ useDemo: true, needsSetup: true, config: memoryGaConfig });
+    }
+
+    if (process.env.GA4_SERVICE_ACCOUNT_JSON) {
+      try {
+        const credentials = JSON.parse(process.env.GA4_SERVICE_ACCOUNT_JSON);
+        const gAuth = new GoogleAuth({
+          credentials,
+          scopes: ['https://www.googleapis.com/auth/analytics.readonly']
+        });
+        const client = await gAuth.getClient();
+        const tokenRes = await client.getAccessToken();
+        if (tokenRes?.token) {
+          const result = await fetchGa4ReportsViaRest(tokenRes.token, propertyId, memoryGaConfig.measurementId);
+          if (result.ok) return res.json(result.data);
+        }
+      } catch (saErr) {}
+    }
+
+    const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+    const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+    const refreshToken = (process.env.GA4_REFRESH_TOKEN || '').trim();
+
+    if (!clientId || !clientSecret || !refreshToken) {
+      return res.status(200).json({
+        useDemo: true,
+        needsSetup: !clientId || !clientSecret,
+        needsAuth: !refreshToken,
+        config: memoryGaConfig
       });
     }
 
-    if (!refreshToken) {
-      return res.status(200).json({ 
-        error: 'Missing Refresh Token', 
-        useDemo: true, 
-        needsAuth: true 
-      });
+    const tokenExchangeRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token'
+      }).toString()
+    });
+
+    if (!tokenExchangeRes.ok) {
+      return res.status(200).json({ useDemo: true, needsAuth: true, config: memoryGaConfig });
     }
 
-    const authClient = new OAuth2Client(clientId, clientSecret);
-    authClient.setCredentials({ refresh_token: refreshToken });
+    const tokenPayload = await tokenExchangeRes.json();
+    if (tokenPayload?.access_token) {
+      const result = await fetchGa4ReportsViaRest(tokenPayload.access_token, propertyId, memoryGaConfig.measurementId);
+      if (result.ok) return res.json(result.data);
+    }
 
-    const analyticsDataClient = new BetaAnalyticsDataClient({ authClient });
-
-    // Fetch Traffic over last 7 days
-    const [trafficResponse] = await analyticsDataClient.runReport({
-      property: `properties/${propertyId}`,
-      dateRanges: [
-        {
-          startDate: '7daysAgo',
-          endDate: 'today',
-        },
-      ],
-      dimensions: [
-        { name: 'date' },
-      ],
-      metrics: [
-        { name: 'activeUsers' },
-        { name: 'screenPageViews' }
-      ],
-    });
-
-    // Fetch Top Locations
-    const [locationResponse] = await analyticsDataClient.runReport({
-      property: `properties/${propertyId}`,
-      dateRanges: [
-        {
-          startDate: '7daysAgo',
-          endDate: 'today',
-        },
-      ],
-      dimensions: [
-        { name: 'country' },
-      ],
-      metrics: [
-        { name: 'activeUsers' },
-      ],
-    });
-
-    res.json({
-      traffic: trafficResponse,
-      locations: locationResponse
-    });
-
+    return res.status(200).json({ useDemo: true, needsAuth: true, config: memoryGaConfig });
   } catch (error) {
-    console.error('Analytics error:', error);
-    res.status(200).json({ 
-      error: error?.message || 'Failed to fetch analytics', 
-      useDemo: true 
-    });
+    res.status(200).json({ useDemo: true, needsAuth: true });
   }
+});
+
+// In-memory fallback for Vercel Serverless (/api/tickets & /api/telemetry)
+let vercelTickets = [];
+let vercelPresence = [];
+let vercelMovements = [];
+
+app.get('/api/tickets', (req, res) => {
+  const userId = req.query.userId;
+  if (userId) return res.json({ tickets: vercelTickets.filter((t) => t.userId === userId) });
+  res.json({ tickets: vercelTickets });
+});
+
+app.post('/api/tickets', (req, res) => {
+  const ticket = req.body;
+  if (!ticket || !ticket.id) return res.status(400).json({ error: 'Invalid ticket' });
+  const idx = vercelTickets.findIndex((t) => t.id === ticket.id);
+  if (idx !== -1) vercelTickets[idx] = { ...vercelTickets[idx], ...ticket };
+  else vercelTickets.unshift(ticket);
+  res.status(201).json({ success: true, ticket });
+});
+
+app.post('/api/tickets/:id/reply', (req, res) => {
+  const { id } = req.params;
+  const { message, status, unreadByAdmin, unreadByUser } = req.body || {};
+  const idx = vercelTickets.findIndex((t) => t.id === id);
+  if (idx !== -1 && message) {
+    vercelTickets[idx] = {
+      ...vercelTickets[idx],
+      messages: [...(vercelTickets[idx].messages || []), message],
+      ...(status ? { status } : {}),
+      ...(unreadByAdmin !== undefined ? { unreadByAdmin } : {}),
+      ...(unreadByUser !== undefined ? { unreadByUser } : {}),
+      updatedAt: Date.now()
+    };
+  }
+  res.json({ success: true });
+});
+
+app.patch('/api/tickets/:id/status', (req, res) => {
+  const { id } = req.params;
+  vercelTickets = vercelTickets.map((t) => (t.id === id ? { ...t, ...(req.body || {}), updatedAt: Date.now() } : t));
+  res.json({ success: true });
+});
+
+app.delete('/api/tickets/:id', (req, res) => {
+  vercelTickets = vercelTickets.filter((t) => t.id !== req.params.id);
+  res.json({ success: true });
+});
+
+app.get('/api/telemetry', (req, res) => {
+  res.json({ presence: vercelPresence, movements: vercelMovements });
+});
+
+app.post('/api/telemetry/presence', (req, res) => {
+  const record = req.body;
+  if (record && record.id) {
+    const idx = vercelPresence.findIndex((p) => p.id === record.id);
+    if (idx !== -1) vercelPresence[idx] = { ...vercelPresence[idx], ...record };
+    else vercelPresence.unshift(record);
+    vercelPresence = vercelPresence.slice(0, 300);
+  }
+  res.json({ success: true });
+});
+
+app.post('/api/telemetry/movement', (req, res) => {
+  const ev = req.body;
+  if (ev && ev.id && !vercelMovements.some((m) => m.id === ev.id)) {
+    vercelMovements.unshift(ev);
+    vercelMovements = vercelMovements.slice(0, 300);
+  }
+  res.json({ success: true });
 });
 
 // YouTube Playlist Importer Proxy Endpoint
