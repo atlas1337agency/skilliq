@@ -3,7 +3,8 @@ import { persist } from 'zustand/middleware';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { courses as defaultCourses, learningPaths as defaultPaths, categories as defaultCategories, defaultBanners, defaultBooks, Course, LearningPath, Category, AppNotification, AdBannerData, Book } from '../data/courses';
-import { fetchFirestoreContent } from '../lib/firestoreContent';
+import { fetchFirestoreContent, addOrUpdateCourse } from '../lib/firestoreContent';
+import { syncAllCoursesLiveBackground, applyCachedStatsToCourses } from '../lib/youtube';
 import { PublicProfile, awardXPAndBadges, initializeOrUpdateProfile } from '../lib/gamification';
 import { recordPlatformMovement } from '../lib/telemetry';
 
@@ -113,9 +114,10 @@ export const useStore = create<StoreState>()(
           const approvedBooks = finalBooks.filter(b => b.isApproved !== false);
 
           if (courses.length > 0 || learningPaths.length > 0) {
-            const approvedCourses = courses.filter(c => c.isApproved !== false);
+            const hydratedCourses = applyCachedStatsToCourses(courses);
+            const approvedCourses = hydratedCourses.filter(c => c.isApproved !== false);
             set({ 
-              allCourses: courses, 
+              allCourses: hydratedCourses, 
               courses: approvedCourses, 
               allBooks: finalBooks,
               books: approvedBooks,
@@ -126,9 +128,23 @@ export const useStore = create<StoreState>()(
               isContentLoading: false,
               hasLoadedFromDb: true
             });
+            syncAllCoursesLiveBackground(hydratedCourses, (updatedMap) => {
+              const latestAll = get().allCourses.map(c => updatedMap[c.id] || c);
+              set({
+                allCourses: latestAll,
+                courses: latestAll.filter(c => c.isApproved !== false)
+              });
+              // If admin/creator is signed in, persist live-synced stats to Firestore
+              const activeUser = get().user;
+              if (activeUser && (activeUser.role === 'admin' || activeUser.role === 'creator')) {
+                Object.values(updatedMap).forEach((updatedCourse) => {
+                  addOrUpdateCourse(updatedCourse).catch(() => {});
+                });
+              }
+            });
           } else {
             // Retain defaultCourses if DB returns empty
-            const currentCourses = get().courses.length > 0 ? get().courses : defaultCourses;
+            const currentCourses = applyCachedStatsToCourses(get().courses.length > 0 ? get().courses : defaultCourses);
             set({ 
               courses: currentCourses, 
               allCourses: currentCourses, 
@@ -140,6 +156,13 @@ export const useStore = create<StoreState>()(
               banners: banners || [], 
               isContentLoading: false,
               hasLoadedFromDb: true
+            });
+            syncAllCoursesLiveBackground(currentCourses, (updatedMap) => {
+              const latestAll = get().allCourses.map(c => updatedMap[c.id] || c);
+              set({
+                allCourses: latestAll,
+                courses: latestAll.filter(c => c.isApproved !== false)
+              });
             });
           }
         } catch (error: any) {

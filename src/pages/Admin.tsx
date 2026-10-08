@@ -28,7 +28,10 @@ import {
   Clock,
   ExternalLink,
   MessageSquareHeart,
-  LifeBuoy
+  LifeBuoy,
+  ThumbsUp,
+  MessageSquare,
+  RefreshCw
 } from 'lucide-react';
 import { 
   deleteCourseInFirestore, 
@@ -38,8 +41,10 @@ import {
   deleteBookInFirestore,
   addOrUpdateNotification,
   addOrUpdateBanner,
-  addOrUpdateBook
+  addOrUpdateBook,
+  addOrUpdateCourse
 } from '../lib/firestoreContent';
+import { formatCompactNumber, syncAllCoursesLiveBackground } from '../lib/youtube';
 import { AdminForms } from '../components/AdminForms';
 import { AdminAnalytics } from '../components/AdminAnalytics';
 import { AdminUsers } from '../components/AdminUsers';
@@ -97,6 +102,32 @@ export function Admin() {
   // Courses state
   const [courseSearch, setCourseSearch] = useState('');
   const [coursePage, setCoursePage] = useState(1);
+  const [isSyncingAllStats, setIsSyncingAllStats] = useState(false);
+
+  const handleSyncAllCoursesStats = async () => {
+    if (isSyncingAllStats) return;
+    setIsSyncingAllStats(true);
+    try {
+      await syncAllCoursesLiveBackground(
+        allCourses,
+        (updatedMap) => {
+          const latestAll = useStore.getState().allCourses.map(c => updatedMap[c.id] || c);
+          useStore.setState({
+            allCourses: latestAll,
+            courses: latestAll.filter(c => c.isApproved !== false)
+          });
+          Object.values(updatedMap).forEach((updatedCourse) => {
+            addOrUpdateCourse(updatedCourse).catch(() => {});
+          });
+        },
+        true
+      );
+    } catch (e) {
+      console.warn('Manual live stats sync warning:', e);
+    } finally {
+      setIsSyncingAllStats(false);
+    }
+  };
 
   // Books state
   const [bookSearch, setBookSearch] = useState('');
@@ -574,16 +605,28 @@ export function Admin() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl sm:text-2xl font-black text-foreground">{t('manage_courses', 'Manage Courses & Masterclasses')}</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Edit syllabus, YouTube playlists, lessons, and course cover media.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Edit syllabus, YouTube playlists, lessons, and real-time YouTube engagement telemetry.</p>
               </div>
 
-              <button 
-                onClick={() => setEditingItem({ type: 'course' })}
-                className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
-              >
-                <Plus className="w-4 h-4" /> 
-                <span>{t('add_course', 'Add Course')}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button 
+                  onClick={handleSyncAllCoursesStats}
+                  disabled={isSyncingAllStats}
+                  className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs cursor-pointer active:scale-98"
+                  title={isRtl ? 'تحديث المشاهدات والإعجابات والتعليقات والمشتركين لجميع الدورات' : 'Refresh real-time Views, Likes, Comments & Subscribers for all courses'}
+                >
+                  <RefreshCw className={cn("w-3.5 h-3.5", isSyncingAllStats && "animate-spin")} /> 
+                  <span>{isSyncingAllStats ? (isRtl ? 'جاري التحديث...' : 'Syncing Live Stats...') : (isRtl ? 'مزامنة الإحصائيات الحية' : 'Sync All Live Stats')}</span>
+                </button>
+
+                <button 
+                  onClick={() => setEditingItem({ type: 'course' })}
+                  className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
+                >
+                  <Plus className="w-4 h-4" /> 
+                  <span>{t('add_course', 'Add Course')}</span>
+                </button>
+              </div>
             </div>
             
             {/* Search Bar */}
@@ -603,7 +646,13 @@ export function Admin() {
 
             {/* Courses Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {paginatedCourses.map(courseItem => (
+              {paginatedCourses.map(courseItem => {
+                const cViews = courseItem.totalViews || (courseItem.videos || []).reduce((s, v) => s + (v.viewCount || 0), 0);
+                const cLikes = courseItem.totalLikes || (courseItem.videos || []).reduce((s, v) => s + (v.likeCount || 0), 0);
+                const cComments = courseItem.totalComments || (courseItem.videos || []).reduce((s, v) => s + (v.commentCount || 0), 0);
+                const cSubs = courseItem.subscriberCountText || (courseItem.subscriberCount ? formatCompactNumber(courseItem.subscriberCount) : '');
+
+                return (
                 <div key={courseItem.id} className="bg-card border border-border/80 rounded-2xl p-4 flex flex-col justify-between shadow-xs hover:shadow-md transition-shadow">
                   <div className="flex items-start gap-3 mb-3">
                     {courseItem.thumbnail?.trim() ? (
@@ -624,14 +673,41 @@ export function Admin() {
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{courseItem.instructor || 'SkilliQ'}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <p className="text-[11px] text-muted-foreground truncate">{courseItem.instructor || 'SkilliQ'}</p>
+                        {cSubs && (
+                          <span className="shrink-0 text-[9.5px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.2 rounded-full border border-red-500/20">
+                            {cSubs}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[10px] text-muted-foreground font-mono mt-1">
                         {courseItem.isSingleVideo ? 'Masterclass' : 'Playlist'} • {courseItem.videos?.length || 0} videos
                       </p>
                     </div>
                   </div>
 
-                  <div className="mt-auto flex items-center justify-end gap-1.5 pt-3 border-t border-border/60">
+                  {/* Live YouTube Stats Strip inside Admin Course Card */}
+                  <div className="grid grid-cols-4 gap-1.5 py-2 px-2.5 mb-2.5 rounded-xl bg-muted/40 border border-border/60 text-[10px] font-bold">
+                    <div className="flex items-center gap-1 text-foreground truncate" title="Creator Subscribers">
+                      <Users className="w-3 h-3 text-red-500 shrink-0" />
+                      <span className="truncate">{cSubs || '—'}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-foreground truncate" title="Total Views">
+                      <Eye className="w-3 h-3 text-primary shrink-0" />
+                      <span className="truncate">{formatCompactNumber(cViews)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-foreground truncate" title="Total Likes">
+                      <ThumbsUp className="w-3 h-3 text-emerald-500 shrink-0" />
+                      <span className="truncate">{formatCompactNumber(cLikes)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-foreground truncate" title="Total Comments">
+                      <MessageSquare className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span className="truncate">{formatCompactNumber(cComments)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-auto flex items-center justify-end gap-1.5 pt-2 border-t border-border/60">
                     <button 
                       onClick={() => setEditingItem({ type: 'course', item: courseItem })}
                       className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors cursor-pointer"
@@ -650,7 +726,8 @@ export function Admin() {
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Pagination Controls */}

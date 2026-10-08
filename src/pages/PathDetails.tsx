@@ -1,9 +1,10 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, PlayCircle, BookOpen, Shield, Code, Terminal, Layout, Database, Award, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, PlayCircle, BookOpen, Shield, Code, Terminal, Layout, Database, Award, CheckCircle2, Eye, ThumbsUp, MessageSquare } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
 import { filterByLanguage } from '../lib/utils';
+import { formatCompactNumber } from '../lib/youtube';
 import { ScrollingText } from '../components/ScrollingText';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { SEO } from '../components/SEO';
@@ -174,14 +175,43 @@ export function PathDetails() {
                   <h3 className="text-xl font-semibold mb-2 line-clamp-2">{course.title}</h3>
                   <p className="text-muted-foreground text-sm mb-4 line-clamp-2 flex-1">{course.description}</p>
                   
-                  <div className="flex items-center justify-between text-sm text-muted-foreground mb-4">
-                    <div className="flex items-center gap-1">
-                      <BookOpen className="w-4 h-4" />
-                      <span>{course.videos.length} {t('videos')}</span>
+                  <div className="flex flex-col gap-2 text-xs text-muted-foreground mb-4 bg-muted/30 p-2.5 rounded-xl border border-border/50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-bold text-foreground">
+                        <BookOpen className="w-3.5 h-3.5 text-primary" />
+                        <span>{course.videos.length} {t('videos')}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 max-w-[55%] truncate" title={`${educator.professorName} (${educator.youtubeChannelName})`}>
+                        <ScrollingText className="font-medium text-foreground">{educator.professorName}</ScrollingText>
+                        {(course.subscriberCountText || (course.subscriberCount && course.subscriberCount > 0)) && (
+                          <span className="shrink-0 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full border border-red-500/20">
+                            {course.subscriberCountText || formatCompactNumber(course.subscriberCount)}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 max-w-[55%]" title={`${educator.professorName} (${educator.youtubeChannelName})`}>
-                      <ScrollingText className="font-medium text-foreground">{educator.professorName}</ScrollingText>
-                    </div>
+
+                    {(() => {
+                      const cViews = course.totalViews || course.videos.reduce((s: number, v: any) => s + (v.viewCount || 0), 0);
+                      const cLikes = course.totalLikes || course.videos.reduce((s: number, v: any) => s + (v.likeCount || 0), 0);
+                      const cComments = course.totalComments || course.videos.reduce((s: number, v: any) => s + (v.commentCount || 0), 0);
+                      return (
+                        <div className="flex items-center justify-between pt-1.5 border-t border-border/50 text-[11px] font-semibold">
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <Eye className="w-3 h-3 text-primary" />
+                            <span>{formatCompactNumber(cViews)}</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <ThumbsUp className="w-3 h-3 text-emerald-500" />
+                            <span>{formatCompactNumber(cLikes)}</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <MessageSquare className="w-3 h-3 text-amber-500" />
+                            <span>{formatCompactNumber(cComments)}</span>
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {user ? (

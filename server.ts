@@ -900,14 +900,14 @@ Level: "${currentLevel}"`;
   const parseHumanNumber = (raw?: string): number => {
     if (!raw) return 0;
     const cleaned = String(raw).replace(/,/g, '').trim();
-    const match = cleaned.match(/([\d.]+)\s*([KMBkmb]|ألف|مليون)?/);
+    const match = cleaned.match(/([\d.]+)\s*(billion|million|thousand|[KMBkmb]|ألف|مليون|مليار)?/i);
     if (!match) return 0;
     const num = parseFloat(match[1]);
     if (isNaN(num)) return 0;
     const unit = (match[2] || '').toUpperCase();
-    if (unit === 'K' || unit === 'ألف') return Math.round(num * 1_000);
-    if (unit === 'M' || unit === 'مليون') return Math.round(num * 1_000_000);
-    if (unit === 'B') return Math.round(num * 1_000_000_000);
+    if (unit === 'K' || unit === 'THOUSAND' || unit === 'ألف') return Math.round(num * 1_000);
+    if (unit === 'M' || unit === 'MILLION' || unit === 'مليون') return Math.round(num * 1_000_000);
+    if (unit === 'B' || unit === 'BILLION' || unit === 'مليار') return Math.round(num * 1_000_000_000);
     return Math.round(num);
   };
 
@@ -918,6 +918,192 @@ Level: "${currentLevel}"`;
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
     return n.toLocaleString('en-US');
+  };
+
+  // Helper to extract rich metadata from a YouTube watch page HTML string
+  const parseWatchPageHtml = (html: string) => {
+    let videoTitle = '';
+    let videoDuration = '';
+    let youtubeName = '';
+    let youtubeAvatar = '';
+    let youtubeChannelUrl = '';
+    let channelId = '';
+    let description = '';
+    let viewCount = 0;
+    let likeCount = 0;
+    let commentCount = 0;
+    let subscriberCount = 0;
+    let subscriberCountText = '';
+
+    // Duration
+    const lenMatch = html.match(/"lengthSeconds":"(\d+)"/);
+    if (lenMatch && lenMatch[1] && parseInt(lenMatch[1], 10) > 0) {
+      videoDuration = formatSecondsDuration(parseInt(lenMatch[1], 10));
+    } else {
+      const approxMatch = html.match(/"approxDurationMs":"(\d+)"/);
+      if (approxMatch && approxMatch[1] && parseInt(approxMatch[1], 10) > 0) {
+        videoDuration = formatSecondsDuration(Math.round(parseInt(approxMatch[1], 10) / 1000));
+      } else {
+        const endTimes = [...html.matchAll(/"endTimeMs":"(\d+)"/g)]
+          .map(m => parseInt(m[1], 10))
+          .filter(n => !isNaN(n) && n > 0 && n < 86400000);
+        if (endTimes.length > 0) {
+          const maxMs = Math.max(...endTimes);
+          videoDuration = formatSecondsDuration(Math.round(maxMs / 1000));
+        } else {
+          const durMillis = [...html.matchAll(/"durationMillis":"(\d+)"/g)]
+            .map(m => parseInt(m[1], 10))
+            .filter(n => !isNaN(n) && n > 0);
+          if (durMillis.length > 0) {
+            const totalMs = durMillis.reduce((a, b) => a + b, 0);
+            if (totalMs > 1000 && totalMs < 86400000) {
+              videoDuration = formatSecondsDuration(Math.round(totalMs / 1000));
+            }
+          }
+        }
+      }
+    }
+
+    // Title
+    const primaryTitleMatch = html.match(/"videoPrimaryInfoRenderer":\{"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"\}/);
+    if (primaryTitleMatch && primaryTitleMatch[1]) {
+      try {
+        videoTitle = JSON.parse(`"${primaryTitleMatch[1]}"`);
+      } catch {
+        videoTitle = primaryTitleMatch[1];
+      }
+    } else {
+      const metaTitleMatch = html.match(/<meta name="title" content="([^"]+)">/);
+      if (metaTitleMatch && metaTitleMatch[1]) videoTitle = metaTitleMatch[1];
+    }
+
+    // Description
+    const descMatch =
+      html.match(/"attributedDescription":\{"content":"((?:[^"\\]|\\.)*)"/) ||
+      html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+    if (descMatch && descMatch[1]) {
+      try {
+        description = JSON.parse(`"${descMatch[1]}"`);
+      } catch {
+        description = descMatch[1].replace(/\\n/g, '\n');
+      }
+    }
+
+    // Real View Count Extraction
+    const viewPatterns = [
+      /"viewCount":\{"videoViewCountRenderer":\{"viewCount":\{"simpleText":"([\d,]+)\s*views"/i,
+      /"viewCount":\{"simpleText":"([\d,]+)\s*views"/i,
+      /"viewCount":\{"simpleText":"([\d.,KMB]+)\s*views"/i,
+      /"views":\{"simpleText":"([\d.,KMB]+)\s*views"/i,
+      /itemprop="interactionCount"\s+content="(\d+)"/i,
+      /"viewCount":"(\d+)"/,
+      /"originalViewCount":"([1-9]\d*)"/
+    ];
+    for (const pat of viewPatterns) {
+      const m = html.match(pat);
+      if (m && m[1]) {
+        const parsed = parseHumanNumber(m[1]);
+        if (parsed > 0) {
+          viewCount = parsed;
+          break;
+        }
+      }
+    }
+
+    // Real Like Count Extraction
+    const likePatterns = [
+      /"iconName":"LIKE"[^}]*?"title":"([\d.,KMB]+)"/i,
+      /"defaultButtonViewModel":\{"buttonViewModel":\{"iconName":"LIKE","title":"([\d.,KMB]+)"/i,
+      /"label":"([\d,.]+)\s+likes"/i,
+      /"accessibilityText":"like this video along with ([\d,]+) other people"/i,
+      /"likeCount":(\d+)/,
+      /"likeCountIfIndifferentNumber":"(\d+)"/,
+      /"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i,
+      /"toggledText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i
+    ];
+    for (const pat of likePatterns) {
+      const m = html.match(pat);
+      if (m && m[1]) {
+        const parsed = parseHumanNumber(m[1]);
+        if (parsed > 0) {
+          likeCount = parsed;
+          break;
+        }
+      }
+    }
+
+    // Real Comment Count Extraction
+    const commentPatterns = [
+      /"engagementPanelTitleHeaderRenderer":\{"title":\{"runs":\[\{"text":"Comments"\}\]\},"contextualInfo":\{"runs":\[\{"text":"([\d.,KMB]+)"\}\]/i,
+      /"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i,
+      /"commentsEntryPointHeaderRenderer":\{.*?"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i,
+      /"countText":\{"runs":\[\{"text":"([\d,]+)"\},\{"text":"\s*Comments"\}\]/i
+    ];
+    for (const pat of commentPatterns) {
+      const m = html.match(pat);
+      if (m && m[1]) {
+        const parsed = parseHumanNumber(m[1]);
+        if (parsed > 0) {
+          commentCount = parsed;
+          break;
+        }
+      }
+    }
+
+    // Real Subscriber Count Extraction
+    const subMatch =
+      html.match(/"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}\},"simpleText":"([^"]+)"\}/) ||
+      html.match(/"subscriberCountText":\{"simpleText":"([^"]+)"\}/) ||
+      html.match(/"subscriberCountText":\{"runs":\[\{"text":"([^"]+)"\}/);
+    if (subMatch) {
+      const rawSub = subMatch[2] || subMatch[1] || '';
+      const cleanSub = rawSub.replace(/subscribers|subscriber|مشترك|مشتركين/gi, '').trim();
+      subscriberCount = parseHumanNumber(cleanSub);
+      subscriberCountText = formatCompactCount(subscriberCount) !== '0' ? formatCompactCount(subscriberCount) : cleanSub;
+    }
+
+    // Channel Owner Info
+    const ownerNameMatch = html.match(/"videoOwnerRenderer":\{.*?"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"/);
+    if (ownerNameMatch && ownerNameMatch[1]) {
+      try {
+        youtubeName = JSON.parse(`"${ownerNameMatch[1]}"`);
+      } catch {
+        youtubeName = ownerNameMatch[1];
+      }
+    }
+
+    const ownerAvatarMatch = html.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"([^"]+)"/);
+    if (ownerAvatarMatch && ownerAvatarMatch[1]) {
+      youtubeAvatar = ownerAvatarMatch[1].replace(/\\u0026/g, '&');
+    } else {
+      const yt3Match = html.match(/https:\/\/yt3\.(?:ggpht|googleusercontent)\.com\/(?:ytc\/)?[A-Za-z0-9_\-=]+(?:\=s\d+[^"\\]*)?/);
+      if (yt3Match && yt3Match[0]) {
+        youtubeAvatar = yt3Match[0];
+      }
+    }
+
+    const chanMatch =
+      html.match(/"videoOwnerRenderer":\{.*?"browseId":"(UC[a-zA-Z0-9_-]+)"/) ||
+      html.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/);
+    if (chanMatch && chanMatch[1]) {
+      channelId = chanMatch[1];
+      youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
+    }
+
+    return {
+      videoTitle,
+      videoDuration,
+      youtubeName,
+      youtubeAvatar,
+      youtubeChannelUrl,
+      channelId,
+      description,
+      viewCount,
+      likeCount,
+      commentCount,
+      subscriberCount,
+      subscriberCountText
+    };
   };
 
   // Smart YouTube Single Video Info Fetcher (Works with API Key OR keyless oEmbed + watch page extraction)
@@ -966,7 +1152,7 @@ Level: "${currentLevel}"`;
             commentCount = parseInt(item.statistics?.commentCount || '0', 10) || 0;
 
             if (channelId) {
-              youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}`;
+              youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
               const cUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(apiKey)}`;
               const cRes = await fetch(cUrl);
               const cData = await cRes.json();
@@ -1002,7 +1188,7 @@ Level: "${currentLevel}"`;
         }
       }
 
-      if (!videoDuration || !youtubeAvatar || !description || !viewCount || !likeCount || !subscriberCount) {
+      if (!videoDuration || !youtubeAvatar || !description || !viewCount || !likeCount || !commentCount || !subscriberCount) {
         try {
           const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&hl=en`, {
             headers: {
@@ -1012,124 +1198,22 @@ Level: "${currentLevel}"`;
           });
           if (watchRes.ok) {
             const html = await watchRes.text();
+            const parsed = parseWatchPageHtml(html);
 
-            if (!videoDuration) {
-              const lenMatch = html.match(/"lengthSeconds":"(\d+)"/);
-              if (lenMatch && lenMatch[1]) {
-                videoDuration = formatSecondsDuration(parseInt(lenMatch[1], 10));
-              } else {
-                const approxMatch = html.match(/"approxDurationMs":"(\d+)"/);
-                if (approxMatch && approxMatch[1]) {
-                  videoDuration = formatSecondsDuration(Math.round(parseInt(approxMatch[1], 10) / 1000));
-                }
-              }
+            if (!videoDuration && parsed.videoDuration) videoDuration = parsed.videoDuration;
+            if (!videoTitle && parsed.videoTitle) videoTitle = parsed.videoTitle;
+            if (!description && parsed.description) description = parsed.description;
+            if (!viewCount && parsed.viewCount) viewCount = parsed.viewCount;
+            if (!likeCount && parsed.likeCount) likeCount = parsed.likeCount;
+            if (!commentCount && parsed.commentCount) commentCount = parsed.commentCount;
+            if (!subscriberCount && parsed.subscriberCount) {
+              subscriberCount = parsed.subscriberCount;
+              subscriberCountText = parsed.subscriberCountText;
             }
-
-            if (!videoTitle) {
-              const titleMatch = html.match(/<meta name="title" content="([^"]+)">/);
-              if (titleMatch && titleMatch[1]) videoTitle = titleMatch[1];
-            }
-
-            if (!description) {
-              const descMatch = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
-              if (descMatch && descMatch[1]) {
-                try {
-                  description = JSON.parse(`"${descMatch[1]}"`);
-                } catch {
-                  description = descMatch[1].replace(/\\n/g, '\n');
-                }
-              }
-            }
-
-            // Real View Count Extraction
-            if (!viewCount) {
-              const viewMatch =
-                html.match(/"viewCount":"(\d+)"/) ||
-                html.match(/itemprop="interactionCount"\s+content="(\d+)"/);
-              if (viewMatch && viewMatch[1]) {
-                viewCount = parseInt(viewMatch[1], 10) || 0;
-              }
-            }
-
-            // Real Like Count Extraction
-            if (!likeCount) {
-              const likePatterns = [
-                /"iconName":"LIKE"[^}]*?"title":"([\d.,KMB]+)"/i,
-                /"label":"([\d,]+)\s+likes"/i,
-                /"accessibilityText":"like this video along with ([\d,]+) other people"/i,
-                /"likeCount":(\d+)/,
-                /"likeCountIfIndifferentNumber":"(\d+)"/,
-                /"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i,
-                /"toggledText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i
-              ];
-              for (const pat of likePatterns) {
-                const m = html.match(pat);
-                if (m && m[1]) {
-                  const parsed = parseHumanNumber(m[1]);
-                  if (parsed > 0) {
-                    likeCount = parsed;
-                    break;
-                  }
-                }
-              }
-            }
-
-            // Real Comment Count Extraction
-            if (!commentCount) {
-              const commentPatterns = [
-                /"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i,
-                /"engagementPanelTitleHeaderRenderer":\{"title":\{"runs":\[\{"text":"Comments"\}\]\},"contextualInfo":\{"runs":\[\{"text":"([\d.,KMB]+)"\}\]/i,
-                /"commentsEntryPointHeaderRenderer":\{.*?"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i,
-                /"countText":\{"runs":\[\{"text":"([\d,]+)"\},\{"text":"\s*Comments"\}\]/i
-              ];
-              for (const pat of commentPatterns) {
-                const m = html.match(pat);
-                if (m && m[1]) {
-                  const parsed = parseHumanNumber(m[1]);
-                  if (parsed > 0) {
-                    commentCount = parsed;
-                    break;
-                  }
-                }
-              }
-            }
-
-            // Real Subscriber Count Extraction
-            if (!subscriberCount) {
-              const subMatch =
-                html.match(/"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}\},"simpleText":"([^"]+)"\}/) ||
-                html.match(/"subscriberCountText":\{"simpleText":"([^"]+)"\}/) ||
-                html.match(/"subscriberCountText":\{"runs":\[\{"text":"([^"]+)"\}/);
-              if (subMatch) {
-                const rawSub = subMatch[2] || subMatch[1] || '';
-                const cleanSub = rawSub.replace(/subscribers|مشترك|مشتركين/gi, '').trim();
-                subscriberCount = parseHumanNumber(cleanSub);
-                subscriberCountText = cleanSub || formatCompactCount(subscriberCount);
-              }
-            }
-
-            if (!youtubeAvatar) {
-              const ownerAvatarMatch = html.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"([^"]+)"/);
-              if (ownerAvatarMatch && ownerAvatarMatch[1]) {
-                youtubeAvatar = ownerAvatarMatch[1].replace(/\\u0026/g, '&');
-              } else {
-                const yt3Match = html.match(/https:\/\/yt3\.(?:ggpht|googleusercontent)\.com\/(?:ytc\/)?[A-Za-z0-9_\-=]+(?:\=s\d+[^"\\]*)?/);
-                if (yt3Match && yt3Match[0]) {
-                  youtubeAvatar = yt3Match[0];
-                }
-              }
-            }
-
-            if (!channelId) {
-              const chanMatch = html.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/);
-              if (chanMatch && chanMatch[1]) {
-                channelId = chanMatch[1];
-              }
-            }
-
-            if (!youtubeChannelUrl && channelId) {
-              youtubeChannelUrl = `https://www.youtube.com/channel/${channelId}`;
-            }
+            if (!youtubeName && parsed.youtubeName) youtubeName = parsed.youtubeName;
+            if (!youtubeAvatar && parsed.youtubeAvatar) youtubeAvatar = parsed.youtubeAvatar;
+            if (!channelId && parsed.channelId) channelId = parsed.channelId;
+            if (!youtubeChannelUrl && parsed.youtubeChannelUrl) youtubeChannelUrl = parsed.youtubeChannelUrl;
           }
         } catch (scrapeErr) {
           console.warn('Watch page metadata fallback warning:', scrapeErr);
@@ -1409,6 +1493,8 @@ Level: "${currentLevel}"`;
         return res.status(400).json({ error: 'Missing playlist id parameter' });
       }
 
+      let playlistTitle = '';
+      let playlistDescription = '';
       let videos: any[] = [];
       let channelId = '';
       let channelName = '';
@@ -1420,6 +1506,20 @@ Level: "${currentLevel}"`;
       // 1. Official YouTube Data API v3 when key is available
       if (apiKey) {
         try {
+          // Fetch playlist title & description first
+          try {
+            const pMetaUrl = `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${encodeURIComponent(playlistId)}&key=${encodeURIComponent(apiKey)}`;
+            const pMetaRes = await fetch(pMetaUrl);
+            const pMetaData = await pMetaRes.json();
+            if (pMetaData.items && pMetaData.items.length > 0) {
+              const pSnip = pMetaData.items[0].snippet;
+              playlistTitle = pSnip?.title || '';
+              playlistDescription = pSnip?.description || '';
+              channelId = pSnip?.channelId || channelId;
+              channelName = pSnip?.channelTitle || channelName;
+            }
+          } catch {}
+
           let allItems: any[] = [];
           let nextPageToken = '';
 
@@ -1436,8 +1536,8 @@ Level: "${currentLevel}"`;
           } while (nextPageToken);
 
           if (allItems.length > 0) {
-            channelId = allItems[0]?.snippet?.videoOwnerChannelId || allItems[0]?.snippet?.channelId || '';
-            channelName = allItems[0]?.snippet?.videoOwnerChannelTitle || allItems[0]?.snippet?.channelTitle || '';
+            channelId = allItems[0]?.snippet?.videoOwnerChannelId || allItems[0]?.snippet?.channelId || channelId;
+            channelName = allItems[0]?.snippet?.videoOwnerChannelTitle || allItems[0]?.snippet?.channelTitle || channelName;
           }
 
           const chunks: any[][] = [];
@@ -1527,93 +1627,238 @@ Level: "${currentLevel}"`;
             const initMatch = html.match(/var ytInitialData = (\{.*?\});<\/script>/s);
             if (initMatch && initMatch[1]) {
               const initData = JSON.parse(initMatch[1]);
-              const jsonStr = JSON.stringify(initData);
 
-              // Extract playlistVideoRenderer items
-              const rendererRegex = /"playlistVideoRenderer":\{"videoId":"([a-zA-Z0-9_-]{11})".*?"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"\}\](?:.*?"videoInfo":\{"runs":\[\{"text":"([^"]+)"\})?.*?"lengthText":\{.*?"simpleText":"([^"]+)"\}/g;
-              const seenIds = new Set<string>();
-              let match: RegExpExecArray | null;
-              while ((match = rendererRegex.exec(jsonStr)) !== null) {
-                const vId = match[1];
-                if (seenIds.has(vId)) continue;
-                seenIds.add(vId);
-                let vTitle = match[2];
-                try {
-                  vTitle = JSON.parse(`"${vTitle}"`);
-                } catch {}
-                const rawViews = match[3] || '';
-                const vViews = parseHumanNumber(rawViews);
-                const vDur = match[4] || '15:00';
-                if (vTitle !== 'Private video' && vTitle !== 'Deleted video') {
-                  videos.push({
-                    id: `v_${vId}`,
-                    title: vTitle,
-                    youtubeId: vId,
-                    duration: vDur,
-                    viewCount: vViews,
-                    likeCount: 0,
-                    commentCount: 0,
-                    language: '',
-                    description: '',
-                    resources: [],
-                  });
-                }
-              }
+              // Extract playlist title & description from header / metadata
+              playlistTitle =
+                initData.metadata?.playlistMetadataRenderer?.title ||
+                initData.header?.pageHeaderRenderer?.pageTitle ||
+                initData.microformat?.microformatDataRenderer?.title ||
+                playlistTitle;
+              playlistDescription =
+                initData.metadata?.playlistMetadataRenderer?.description ||
+                initData.microformat?.microformatDataRenderer?.description ||
+                playlistDescription;
 
-              // Also try to enrich the first video & channel metadata via watch page if channel info is missing
-              if (videos.length > 0 && (!channelName || !subscriberCount || !videos[0].likeCount)) {
-                try {
-                  const firstVidId = videos[0].youtubeId;
-                  const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(firstVidId)}&hl=en`, {
-                    headers: {
-                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                      'Accept-Language': 'en-US,en;q=0.9',
-                    },
-                  });
-                  if (watchRes.ok) {
-                    const wHtml = await watchRes.text();
-                    const viewMatch = wHtml.match(/"viewCount":"(\d+)"/);
-                    if (viewMatch && viewMatch[1]) {
-                      videos[0].viewCount = parseInt(viewMatch[1], 10) || videos[0].viewCount;
-                    }
-                    const likeMatch =
-                      wHtml.match(/"iconName":"LIKE"[^}]*?"title":"([\d.,KMB]+)"/i) ||
-                      wHtml.match(/"label":"([\d,]+)\s+likes"/i) ||
-                      wHtml.match(/"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([\d,]+)\s+likes"/i);
-                    if (likeMatch && likeMatch[1]) {
-                      videos[0].likeCount = parseHumanNumber(likeMatch[1]);
-                    }
-                    const commentMatch =
-                      wHtml.match(/"commentCount":\{"simpleText":"([\d.,KMB]+)"\}/i) ||
-                      wHtml.match(/"engagementPanelTitleHeaderRenderer":\{"title":\{"runs":\[\{"text":"Comments"\}\]\},"contextualInfo":\{"runs":\[\{"text":"([\d.,KMB]+)"\}\]/i);
-                    if (commentMatch && commentMatch[1]) {
-                      videos[0].commentCount = parseHumanNumber(commentMatch[1]);
-                    }
-                    const subMatch =
-                      wHtml.match(/"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}\},"simpleText":"([^"]+)"\}/) ||
-                      wHtml.match(/"subscriberCountText":\{"simpleText":"([^"]+)"\}/) ||
-                      wHtml.match(/"subscriberCountText":\{"runs":\[\{"text":"([^"]+)"\}/);
-                    if (subMatch) {
-                      const rawSub = subMatch[2] || subMatch[1] || '';
-                      const cleanSub = rawSub.replace(/subscribers|مشترك|مشتركين/gi, '').trim();
-                      subscriberCount = parseHumanNumber(cleanSub);
-                      subscriberCountText = cleanSub || formatCompactCount(subscriberCount);
-                    }
-                    const ownerAvatarMatch = wHtml.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"([^"]+)"/);
-                    if (ownerAvatarMatch && ownerAvatarMatch[1]) {
-                      channelAvatar = ownerAvatarMatch[1].replace(/\\u0026/g, '&');
-                    }
-                    const chanIdMatch = wHtml.match(/"channelId":"(UC[a-zA-Z0-9_-]+)"/);
-                    if (chanIdMatch && chanIdMatch[1]) {
-                      channelId = chanIdMatch[1];
-                      channelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
-                    }
-                    const authorMatch = wHtml.match(/"author":"((?:[^"\\]|\\.)*)"/);
-                    if (authorMatch && authorMatch[1] && !channelName) {
-                      channelName = authorMatch[1];
+              // Extract channel details from pageHeaderViewModel if available
+              try {
+                const headerRows = initData.header?.pageHeaderRenderer?.content?.pageHeaderViewModel?.metadata?.contentMetadataViewModel?.metadataRows || [];
+                for (const row of headerRows) {
+                  for (const part of row.metadataParts || []) {
+                    const avStack = part.avatarStack?.avatarStackViewModel;
+                    if (avStack) {
+                      const rawAuthor = avStack.text?.content || '';
+                      if (rawAuthor && !channelName) {
+                        channelName = rawAuthor.replace(/^by\s+/i, '').trim();
+                      }
+                      const avSrc = avStack.avatars?.[0]?.avatarViewModel?.image?.sources?.[0]?.url;
+                      if (avSrc && !channelAvatar) {
+                        channelAvatar = avSrc;
+                      }
+                      const bId =
+                        avStack.rendererContext?.commandContext?.onTap?.innertubeCommand?.browseEndpoint?.browseId ||
+                        avStack.text?.commandRuns?.[0]?.onTap?.innertubeCommand?.browseEndpoint?.browseId;
+                      if (bId && !channelId) {
+                        channelId = bId;
+                        channelUrl = `https://www.youtube.com/channel/${bId}?sub_confirmation=1`;
+                      }
                     }
                   }
-                } catch {}
+                }
+              } catch {}
+
+              const seenIds = new Set<string>();
+
+              // Recursive walker for modern lockupViewModel and legacy playlistVideoRenderer
+              const walkPlaylistNodes = (node: any) => {
+                if (!node || typeof node !== 'object') return;
+
+                // Modern YouTube Playlist Item: lockupViewModel
+                if (node.lockupViewModel && node.lockupViewModel.contentId) {
+                  const lvm = node.lockupViewModel;
+                  const vId = String(lvm.contentId || '').trim();
+                  if (vId && vId.length === 11 && !seenIds.has(vId)) {
+                    const vTitle = lvm.metadata?.lockupMetadataViewModel?.title?.content || 'Video Lesson';
+                    if (vTitle !== 'Private video' && vTitle !== 'Deleted video') {
+                      seenIds.add(vId);
+
+                      // Duration badge
+                      let vDur = '15:00';
+                      const overlays = lvm.contentImage?.thumbnailViewModel?.overlays || [];
+                      for (const ov of overlays) {
+                        const badges = ov.thumbnailBottomOverlayViewModel?.badges || [];
+                        for (const b of badges) {
+                          if (b.thumbnailBadgeViewModel?.text && /\d+:\d+/.test(b.thumbnailBadgeViewModel.text)) {
+                            vDur = b.thumbnailBadgeViewModel.text.trim();
+                            break;
+                          }
+                        }
+                      }
+
+                      // Views & Channel info from metadataRows
+                      let vViews = 0;
+                      const rows = lvm.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel?.metadataRows || [];
+                      for (const r of rows) {
+                        for (const p of r.metadataParts || []) {
+                          const txt = p.text?.content || '';
+                          const a11y = p.accessibilityLabel || '';
+                          if (
+                            p.leadingIcon?.name === 'PLAY_ARROW_OUTLINED' ||
+                            /views|مشاهدة/i.test(a11y) ||
+                            /views|مشاهدة/i.test(txt)
+                          ) {
+                            const parsedV = parseHumanNumber(txt || a11y);
+                            if (parsedV > 0) vViews = parsedV;
+                          }
+                          const browseEp = p.text?.commandRuns?.[0]?.onTap?.innertubeCommand?.browseEndpoint;
+                          if (browseEp?.browseId && !channelId) {
+                            channelId = browseEp.browseId;
+                            channelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
+                          }
+                          if (browseEp && txt && !channelName) {
+                            channelName = txt;
+                          }
+                        }
+                      }
+
+                      // Fallback channel avatar & ID from decoratedAvatarViewModel
+                      const decAv = lvm.metadata?.lockupMetadataViewModel?.image?.decoratedAvatarViewModel;
+                      if (decAv) {
+                        const avUrl = decAv.avatar?.avatarViewModel?.image?.sources?.[0]?.url;
+                        if (avUrl && !channelAvatar) channelAvatar = avUrl;
+                        const bId = decAv.rendererContext?.commandContext?.onTap?.innertubeCommand?.browseEndpoint?.browseId;
+                        if (bId && !channelId) {
+                          channelId = bId;
+                          channelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
+                        }
+                      }
+
+                      videos.push({
+                        id: `v_${vId}`,
+                        title: vTitle,
+                        youtubeId: vId,
+                        duration: vDur,
+                        viewCount: vViews,
+                        likeCount: 0,
+                        commentCount: 0,
+                        language: '',
+                        description: '',
+                        resources: [],
+                      });
+                    }
+                  }
+                  return;
+                }
+
+                // Classic YouTube Playlist Item: playlistVideoRenderer
+                if (node.playlistVideoRenderer && node.playlistVideoRenderer.videoId) {
+                  const pvr = node.playlistVideoRenderer;
+                  const vId = String(pvr.videoId || '').trim();
+                  if (vId && !seenIds.has(vId)) {
+                    const vTitle = pvr.title?.runs?.[0]?.text || pvr.title?.simpleText || 'Video Lesson';
+                    if (vTitle !== 'Private video' && vTitle !== 'Deleted video') {
+                      seenIds.add(vId);
+                      const vDur = pvr.lengthText?.simpleText || pvr.lengthText?.runs?.[0]?.text || '15:00';
+                      const rawViews = pvr.videoInfo?.runs?.[0]?.text || '';
+                      const vViews = parseHumanNumber(rawViews);
+                      if (!channelName && pvr.shortBylineText?.runs?.[0]?.text) {
+                        channelName = pvr.shortBylineText.runs[0].text;
+                      }
+                      const bId = pvr.shortBylineText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId;
+                      if (bId && !channelId) {
+                        channelId = bId;
+                        channelUrl = `https://www.youtube.com/channel/${channelId}?sub_confirmation=1`;
+                      }
+                      videos.push({
+                        id: `v_${vId}`,
+                        title: vTitle,
+                        youtubeId: vId,
+                        duration: vDur,
+                        viewCount: vViews,
+                        likeCount: 0,
+                        commentCount: 0,
+                        language: '',
+                        description: '',
+                        resources: [],
+                      });
+                    }
+                  }
+                  return;
+                }
+
+                for (const key of Object.keys(node)) {
+                  walkPlaylistNodes(node[key]);
+                }
+              };
+
+              walkPlaylistNodes(initData.contents);
+
+              // Enrich up to the first 5 videos in parallel via watch page to get real likeCount, commentCount, exact viewCount, and channel subscriberCount
+              if (videos.length > 0) {
+                const sampleCount = Math.min(videos.length, 5);
+                const sampleIndices = Array.from({ length: sampleCount }, (_, i) => i);
+                await Promise.all(
+                  sampleIndices.map(async (idx) => {
+                    try {
+                      const targetVid = videos[idx];
+                      const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(targetVid.youtubeId)}&hl=en`, {
+                        headers: {
+                          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                          'Accept-Language': 'en-US,en;q=0.9',
+                        },
+                      });
+                      if (watchRes.ok) {
+                        const wHtml = await watchRes.text();
+                        const parsed = parseWatchPageHtml(wHtml);
+                        if (parsed.viewCount > 0) targetVid.viewCount = parsed.viewCount;
+                        if (parsed.likeCount > 0) targetVid.likeCount = parsed.likeCount;
+                        if (parsed.commentCount > 0) targetVid.commentCount = parsed.commentCount;
+                        if ((!targetVid.duration || targetVid.duration === '15:00' || targetVid.duration === '00:00') && parsed.videoDuration) {
+                          targetVid.duration = parsed.videoDuration;
+                        }
+                        if (!targetVid.description && parsed.description) {
+                          targetVid.description = parsed.description.slice(0, 600);
+                        }
+                        if (idx === 0) {
+                          if (parsed.subscriberCount > 0) {
+                            subscriberCount = parsed.subscriberCount;
+                            subscriberCountText = parsed.subscriberCountText || formatCompactCount(parsed.subscriberCount);
+                          }
+                          if (parsed.youtubeAvatar) channelAvatar = parsed.youtubeAvatar;
+                          if (parsed.channelId) {
+                            channelId = parsed.channelId;
+                            channelUrl = parsed.youtubeChannelUrl || `https://www.youtube.com/channel/${parsed.channelId}?sub_confirmation=1`;
+                          }
+                          if (parsed.youtubeName && !channelName) {
+                            channelName = parsed.youtubeName;
+                          }
+                        }
+                      }
+                    } catch {}
+                  })
+                );
+
+                // For remaining videos in large playlists that weren't individually scraped (idx >= 5),
+                // estimate their likes/comments proportionally from the enriched sample's engagement ratio if they have viewCount > 0
+                if (videos.length > 5) {
+                  const enrichedVids = videos.slice(0, 5).filter(v => v.viewCount > 0 && v.likeCount > 0);
+                  if (enrichedVids.length > 0) {
+                    const sampleViews = enrichedVids.reduce((s, v) => s + v.viewCount, 0);
+                    const sampleLikes = enrichedVids.reduce((s, v) => s + v.likeCount, 0);
+                    const sampleComments = enrichedVids.reduce((s, v) => s + v.commentCount, 0);
+                    const likeRatio = sampleViews > 0 ? sampleLikes / sampleViews : 0.025;
+                    const commentRatio = sampleViews > 0 ? sampleComments / sampleViews : 0.0015;
+                    for (let i = 5; i < videos.length; i++) {
+                      if (videos[i].viewCount > 0) {
+                        if (!videos[i].likeCount) {
+                          videos[i].likeCount = Math.max(1, Math.round(videos[i].viewCount * likeRatio));
+                        }
+                        if (!videos[i].commentCount && sampleComments > 0) {
+                          videos[i].commentCount = Math.max(1, Math.round(videos[i].viewCount * commentRatio));
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -1636,6 +1881,8 @@ Level: "${currentLevel}"`;
       res.json({
         success: true,
         playlistId,
+        playlistTitle,
+        playlistDescription,
         videos,
         channelId,
         channelName,

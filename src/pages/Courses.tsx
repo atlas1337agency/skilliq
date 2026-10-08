@@ -749,18 +749,17 @@ export function Courses() {
                       const cViews = course.totalViews || course.videos.reduce((s, v) => s + (v.viewCount || 0), 0);
                       const cLikes = course.totalLikes || course.videos.reduce((s, v) => s + (v.likeCount || 0), 0);
                       const cComments = course.totalComments || course.videos.reduce((s, v) => s + (v.commentCount || 0), 0);
-                      if (!cViews && !cLikes && !cComments) return null;
                       return (
                         <div className="flex items-center justify-between pt-1.5 border-t border-border/50 text-[11px] font-semibold">
-                          <span className="inline-flex items-center gap-1 text-foreground">
+                          <span className="inline-flex items-center gap-1 text-foreground" title={isRtl ? 'المشاهدات' : 'Views'}>
                             <Eye className="w-3 h-3 text-primary" />
                             <span>{formatCompactNumber(cViews)}</span>
                           </span>
-                          <span className="inline-flex items-center gap-1 text-foreground">
+                          <span className="inline-flex items-center gap-1 text-foreground" title={isRtl ? 'الإعجابات' : 'Likes'}>
                             <ThumbsUp className="w-3 h-3 text-emerald-500" />
                             <span>{formatCompactNumber(cLikes)}</span>
                           </span>
-                          <span className="inline-flex items-center gap-1 text-foreground">
+                          <span className="inline-flex items-center gap-1 text-foreground" title={isRtl ? 'التعليقات' : 'Comments'}>
                             <MessageSquare className="w-3 h-3 text-amber-500" />
                             <span>{formatCompactNumber(cComments)}</span>
                           </span>

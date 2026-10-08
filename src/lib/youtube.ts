@@ -72,6 +72,8 @@ const formatDuration = (isoDuration: string) => {
 
 export interface PlaylistSyncResponse {
   playlistId: string;
+  playlistTitle?: string;
+  playlistDescription?: string;
   videos: Video[];
   channelId?: string;
   channelName?: string;
@@ -102,6 +104,8 @@ export const fetchPlaylistFullData = async (
       if (data && Array.isArray(data.videos) && data.videos.length > 0) {
         return {
           playlistId,
+          playlistTitle: data.playlistTitle || '',
+          playlistDescription: data.playlistDescription || '',
           videos: data.videos,
           channelId: data.channelId || '',
           channelName: data.channelName || '',
@@ -705,6 +709,176 @@ export const syncCourseRealtimeWithYouTube = async (
     newVideosAddedCount,
     activeVideoStats,
   };
+};
+
+// Track which course IDs have already been live-synced in this browser session
+const sessionSyncedCourseIds = new Set<string>();
+const LIVE_STATS_CACHE_KEY = 'skilliq_course_live_stats_v2';
+
+export const getCachedCourseStats = (): Record<string, Partial<Course>> => {
+  try {
+    const raw = localStorage.getItem(LIVE_STATS_CACHE_KEY);
+    if (raw) {
+      return JSON.parse(raw) || {};
+    }
+  } catch {}
+  return {};
+};
+
+export const saveCachedCourseStats = (updates: Record<string, Course>) => {
+  try {
+    const current = getCachedCourseStats();
+    for (const [id, c] of Object.entries(updates)) {
+      current[id] = {
+        subscriberCount: c.subscriberCount,
+        subscriberCountText: c.subscriberCountText,
+        instructorAvatar: c.instructorAvatar,
+        instructorUrl: c.instructorUrl,
+        channelId: c.channelId,
+        totalViews: c.totalViews,
+        totalLikes: c.totalLikes,
+        totalComments: c.totalComments,
+        lastSyncedAt: c.lastSyncedAt,
+        videos: c.videos,
+      };
+    }
+    localStorage.setItem(LIVE_STATS_CACHE_KEY, JSON.stringify(current));
+  } catch {}
+};
+
+export const applyCachedStatsToCourses = (courses: Course[]): Course[] => {
+  const cache = getCachedCourseStats();
+  if (!cache || Object.keys(cache).length === 0) return courses;
+  return courses.map((c) => {
+    const cached = cache[c.id];
+    if (!cached) return c;
+    return {
+      ...c,
+      subscriberCount: c.subscriberCount || cached.subscriberCount,
+      subscriberCountText: c.subscriberCountText || cached.subscriberCountText,
+      instructorAvatar: c.instructorAvatar?.trim() ? c.instructorAvatar : (cached.instructorAvatar || c.instructorAvatar),
+      instructorUrl: c.instructorUrl?.trim() ? c.instructorUrl : (cached.instructorUrl || c.instructorUrl),
+      channelId: c.channelId || cached.channelId,
+      totalViews: Math.max(c.totalViews || 0, cached.totalViews || 0),
+      totalLikes: Math.max(c.totalLikes || 0, cached.totalLikes || 0),
+      totalComments: Math.max(c.totalComments || 0, cached.totalComments || 0),
+      lastSyncedAt: Math.max(c.lastSyncedAt || 0, cached.lastSyncedAt || 0),
+      videos: (c.videos || []).map((v, idx) => {
+        const cv = cached.videos?.find((x) => x.id === v.id || (x.youtubeId && x.youtubeId === v.youtubeId)) || cached.videos?.[idx];
+        if (!cv) return v;
+        return {
+          ...v,
+          viewCount: v.viewCount || cv.viewCount || 0,
+          likeCount: v.likeCount || cv.likeCount || 0,
+          commentCount: v.commentCount || cv.commentCount || 0,
+          duration: (v.duration && v.duration !== '00:00' && v.duration !== '15:00') ? v.duration : (cv.duration || v.duration),
+        };
+      }),
+    };
+  });
+};
+
+/**
+* Automatically enriches courses in the background with real YouTube views, likes, comments,
+* and creator subscriber counts if they haven't been synced recently.
+*/
+export const syncAllCoursesLiveBackground = async (
+  coursesList: Course[],
+  onBatchUpdated: (updatedMap: Record<string, Course>) => void,
+  forceAll = false
+): Promise<void> => {
+  const ONE_HOUR = 60 * 60 * 1000;
+  const now = Date.now();
+
+  const needsSync = coursesList.filter((c) => {
+    if (!c || !c.id) return false;
+    if (!forceAll && sessionSyncedCourseIds.has(c.id)) return false;
+    const firstVid = c.videos?.[0];
+    if (!firstVid?.youtubeId && !c.playlistId) return false;
+    if (forceAll) return true;
+    const isMissingStats =
+      !c.totalViews ||
+      !c.totalLikes ||
+      !c.subscriberCount ||
+      !firstVid?.viewCount ||
+      !firstVid?.likeCount;
+    const isStale = !c.lastSyncedAt || now - c.lastSyncedAt > ONE_HOUR;
+    return isMissingStats || isStale;
+  });
+
+  if (needsSync.length === 0) return;
+
+  // Process in batches of 4 so UI updates rapidly
+  const batchSize = 4;
+  for (let i = 0; i < needsSync.length; i += batchSize) {
+    const chunk = needsSync.slice(i, i + batchSize);
+    const updatedBatch: Record<string, Course> = {};
+
+    await Promise.all(
+      chunk.map(async (courseItem) => {
+        sessionSyncedCourseIds.add(courseItem.id);
+        try {
+          const firstVidId = extractYoutubeVideoId(courseItem.videos?.[0]?.youtubeId || '');
+          if (!firstVidId) return;
+
+          const meta = await fetchFullYoutubeVideoMetadata(firstVidId);
+          if (!meta || (!meta.viewCount && !meta.likeCount && !meta.subscriberCount)) return;
+
+          const updatedVideos = (courseItem.videos || []).map((v, idx) => {
+            if (idx === 0) {
+              return {
+                ...v,
+                viewCount: meta.viewCount || v.viewCount || 0,
+                likeCount: meta.likeCount || v.likeCount || 0,
+                commentCount: meta.commentCount || v.commentCount || 0,
+                duration:
+                  v.duration && v.duration !== '00:00' && v.duration !== '15:00'
+                    ? v.duration
+                    : meta.videoDuration || v.duration || '15:00',
+              };
+            }
+            return v;
+          });
+
+          const sumViews = updatedVideos.reduce((acc, v) => acc + (v.viewCount || 0), 0);
+          const sumLikes = updatedVideos.reduce((acc, v) => acc + (v.likeCount || 0), 0);
+          const sumComments = updatedVideos.reduce((acc, v) => acc + (v.commentCount || 0), 0);
+
+          const totalViews = Math.max(courseItem.totalViews || 0, sumViews);
+          const totalLikes = Math.max(courseItem.totalLikes || 0, sumLikes);
+          const totalComments = Math.max(courseItem.totalComments || 0, sumComments);
+          const subscriberCount = meta.subscriberCount || courseItem.subscriberCount || 0;
+          const subscriberCountText =
+            meta.subscriberCountText ||
+            courseItem.subscriberCountText ||
+            (subscriberCount > 0 ? formatCompactNumber(subscriberCount) : '');
+
+          updatedBatch[courseItem.id] = {
+            ...courseItem,
+            videos: updatedVideos,
+            channelId: meta.channelId || courseItem.channelId,
+            subscriberCount,
+            subscriberCountText,
+            instructorAvatar: courseItem.instructorAvatar?.trim()
+              ? courseItem.instructorAvatar
+              : meta.youtubeAvatar || courseItem.instructorAvatar,
+            instructorUrl: courseItem.instructorUrl?.trim()
+              ? courseItem.instructorUrl
+              : meta.youtubeChannelUrl || courseItem.instructorUrl,
+            totalViews,
+            totalLikes,
+            totalComments,
+            lastSyncedAt: Date.now(),
+          };
+        } catch {}
+      })
+    );
+
+    if (Object.keys(updatedBatch).length > 0) {
+      saveCachedCourseStats(updatedBatch);
+      onBatchUpdated(updatedBatch);
+    }
+  }
 };
 
 export const searchBookCoverOnline = async (

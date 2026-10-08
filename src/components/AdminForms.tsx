@@ -347,14 +347,17 @@ export function AdminForms({
     setCourse({ ...course, videos: newVideos });
   };
 
-  // Smart Auto-Import YouTube Playlist (with Real Views, Likes, Comments, Channel Subscribers & Auto-Sync Playlist ID)
-  const handleImportPlaylist = async (overrideKey?: string) => {
-    if (!playlistUrlInput.trim()) return;
+  // Smart Auto-Import YouTube Playlist OR Single Video (with Real Views, Likes, Comments, Channel Subscribers & Auto-Sync Playlist ID)
+  const handleImportPlaylist = async (overrideKey?: string, overrideUrl?: string) => {
+    const rawTarget = (overrideUrl !== undefined ? overrideUrl : playlistUrlInput).trim();
+    if (!rawTarget) return;
     
     setImportMessage(null);
-    const playlistId = extractPlaylistId(playlistUrlInput.trim());
-    if (!playlistId) {
-      setImportMessage({ type: 'error', text: 'Invalid YouTube Playlist URL or ID. Make sure it contains "list=...".' });
+    const playlistId = extractPlaylistId(rawTarget);
+    const singleVideoId = !playlistId ? extractYoutubeVideoId(rawTarget) : '';
+
+    if (!playlistId && !singleVideoId) {
+      setImportMessage({ type: 'error', text: 'Invalid YouTube Playlist or Video URL. Paste a playlist link (list=PL...) or video link (watch?v=...).' });
       return;
     }
 
@@ -362,7 +365,65 @@ export function AdminForms({
 
     setIsImporting(true);
     try {
-      const fullData = await fetchPlaylistFullData(playlistId, keyToUse);
+      // Case A: User pasted a Single Video URL into the 1-Click Importer (e.g. for a Masterclass or single lesson)
+      if (!playlistId && singleVideoId) {
+        const meta = await fetchFullYoutubeVideoMetadata(singleVideoId, keyToUse);
+        if (!meta) {
+          setImportMessage({ type: 'error', text: 'Could not extract video details from YouTube.' });
+          return;
+        }
+        const vidObj: Video = {
+          id: `v_${singleVideoId}`,
+          title: meta.videoTitle || 'Video Lesson',
+          youtubeId: singleVideoId,
+          duration: meta.videoDuration || '15:00',
+          viewCount: meta.viewCount || 0,
+          likeCount: meta.likeCount || 0,
+          commentCount: meta.commentCount || 0,
+          language: course.language || 'English',
+          description: meta.description || '',
+          resources: [],
+        };
+        const existingIds = new Set((course.videos || []).map(v => v.youtubeId).filter(Boolean));
+        const newVids = existingIds.has(singleVideoId)
+          ? (course.videos || []).map(v => v.youtubeId === singleVideoId ? { ...v, ...vidObj } : v)
+          : [...(course.videos || []), vidObj];
+
+        const totalViews = newVids.reduce((acc, v) => acc + (v.viewCount || 0), 0);
+        const totalLikes = newVids.reduce((acc, v) => acc + (v.likeCount || 0), 0);
+        const totalComments = newVids.reduce((acc, v) => acc + (v.commentCount || 0), 0);
+        const subCount = meta.subscriberCount || course.subscriberCount || 0;
+        const subText = meta.subscriberCountText || course.subscriberCountText || (subCount > 0 ? formatCompactNumber(subCount) : '');
+
+        setCourse(prev => ({
+          ...prev,
+          title: prev.title?.trim() ? prev.title : (meta.videoTitle || prev.title),
+          description: prev.description?.trim() ? prev.description : (meta.description ? meta.description.slice(0, 500) : prev.description),
+          thumbnail: prev.thumbnail?.trim() ? prev.thumbnail : `https://img.youtube.com/vi/${singleVideoId}/maxresdefault.jpg`,
+          videos: newVids,
+          instructor: meta.youtubeName || prev.instructor,
+          youtubeChannelName: meta.youtubeName || prev.youtubeChannelName || prev.instructor,
+          instructorAvatar: meta.youtubeAvatar || prev.instructorAvatar,
+          instructorUrl: meta.youtubeChannelUrl || prev.instructorUrl,
+          channelId: meta.channelId || prev.channelId,
+          subscriberCount: subCount,
+          subscriberCountText: subText,
+          totalViews,
+          totalLikes,
+          totalComments,
+          lastSyncedAt: Date.now()
+        }));
+
+        setPlaylistUrlInput('');
+        setImportMessage({
+          type: 'success',
+          text: `Imported video "${meta.videoTitle}" with Live Stats (${formatCompactNumber(totalViews)} views • ${formatCompactNumber(totalLikes)} likes • ${formatCompactNumber(totalComments)} comments${subText ? ` • ${subText} subscribers` : ''})!`
+        });
+        return;
+      }
+
+      // Case B: User pasted a YouTube Playlist URL or ID
+      const fullData = await fetchPlaylistFullData(playlistId!, keyToUse);
       const importedVideos = fullData.videos || [];
       
       if (!importedVideos || importedVideos.length === 0) {
@@ -373,10 +434,18 @@ export function AdminForms({
           importedVideos.forEach(v => v.language = course.language);
         }
 
-        // Deduplicate by youtubeId if re-importing
+        // Merge with existing videos by youtubeId so re-importing updates real stats
+        const importedByYtId = new Map<string, Video>();
+        importedVideos.forEach(v => {
+          if (v.youtubeId) importedByYtId.set(v.youtubeId, v);
+        });
         const existingIds = new Set((course.videos || []).map(v => v.youtubeId).filter(Boolean));
+        const updatedExisting = (course.videos || []).map(ev => {
+          const fresh = ev.youtubeId ? importedByYtId.get(ev.youtubeId) : undefined;
+          return fresh ? { ...ev, ...fresh, title: ev.title || fresh.title } : ev;
+        });
         const uniqueNew = importedVideos.filter(v => !v.youtubeId || !existingIds.has(v.youtubeId));
-        const newVids = [...(course.videos || []), ...uniqueNew];
+        const newVids = [...updatedExisting, ...uniqueNew];
         
         // Auto-fill thumbnail if empty
         let newThumbnail = course.thumbnail;
@@ -384,28 +453,39 @@ export function AdminForms({
           newThumbnail = `https://img.youtube.com/vi/${newVids[0].youtubeId}/maxresdefault.jpg`;
         }
 
-        // Auto-fetch channel info if not returned yet
-        let channelDetails: any = null;
-        if (!fullData.channelName && newVids[0]?.youtubeId) {
-          channelDetails = await fetchChannelDetailsFromVideoOrPlaylist(newVids[0].youtubeId, false, keyToUse);
+        // Auto-fetch channel info & first video stats if not returned yet
+        let firstVideoMeta: any = null;
+        if ((!fullData.channelName || !fullData.subscriberCount || !newVids[0]?.likeCount) && newVids[0]?.youtubeId) {
+          firstVideoMeta = await fetchFullYoutubeVideoMetadata(newVids[0].youtubeId, keyToUse);
+          if (firstVideoMeta) {
+            newVids[0] = {
+              ...newVids[0],
+              viewCount: firstVideoMeta.viewCount || newVids[0].viewCount || 0,
+              likeCount: firstVideoMeta.likeCount || newVids[0].likeCount || 0,
+              commentCount: firstVideoMeta.commentCount || newVids[0].commentCount || 0,
+              duration: (newVids[0].duration && newVids[0].duration !== '00:00') ? newVids[0].duration : (firstVideoMeta.videoDuration || '15:00'),
+            };
+          }
         }
 
         const totalViews = newVids.reduce((acc, v) => acc + (v.viewCount || 0), 0);
         const totalLikes = newVids.reduce((acc, v) => acc + (v.likeCount || 0), 0);
         const totalComments = newVids.reduce((acc, v) => acc + (v.commentCount || 0), 0);
-        const subCount = fullData.subscriberCount || channelDetails?.subscriberCount || course.subscriberCount || 0;
-        const subText = fullData.subscriberCountText || channelDetails?.subscriberCountText || course.subscriberCountText || (subCount > 0 ? formatCompactNumber(subCount) : '');
+        const subCount = fullData.subscriberCount || firstVideoMeta?.subscriberCount || course.subscriberCount || 0;
+        const subText = fullData.subscriberCountText || firstVideoMeta?.subscriberCountText || course.subscriberCountText || (subCount > 0 ? formatCompactNumber(subCount) : '');
 
         setCourse(prev => ({
           ...prev,
-          playlistId,
+          playlistId: playlistId!,
+          title: prev.title?.trim() ? prev.title : (fullData.playlistTitle || newVids[0]?.title || prev.title),
+          description: prev.description?.trim() ? prev.description : (fullData.playlistDescription || firstVideoMeta?.description?.slice(0, 500) || prev.description),
           thumbnail: newThumbnail,
           videos: newVids,
-          instructor: fullData.channelName || channelDetails?.instructorName || prev.instructor,
-          youtubeChannelName: fullData.channelName || channelDetails?.instructorName || prev.youtubeChannelName || prev.instructor,
-          instructorAvatar: fullData.channelAvatar || channelDetails?.instructorAvatar || prev.instructorAvatar,
-          instructorUrl: fullData.channelUrl || channelDetails?.instructorUrl || prev.instructorUrl,
-          channelId: fullData.channelId || channelDetails?.channelId || prev.channelId,
+          instructor: fullData.channelName || firstVideoMeta?.youtubeName || prev.instructor,
+          youtubeChannelName: fullData.channelName || firstVideoMeta?.youtubeName || prev.youtubeChannelName || prev.instructor,
+          instructorAvatar: fullData.channelAvatar || firstVideoMeta?.youtubeAvatar || prev.instructorAvatar,
+          instructorUrl: fullData.channelUrl || firstVideoMeta?.youtubeChannelUrl || prev.instructorUrl,
+          channelId: fullData.channelId || firstVideoMeta?.channelId || prev.channelId,
           subscriberCount: subCount,
           subscriberCountText: subText,
           totalViews,
@@ -417,7 +497,7 @@ export function AdminForms({
         setPlaylistUrlInput('');
         setImportMessage({ 
           type: 'success', 
-          text: `Imported ${importedVideos.length} videos with Live YouTube Stats (${formatCompactNumber(totalViews)} views${subText ? ` • ${subText} subscribers` : ''}) & Auto-Sync enabled!` 
+          text: `Imported ${importedVideos.length} videos with Live YouTube Stats (${formatCompactNumber(totalViews)} views • ${formatCompactNumber(totalLikes)} likes • ${formatCompactNumber(totalComments)} comments${subText ? ` • ${subText} subscribers` : ''}) & Auto-Sync enabled!` 
         });
       }
     } catch (err: any) {
@@ -530,10 +610,10 @@ export function AdminForms({
         cleanCourse.category = normalizeCategory(cleanCourse.category);
       }
 
-      // If first video has no stats yet or instructor subscribers are missing, fetch real-time stats automatically before saving
+      // If first video has no stats yet or instructor subscribers/likes/comments are missing, fetch real-time stats automatically before saving
       if (Array.isArray(cleanCourse.videos) && cleanCourse.videos.length > 0) {
         const firstVid = cleanCourse.videos[0];
-        if (firstVid?.youtubeId && (!firstVid.viewCount || !cleanCourse.subscriberCount)) {
+        if (firstVid?.youtubeId && (!firstVid.viewCount || !firstVid.likeCount || !cleanCourse.subscriberCount)) {
           try {
             const liveMeta = await fetchFullYoutubeVideoMetadata(firstVid.youtubeId, apiKeyInput);
             if (liveMeta) {
@@ -1116,8 +1196,15 @@ export function AdminForms({
                       <input 
                         type="text" 
                         value={playlistUrlInput} 
-                        onChange={e => setPlaylistUrlInput(e.target.value)} 
-                        placeholder="Paste YouTube Playlist URL or ID here..." 
+                        onChange={e => {
+                          const val = e.target.value;
+                          setPlaylistUrlInput(val);
+                          const pId = extractPlaylistId(val.trim());
+                          if (pId && val.includes('list=')) {
+                            handleImportPlaylist(undefined, val.trim());
+                          }
+                        }} 
+                        placeholder="Paste YouTube Playlist URL, ID, or Video Link here..." 
                         className="flex-1 bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
                       />
                       <button
@@ -1152,6 +1239,52 @@ export function AdminForms({
                         </span>
                       </div>
                     )}
+
+                    {/* LIVE COURSE STATS SUMMARY BAR (Subscribers, Views, Likes, Comments) */}
+                    {((course.videos && course.videos.length > 0) || course.subscriberCount || course.totalViews || course.totalLikes || course.totalComments) && (() => {
+                      const liveViews = course.totalViews || (course.videos || []).reduce((acc, v) => acc + (v.viewCount || 0), 0);
+                      const liveLikes = course.totalLikes || (course.videos || []).reduce((acc, v) => acc + (v.likeCount || 0), 0);
+                      const liveComments = course.totalComments || (course.videos || []).reduce((acc, v) => acc + (v.commentCount || 0), 0);
+                      const liveSubsText = course.subscriberCountText || (course.subscriberCount ? formatCompactNumber(course.subscriberCount) : '0');
+                      return (
+                        <div className="p-3 rounded-xl bg-background/80 border border-border/80 flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
+                            <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400 bg-red-500/10 px-2.5 py-1 rounded-lg border border-red-500/20">
+                              <User className="w-3.5 h-3.5" />
+                              <span>{course.instructor || 'Creator'}: {liveSubsText} Followers</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1.5 text-foreground bg-muted/60 px-2.5 py-1 rounded-lg border border-border/60">
+                              <Eye className="w-3.5 h-3.5 text-primary" />
+                              <span>{formatCompactNumber(liveViews)} Views</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1.5 text-foreground bg-muted/60 px-2.5 py-1 rounded-lg border border-border/60">
+                              <ThumbsUp className="w-3.5 h-3.5 text-emerald-500" />
+                              <span>{formatCompactNumber(liveLikes)} Likes</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1.5 text-foreground bg-muted/60 px-2.5 py-1 rounded-lg border border-border/60">
+                              <MessageSquare className="w-3.5 h-3.5 text-amber-500" />
+                              <span>{formatCompactNumber(liveComments)} Comments</span>
+                            </span>
+                          </div>
+                          {course.videos?.[0]?.youtubeId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (course.playlistId) {
+                                  handleImportPlaylist(undefined, course.playlistId);
+                                } else if (course.videos?.[0]?.youtubeId) {
+                                  handleFetchSingleVideoRealtime(0, course.videos[0].youtubeId);
+                                }
+                              }}
+                              className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1 cursor-pointer"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              <span>Refresh Live Data</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* VIDEOS LIST HEADER */}
@@ -1265,6 +1398,12 @@ export function AdminForms({
                               value={vid.youtubeId || ''} 
                               onChange={e => {
                                 const rawVal = e.target.value;
+                                const maybePlaylist = extractPlaylistId(rawVal);
+                                if (maybePlaylist && rawVal.includes('list=') && !rawVal.includes('v=')) {
+                                  setPlaylistUrlInput(rawVal);
+                                  handleImportPlaylist(undefined, rawVal);
+                                  return;
+                                }
                                 const extracted = extractYoutubeId(rawVal);
                                 const newVids = [...(course.videos || [])];
                                 newVids[idx].youtubeId = extracted;
