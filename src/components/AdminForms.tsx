@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Course, LearningPath, LearningPathRoadmapStep, LearningPathRoadmapResource, AppNotification, AdBannerData, Book } from '../data/courses';
 import { addOrUpdateCourse, addOrUpdatePath, addOrUpdateNotification, addOrUpdateBanner, addOrUpdateBook } from '../lib/firestoreContent';
 import { 
@@ -118,7 +119,7 @@ export function AdminForms({
   onClose: () => void 
 }) {
   const { t } = useTranslation();
-  const { loadContent, allCourses, language } = useStore();
+  const { loadContent, allCourses, allBooks, language } = useStore();
   const isAdmin = useStore.getState().user?.role === 'admin';
 
   // Active step for course wizard
@@ -128,23 +129,148 @@ export function AdminForms({
   const [pathStep, setPathStep] = useState<'basics' | 'roadmap' | 'toolkit' | 'preview'>('basics');
   const [pathCourseSearch, setPathCourseSearch] = useState('');
 
-  const [course, setCourse] = useState<Partial<Course>>(() => ({
-    id: 'course_' + Math.random().toString(36).substring(2, 9),
-    title: '',
-    description: '',
-    category: 'Programming',
-    thumbnail: '',
-    instructor: '',
-    instructorAvatar: '',
-    instructorUrl: '',
-    language: 'English',
-    isSingleVideo: false,
-    videos: [],
-    resources: [],
-    isApproved: isAdmin ? true : false,
-    createdAt: Date.now(),
-    ...(type === 'course' && itemToEdit ? itemToEdit : {}),
-  }));
+  // Persist & load last used category and custom category tags
+  const [savedCustomCategories, setSavedCustomCategories] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('skilliq_custom_course_categories');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [savedCustomBookCategories, setSavedCustomBookCategories] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('skilliq_custom_book_categories');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const rememberCourseCategory = (cat?: string) => {
+    const clean = (cat || '').trim();
+    if (!clean) return;
+    try {
+      localStorage.setItem('skilliq_last_course_category', clean);
+      setSavedCustomCategories(prev => {
+        const exists = prev.some(c => c.toLowerCase() === clean.toLowerCase());
+        const next = exists
+          ? [clean, ...prev.filter(c => c.toLowerCase() !== clean.toLowerCase())]
+          : [clean, ...prev];
+        localStorage.setItem('skilliq_custom_course_categories', JSON.stringify(next.slice(0, 25)));
+        return next.slice(0, 25);
+      });
+    } catch {}
+  };
+
+  const rememberBookCategory = (cat?: string) => {
+    const clean = (cat || '').trim();
+    if (!clean) return;
+    try {
+      localStorage.setItem('skilliq_last_book_category', clean);
+      setSavedCustomBookCategories(prev => {
+        const exists = prev.some(c => c.toLowerCase() === clean.toLowerCase());
+        const next = exists
+          ? [clean, ...prev.filter(c => c.toLowerCase() !== clean.toLowerCase())]
+          : [clean, ...prev];
+        localStorage.setItem('skilliq_custom_book_categories', JSON.stringify(next.slice(0, 25)));
+        return next.slice(0, 25);
+      });
+    } catch {}
+  };
+
+  // Lock background page scroll while modal popup is open
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+
+  const [course, setCourse] = useState<Partial<Course>>(() => {
+    let defaultCategory = 'Programming';
+    try {
+      const lastUsed = localStorage.getItem('skilliq_last_course_category');
+      if (lastUsed && lastUsed.trim()) {
+        defaultCategory = lastUsed.trim();
+      }
+    } catch {}
+    return {
+      id: 'course_' + Math.random().toString(36).substring(2, 9),
+      title: '',
+      description: '',
+      category: defaultCategory,
+      thumbnail: '',
+      instructor: '',
+      instructorAvatar: '',
+      instructorUrl: '',
+      language: 'English',
+      isSingleVideo: false,
+      videos: [],
+      resources: [],
+      isApproved: isAdmin ? true : false,
+      createdAt: Date.now(),
+      ...(type === 'course' && itemToEdit ? itemToEdit : {}),
+    };
+  });
+
+  // Dynamically build live category tags from last-used, custom saved, existing courses, and popular defaults
+  const dynamicCourseCategories = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    const addTag = (raw?: string) => {
+      const val = (raw || '').trim();
+      if (!val) return;
+      const key = val.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(val);
+      }
+    };
+
+    try {
+      const lastUsed = localStorage.getItem('skilliq_last_course_category');
+      if (lastUsed) addTag(lastUsed);
+    } catch {}
+
+    savedCustomCategories.forEach(addTag);
+    if (course.category?.trim()) addTag(course.category.trim());
+    (allCourses || []).forEach(c => {
+      if (c.category) addTag(c.category);
+    });
+    POPULAR_CATEGORIES.forEach(addTag);
+
+    return result;
+  }, [allCourses, savedCustomCategories, course.category]);
+
+  const dynamicBookCategories = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    const addTag = (raw?: string) => {
+      const val = (raw || '').trim();
+      if (!val) return;
+      const key = val.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(val);
+      }
+    };
+
+    try {
+      const lastUsed = localStorage.getItem('skilliq_last_book_category');
+      if (lastUsed) addTag(lastUsed);
+    } catch {}
+
+    savedCustomBookCategories.forEach(addTag);
+    (allBooks || []).forEach(b => {
+      if (b.category) addTag(b.category);
+    });
+    POPULAR_BOOK_CATEGORIES.forEach(addTag);
+
+    return result;
+  }, [allBooks, savedCustomBookCategories]);
 
   const [path, setPath] = useState<Partial<LearningPath>>(() => {
     if (itemToEdit && type === 'path') {
@@ -213,36 +339,46 @@ export function AdminForms({
     createdAt: Date.now(),
   });
 
-  const [book, setBook] = useState<Partial<Book>>(itemToEdit || {
-    id: 'book_' + Math.random().toString(36).substring(2, 9),
-    title: '',
-    author: '',
-    description: '',
-    category: 'Software Engineering',
-    subCategory: '',
-    coverImage: '',
-    youtubeUrl: '',
-    youtubeId: '',
-    videoTitle: '',
-    videoThumbnail: '',
-    videoDuration: '',
-    youtubeName: '',
-    youtubeAvatar: '',
-    youtubeChannelUrl: '',
-    youtubeUrlAr: '',
-    youtubeIdAr: '',
-    videoTitleAr: '',
-    videoThumbnailAr: '',
-    videoDurationAr: '',
-    youtubeNameAr: '',
-    youtubeAvatarAr: '',
-    youtubeChannelUrlAr: '',
-    buyUrl: '',
-    buyUrlAr: '',
-    language: 'English',
-    keyTakeaways: [],
-    isApproved: true,
-    createdAt: Date.now(),
+  const [book, setBook] = useState<Partial<Book>>(() => {
+    let defaultBookCat = 'Software Engineering';
+    try {
+      const lastBookCat = localStorage.getItem('skilliq_last_book_category');
+      if (lastBookCat && lastBookCat.trim()) {
+        defaultBookCat = lastBookCat.trim();
+      }
+    } catch {}
+    return {
+      id: 'book_' + Math.random().toString(36).substring(2, 9),
+      title: '',
+      author: '',
+      description: '',
+      category: defaultBookCat,
+      subCategory: '',
+      coverImage: '',
+      youtubeUrl: '',
+      youtubeId: '',
+      videoTitle: '',
+      videoThumbnail: '',
+      videoDuration: '',
+      youtubeName: '',
+      youtubeAvatar: '',
+      youtubeChannelUrl: '',
+      youtubeUrlAr: '',
+      youtubeIdAr: '',
+      videoTitleAr: '',
+      videoThumbnailAr: '',
+      videoDurationAr: '',
+      youtubeNameAr: '',
+      youtubeAvatarAr: '',
+      youtubeChannelUrlAr: '',
+      buyUrl: '',
+      buyUrlAr: '',
+      language: 'English',
+      keyTakeaways: [],
+      isApproved: true,
+      createdAt: Date.now(),
+      ...(type === 'book' && itemToEdit ? itemToEdit : {}),
+    };
   });
 
   const [isFetchingBookYt, setIsFetchingBookYt] = useState(false);
@@ -662,7 +798,9 @@ export function AdminForms({
       if (!itemToEdit?.id || !cleanCourse.createdAt) {
         cleanCourse.createdAt = Date.now();
       }
-      cleanCourse.category = normalizeCategory(cleanCourse.category || 'Programming');
+      const rawCategory = (cleanCourse.category || 'Programming').trim();
+      cleanCourse.category = normalizeCategory(rawCategory);
+      rememberCourseCategory(cleanCourse.category);
 
       // If first video has no stats yet or instructor subscribers/likes/comments are missing, fetch real-time stats automatically before saving
       if (Array.isArray(cleanCourse.videos) && cleanCourse.videos.length > 0) {
@@ -1037,6 +1175,7 @@ export function AdminForms({
         createdAt: (!itemToEdit || !book.createdAt) ? Date.now() : book.createdAt
       };
 
+      rememberBookCategory(cleanBook.category);
       await addOrUpdateBook(cleanBook);
       await loadContent();
       onClose();
@@ -1048,12 +1187,20 @@ export function AdminForms({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 md:p-6 overflow-y-auto">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] w-screen h-[100dvh] bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 md:p-6 overflow-hidden"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSaving) {
+          onClose();
+        }
+      }}
+    >
       <div
         dir={language === 'ar' ? 'rtl' : 'ltr'}
+        onClick={(e) => e.stopPropagation()}
         className={cn(
-          "bg-card w-full h-[100dvh] sm:h-[90vh] max-h-[100dvh] sm:max-h-[94vh] rounded-t-3xl sm:rounded-3xl border border-border/80 shadow-2xl flex flex-col overflow-hidden text-start my-auto",
+          "bg-card w-full h-[100dvh] sm:h-[90vh] max-h-[100dvh] sm:max-h-[92vh] rounded-t-3xl sm:rounded-3xl border border-border/80 shadow-2xl flex flex-col overflow-hidden text-start",
           type === 'book' || type === 'path' ? "max-w-6xl" : "max-w-4xl"
         )}
       >
@@ -1189,15 +1336,22 @@ export function AdminForms({
             <button
               onClick={() => setCourseStep('videos')}
               className={cn(
-                "px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5",
+                "group px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5",
                 courseStep === 'videos' 
                   ? "bg-primary text-primary-foreground shadow-xs" 
-                  : "bg-muted/50 text-muted-foreground hover:text-foreground"
+                  : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted/80"
               )}
             >
-              <Youtube className="w-3.5 h-3.5 text-red-500" />
+              <Youtube className={cn("w-3.5 h-3.5 transition-colors", courseStep === 'videos' ? "text-white" : "text-red-500")} />
               <span>2. Videos & YouTube Playlist</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-card border border-border">
+              <span
+                className={cn(
+                  "text-[10px] font-extrabold font-mono tabular-nums px-1.5 py-0.5 rounded-full border transition-all",
+                  courseStep === 'videos'
+                    ? "bg-white/20 text-white border-white/30"
+                    : "bg-background text-foreground border-border/80 group-hover:bg-primary/15 group-hover:text-primary group-hover:border-primary/30"
+                )}
+              >
                 {course.videos?.length || 0}
               </span>
             </button>
@@ -1260,25 +1414,51 @@ export function AdminForms({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-foreground mb-1">Category *</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-bold text-foreground">Category *</label>
+                        {course.category?.trim() && (
+                          <span className="text-[10px] font-semibold text-primary">
+                            Saved as default next time
+                          </span>
+                        )}
+                      </div>
                       <input 
                         value={course.category || ''} 
-                        onChange={e => setCourse({ ...course, category: e.target.value })} 
+                        onChange={e => setCourse({ ...course, category: e.target.value })}
+                        onBlur={e => {
+                          if (e.target.value.trim()) {
+                            const normalized = normalizeCategory(e.target.value.trim());
+                            setCourse(prev => ({ ...prev, category: normalized }));
+                            rememberCourseCategory(normalized);
+                          }
+                        }}
                         className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
-                        placeholder="e.g. Programming" 
+                        placeholder="e.g. Programming, AI & Automation..." 
                       />
-                      {/* Quick Category Chips */}
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {POPULAR_CATEGORIES.map(cat => (
-                          <button
-                            key={cat}
-                            type="button"
-                            onClick={() => setCourse({ ...course, category: cat })}
-                            className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                          >
-                            {cat}
-                          </button>
-                        ))}
+                      {/* Auto-Updated Quick Category Chips (Saves & highlights active / last used category) */}
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {dynamicCourseCategories.map(cat => {
+                          const isSelected = (course.category || '').trim().toLowerCase() === cat.toLowerCase();
+                          return (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => {
+                                setCourse({ ...course, category: cat });
+                                rememberCourseCategory(cat);
+                              }}
+                              className={cn(
+                                "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1",
+                                isSelected
+                                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                                  : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground border-border/60"
+                              )}
+                            >
+                              {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                              <span>{cat}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -4095,25 +4275,37 @@ export function AdminForms({
                       <input
                         value={book.category || ''}
                         onChange={e => setBook({ ...book, category: e.target.value })}
+                        onBlur={e => {
+                          if (e.target.value.trim()) {
+                            rememberBookCategory(e.target.value.trim());
+                          }
+                        }}
                         placeholder="e.g. Software Engineering"
                         className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
                       />
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {POPULAR_BOOK_CATEGORIES.map(cat => (
-                          <button
-                            key={cat}
-                            type="button"
-                            onClick={() => setBook({ ...book, category: cat })}
-                            className={cn(
-                              "text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors cursor-pointer",
-                              book.category === cat
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground"
-                            )}
-                          >
-                            {cat}
-                          </button>
-                        ))}
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {dynamicBookCategories.map(cat => {
+                          const isSelected = (book.category || '').trim().toLowerCase() === cat.toLowerCase();
+                          return (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => {
+                                setBook({ ...book, category: cat });
+                                rememberBookCategory(cat);
+                              }}
+                              className={cn(
+                                "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1",
+                                isSelected
+                                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                                  : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground border-border/60"
+                              )}
+                            >
+                              {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                              <span>{cat}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -4590,6 +4782,7 @@ export function AdminForms({
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

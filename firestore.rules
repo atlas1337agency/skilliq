@@ -122,16 +122,16 @@ service cloud.firestore {
     }
 
     function isValidCourse(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'description', 'instructor', 'professorName', 'youtubeChannelName', 'instructorAvatar', 'instructorUrl', 'channelId', 'subscriberCount', 'subscriberCountText', 'playlistId', 'totalViews', 'totalLikes', 'totalComments', 'lastSyncedAt', 'difficulty', 'thumbnail', 'category', 'subCategory', 'isSingleVideo', 'language', 'resources', 'videos', 'isApproved', 'createdAt']) &&
+      return hasOnlyAllowedFields(['id', 'title', 'description', 'instructor', 'professorName', 'youtubeChannelName', 'instructorAvatar', 'instructorUrl', 'channelId', 'subscriberCount', 'subscriberCountText', 'playlistId', 'totalViews', 'totalLikes', 'totalComments', 'lastSyncedAt', 'difficulty', 'thumbnail', 'category', 'subCategory', 'isSingleVideo', 'isProject', 'language', 'resources', 'videos', 'isApproved', 'createdAt']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
-             data.description is string && data.description.size() <= 5000 &&
-             isValidOptionalString('instructor', 0, 100) &&
-             isValidOptionalString('professorName', 0, 100) &&
-             isValidOptionalString('youtubeChannelName', 0, 100) &&
+             data.description is string && data.description.size() <= 10000 &&
+             isValidOptionalString('instructor', 0, 200) &&
+             isValidOptionalString('professorName', 0, 200) &&
+             isValidOptionalString('youtubeChannelName', 0, 200) &&
              isValidOptionalString('instructorAvatar', 0, 2000) &&
              isValidOptionalString('instructorUrl', 0, 2000) &&
-             isValidOptionalString('channelId', 0, 100) &&
+             isValidOptionalString('channelId', 0, 150) &&
              isValidOptionalString('subscriberCountText', 0, 100) &&
              isValidOptionalString('playlistId', 0, 150) &&
              isValidOptionalString('difficulty', 0, 50) &&
@@ -140,32 +140,44 @@ service cloud.firestore {
              isValidOptionalString('subCategory', 0, 100) &&
              isValidOptionalString('language', 0, 50) &&
              data.isSingleVideo is bool &&
+             (!('isProject' in data) || data.isProject is bool) &&
              (!('isApproved' in data) || data.isApproved is bool) &&
-             (!('resources' in data) || (data.resources is list && data.resources.size() <= 100)) &&
+             (!('resources' in data) || (data.resources is list && data.resources.size() <= 200)) &&
              data.videos is list && data.videos.size() <= 1000 &&
              (!('createdAt' in data) || data.createdAt is number);
     }
 
     function isValidLearningPath(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'description', 'courseIds', 'icon', 'createdAt']) &&
+      return hasOnlyAllowedFields(['id', 'title', 'description', 'courseIds', 'icon', 'iconUrl', 'language', 'graphicRoadmap', 'createdAt']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.description is string && data.description.size() <= 5000 &&
              data.courseIds is list && data.courseIds.size() <= 200 &&
              data.icon is string && data.icon.size() <= 50 &&
+             isValidOptionalString('iconUrl', 0, 2000) &&
+             isValidOptionalString('language', 0, 50) &&
+             (!('graphicRoadmap' in data) || data.graphicRoadmap is map) &&
              (!('createdAt' in data) || data.createdAt is number);
     }
 
     function isValidNotification(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'message', 'image', 'link', 'linkLogo', 'links', 'isActive', 'createdAt', 'targetUserId']) &&
+      return hasOnlyAllowedFields(['id', 'title', 'titleAr', 'message', 'messageAr', 'type', 'image', 'link', 'linkLogo', 'actionLabel', 'actionLabelAr', 'links', 'isActive', 'createdAt', 'targetUserId', 'targetEmail', 'videoId', 'courseId']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.message is string && data.message.size() > 0 && data.message.size() <= 10000 &&
+             isValidOptionalString('titleAr', 0, 200) &&
+             isValidOptionalString('messageAr', 0, 10000) &&
+             isValidOptionalString('type', 0, 50) &&
              isValidOptionalString('image', 0, 2000) &&
              isValidOptionalString('link', 0, 2000) &&
              isValidOptionalString('linkLogo', 0, 2000) &&
+             isValidOptionalString('actionLabel', 0, 100) &&
+             isValidOptionalString('actionLabelAr', 0, 100) &&
              (!('links' in data) || (data.links is list && data.links.size() <= 20)) &&
              isValidOptionalString('targetUserId', 0, 100) &&
+             isValidOptionalString('targetEmail', 0, 200) &&
+             isValidOptionalString('videoId', 0, 100) &&
+             isValidOptionalString('courseId', 0, 100) &&
              data.isActive is bool &&
              data.createdAt is number;
     }

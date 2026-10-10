@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
 import { Navigate } from 'react-router-dom';
@@ -325,8 +326,8 @@ export function Admin() {
     >
       
       {/* DELETE CONFIRMATION MODAL */}
-      {deleteDialog && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      {deleteDialog && createPortal(
+        <div className="fixed inset-0 z-[100] w-screen h-[100dvh] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl p-6 space-y-4">
             <div className="flex items-center gap-3 text-red-500">
               <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center">
@@ -359,7 +360,8 @@ export function Admin() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* POPUP FOR CREATING / EDITING COURSES, BOOKS, NOTIFICATIONS, BANNERS, PATHS */}
