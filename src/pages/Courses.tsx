@@ -34,7 +34,8 @@ import {
   matchCourseCategory, 
   getCategoryDisplayName, 
   getCourseTimestamp, 
-  isCourseNew 
+  isCourseNew,
+  isProjectCourse
 } from '../lib/courseUtils';
 
 type LengthFilter = 'all' | 'short' | 'medium' | 'long';
@@ -42,8 +43,24 @@ type SortOption = 'newest' | 'lessons' | 'title';
 
 export function Courses() {
   const { t, i18n } = useTranslation();
-  const { user, courses, favorites, setIsAuthModalOpen, language, isContentLoading, hasLoadedFromDb } = useStore();
+  const { user, courses, learningPaths, favorites, setIsAuthModalOpen, language, isContentLoading, hasLoadedFromDb } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
+  const isAdmin = Boolean(user && ['admin', 'publisher'].includes(user.role));
+
+  // Map each courseId -> array of LearningPath objects that include this playlist
+  const coursePathsMap = useMemo(() => {
+    const map = new Map<string, { id: string; title: string }[]>();
+    (learningPaths || []).forEach(p => {
+      (p.courseIds || []).forEach(cId => {
+        const list = map.get(cId) || [];
+        if (!list.some(item => item.id === p.id)) {
+          list.push({ id: p.id, title: p.title });
+        }
+        map.set(cId, list);
+      });
+    });
+    return map;
+  }, [learningPaths]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') || searchParams.get('q') || "";
@@ -81,12 +98,19 @@ export function Courses() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [searchParams]);
 
-  // Base playlists (exclude single-video masterclasses)
+  // Base playlists (exclude single-video masterclasses and real-world project builds; hide playlists inside a Path for non-admin users)
   const basePlaylists = useMemo(() => {
     return filterByLanguage(courses, language).filter(c => {
-      return !(c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true');
+      if (isProjectCourse(c)) return false;
+      const isMasterclass = c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true';
+      if (isMasterclass) return false;
+      const inPaths = coursePathsMap.get(c.id);
+      if (inPaths && inPaths.length > 0 && !isAdmin) {
+        return false;
+      }
+      return true;
     });
-  }, [courses, language]);
+  }, [courses, language, coursePathsMap, isAdmin]);
 
   // Guaranteed Deduplicated Categories Map with item counts
   const categoriesData = useMemo(() => {
@@ -701,7 +725,29 @@ export function Courses() {
                   </div>
 
                   {/* Category & Status Badges */}
-                  <div className="absolute top-3 start-3 flex flex-wrap gap-1.5 z-10">
+                  <div className="absolute top-3 start-3 flex flex-wrap gap-1.5 z-10 max-w-[82%]">
+                    {isAdmin && (() => {
+                      const assignedPaths = coursePathsMap.get(course.id);
+                      if (!assignedPaths || assignedPaths.length === 0) return null;
+                      return (
+                        <Link
+                          to={`/path/${assignedPaths[0].id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          title={
+                            isRtl
+                              ? `مخفي عن الطلاب في صفحة الدورات لمنع التكرار — موجود داخل المسار: ${assignedPaths.map(p => p.title).join('، ')}`
+                              : `Hidden from students on Courses page to avoid duplicates — Assigned to Path: ${assignedPaths.map(p => p.title).join(', ')}`
+                          }
+                          className="bg-violet-600/95 hover:bg-violet-500 text-white px-2.5 py-1 rounded-md text-[10.5px] font-black uppercase tracking-wider shadow-md flex items-center gap-1 border border-violet-300/30 transition-colors"
+                        >
+                          <Sparkles className="w-3 h-3 text-amber-300 shrink-0" />
+                          <span className="truncate max-w-[190px]">
+                            {isRtl ? `داخل مسار: ${assignedPaths[0].title}` : `In Path: ${assignedPaths[0].title}`}
+                            {assignedPaths.length > 1 ? ` +${assignedPaths.length - 1}` : ''}
+                          </span>
+                        </Link>
+                      );
+                    })()}
                     {isCourseNew(course, basePlaylists) && (
                       <span className="bg-amber-500 text-black px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider shadow-md flex items-center gap-1 animate-pulse">
                         <Sparkles className="w-3 h-3 text-black" />
@@ -721,6 +767,28 @@ export function Courses() {
 
                 {/* Card Body */}
                 <div className="p-5 sm:p-6 flex flex-col flex-1">
+                  {isAdmin && (() => {
+                    const assignedPaths = coursePathsMap.get(course.id);
+                    if (!assignedPaths || assignedPaths.length === 0) return null;
+                    return (
+                      <div className="mb-2.5 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-violet-500/10 border border-violet-500/25 text-violet-600 dark:text-violet-400 text-[11px] font-bold">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">
+                            {isRtl
+                              ? `مخفي للطلاب (موجود داخل مسار: ${assignedPaths.map(p => p.title).join('، ')})`
+                              : `Admin Only · Inside Path: ${assignedPaths.map(p => p.title).join(', ')}`}
+                          </span>
+                        </div>
+                        <Link
+                          to={`/path/${assignedPaths[0].id}`}
+                          className="shrink-0 underline hover:opacity-80 text-[10px] font-black uppercase"
+                        >
+                          {isRtl ? 'عرض المسار' : 'View Path'}
+                        </Link>
+                      </div>
+                    );
+                  })()}
                   <h3 className="text-base sm:text-lg font-bold mb-2 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
                     {course.title}
                   </h3>

@@ -2,13 +2,13 @@ import { initializeApp } from 'firebase/app';
 import { initializeFirestore, collection, getDocs } from 'firebase/firestore';
 
 const oldConfig = {
-  projectId: "gen-lang-client-0447500373",
-  appId: "1:76674217526:web:9ed335500393bfbdacca97",
-  apiKey: "AIzaSyCFvxkQOxpuG_Rrn3clWz27YU9dyu3uYDc",
-  authDomain: "gen-lang-client-0447500373.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-8fdcd080-33e9-4f3a-8594-804bcad371b2",
-  storageBucket: "gen-lang-client-0447500373.firebasestorage.app",
-  messagingSenderId: "76674217526"
+  projectId: process.env.OLD_FIREBASE_PROJECT_ID || "gen-lang-client-0447500373",
+  appId: process.env.OLD_FIREBASE_APP_ID || "1:76674217526:web:9ed335500393bfbdacca97",
+  apiKey: process.env.OLD_FIREBASE_API_KEY || "",
+  authDomain: process.env.OLD_FIREBASE_AUTH_DOMAIN || "gen-lang-client-0447500373.firebaseapp.com",
+  firestoreDatabaseId: process.env.OLD_FIREBASE_DATABASE_ID || "ai-studio-8fdcd080-33e9-4f3a-8594-804bcad371b2",
+  storageBucket: process.env.OLD_FIREBASE_STORAGE_BUCKET || "gen-lang-client-0447500373.firebasestorage.app",
+  messagingSenderId: process.env.OLD_FIREBASE_MESSAGING_SENDER_ID || "76674217526"
 };
 
 async function checkOldData() {

@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import { Footer } from './Footer';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { PlatformTelemetryTracker } from './PlatformTelemetryTracker';
+import { SkilliqAiAgent } from './SkilliqAiAgent';
 
 export function Layout() {
   const location = useLocation();
@@ -23,6 +24,7 @@ export function Layout() {
         </main>
       </div>
       {!isCoursePage && <BottomNav />}
+      <SkilliqAiAgent />
       <ScrollToTopButton />
     </div>
   );

@@ -577,11 +577,13 @@ export function Community() {
       if (part.startsWith('[') && part.includes('](') && part.endsWith(')')) {
         const match = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
         if (match) {
-          const [, label, url] = match;
+          const [, label, rawUrl] = match;
+          const trimmedUrl = (rawUrl || '').trim();
+          const safeUrl = /^https?:\/\//i.test(trimmedUrl) || trimmedUrl.startsWith('/') ? trimmedUrl : '#';
           return (
             <a
               key={idx}
-              href={url}
+              href={safeUrl}
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}

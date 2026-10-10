@@ -83,7 +83,7 @@ export function Course() {
 
   const course = courses.find((c) => c.id === courseId);
   const courseVideos = course ? filterByLanguage(course.videos, language) : [];
-  const courseProgress = progress[courseId || ''] || { completedVideoIds: [], currentVideoId: courseVideos[0]?.id, videoTimestamps: {} };
+  const courseProgress = progress[courseId || ''] || { completedVideoIds: [], currentVideoId: courseVideos[0]?.id, isCompleted: false, videoTimestamps: {} };
 
   const currentVideoIndex = courseVideos.findIndex(v => v.id === courseProgress.currentVideoId) !== -1 
     ? courseVideos.findIndex(v => v.id === courseProgress.currentVideoId)

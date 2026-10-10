@@ -337,8 +337,17 @@ export function Paths() {
                 
                 {/* Header row: Icon, Badge, Course count */}
                 <div className="flex items-center justify-between gap-3 mb-4">
-                  <div className={`w-13 h-13 rounded-2xl ${style.bg} ${style.text} flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform`}>
-                    <Icon className="w-6 h-6 sm:w-7 sm:h-7" />
+                  <div className={`w-13 h-13 rounded-2xl ${style.bg} ${style.text} flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform overflow-hidden p-2`}>
+                    {path.iconUrl ? (
+                      <img
+                        src={path.iconUrl}
+                        alt={path.title}
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <Icon className="w-6 h-6 sm:w-7 sm:h-7" />
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap justify-end">

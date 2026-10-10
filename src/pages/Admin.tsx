@@ -401,8 +401,22 @@ export function Admin() {
           </div>
         </div>
 
-        {/* Quick Course & Book Add Shortcuts */}
+        {/* Quick Course, Book, Project & Path Add Shortcuts */}
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            onClick={() => setEditingItem({ type: 'course', item: { isProject: true, isSingleVideo: false, videos: [] } })}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isRtl ? 'إضافة مشروع عملي (Project)' : 'Add Real Project'}</span>
+          </button>
+          <button
+            onClick={() => setEditingItem({ type: 'path' })}
+            className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-black transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isRtl ? 'إضافة مسار (Path)' : 'Add Path'}</span>
+          </button>
           <button
             onClick={() => setEditingItem({ type: 'book' })}
             className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
@@ -463,6 +477,20 @@ export function Admin() {
             <span>{isRtl ? 'الكتب (Books)' : 'Books'}</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-black">
               {allBooks.length}
+            </span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('paths')}
+            className={cn(
+              "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
+              activeTab === 'paths' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+            <span>{isRtl ? 'المسارات (Paths)' : t('paths', 'Paths')}</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400 border border-violet-500/30 font-black">
+              {learningPaths.length}
             </span>
           </button>
 
@@ -532,20 +560,6 @@ export function Admin() {
                     {pendingReportsCount}
                   </span>
                 )}
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('paths')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'paths' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-primary" />
-                <span>{t('paths', 'Paths')}</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border">
-                  {learningPaths.length}
-                </span>
               </button>
 
               <button 
@@ -651,6 +665,7 @@ export function Admin() {
                 const cLikes = courseItem.totalLikes || (courseItem.videos || []).reduce((s, v) => s + (v.likeCount || 0), 0);
                 const cComments = courseItem.totalComments || (courseItem.videos || []).reduce((s, v) => s + (v.commentCount || 0), 0);
                 const cSubs = courseItem.subscriberCountText || (courseItem.subscriberCount ? formatCompactNumber(courseItem.subscriberCount) : '');
+                const parentPaths = learningPaths.filter(p => (p.courseIds || []).includes(courseItem.id));
 
                 return (
                 <div key={courseItem.id} className="bg-card border border-border/80 rounded-2xl p-4 flex flex-col justify-between shadow-xs hover:shadow-md transition-shadow">
@@ -670,6 +685,23 @@ export function Admin() {
                         {courseItem.isApproved === false && (
                           <span className="px-1.5 py-0.2 rounded text-[9px] uppercase font-bold bg-amber-500/15 text-amber-600 border border-amber-500/30">
                             {t('pending', 'Pending')}
+                          </span>
+                        )}
+                        {courseItem.isProject && (
+                          <span className="px-1.5 py-0.5 rounded-md text-[9.5px] uppercase font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                            {isRtl ? 'مشروع عملي (Project)' : 'Real Project'}
+                          </span>
+                        )}
+                        {parentPaths.length > 0 && (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9.5px] font-black uppercase bg-violet-500/15 text-violet-600 dark:text-violet-400 border border-violet-500/30"
+                            title={parentPaths.map(p => p.title).join(', ')}
+                          >
+                            <Sparkles className="w-2.5 h-2.5 shrink-0" />
+                            <span className="truncate max-w-[140px]">
+                              {isRtl ? `داخل مسار: ${parentPaths[0].title}` : `In Path: ${parentPaths[0].title}`}
+                              {parentPaths.length > 1 ? ` +${parentPaths.length - 1}` : ''}
+                            </span>
                           </span>
                         )}
                       </div>
@@ -1243,47 +1275,125 @@ export function Admin() {
         <AdminReports onEditCourse={(c) => setEditingItem({ type: 'course', item: c })} />
       )}
 
-      {/* TAB CONTENT 7: PATHS */}
-      {activeTab === 'paths' && isAdmin && (
+      {/* TAB CONTENT 2.6: PATHS */}
+      {activeTab === 'paths' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-foreground">{t('manage_paths', 'Manage Learning Paths')}</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Organize courses into structured learning roadmaps.</p>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card/60 border border-border/80 rounded-2xl sm:rounded-3xl p-4 sm:p-5">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl md:text-2xl font-black text-foreground flex items-center gap-2">
+                <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-violet-500 shrink-0" />
+                <span className="truncate">{isRtl ? 'إدارة المسارات التعليمية والخرائط التفاعلية' : t('manage_paths', 'Manage Learning Paths & Interactive Roadmaps')}</span>
+              </h2>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                {isRtl
+                  ? 'أنشئ مسارات تعليمية متسلسلة مع خرائط ذهنية تفاعلية، مراحل، أدوات وروابط دراسية. أي قائمة تشغيل تُضاف داخل مسار يتم إخفاؤها تلقائياً للطلاب في صفحة الدورات لمنع التكرار وتظهر للأدمن فقط مع شارة المسار.'
+                  : 'Create sequential learning paths with interactive mind maps, stages, tools, and study resources. Playlists added inside a path are hidden for students on the Courses page to avoid duplicates and shown only to Admin with an "In Path" badge.'}
+              </p>
             </div>
 
             <button 
               onClick={() => setEditingItem({ type: 'path' })}
-              className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
+              className="flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 rounded-xl text-xs font-black shadow-xs cursor-pointer active:scale-98 shrink-0"
             >
               <Plus className="w-4 h-4" /> 
-              <span>{t('add_path', 'Add Path')}</span>
+              <span>{isRtl ? 'إنشاء مسار تعليمي جديد' : t('add_path', 'Create New Learning Path')}</span>
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {learningPaths.map(pathItem => (
-              <div key={pathItem.id} className="bg-card border border-border/80 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-                <div>
-                  <h3 className="font-bold text-sm sm:text-base text-foreground mb-1">{pathItem.title}</h3>
-                  <p className="text-xs text-muted-foreground mb-3">{pathItem.courseIds.length} {t('courses_linked', 'Courses Linked')}</p>
+            {learningPaths.map(pathItem => {
+              const stageCount = pathItem.graphicRoadmap?.steps?.length || 0;
+              const toolCount =
+                (pathItem.graphicRoadmap?.essentialTools?.length || 0) +
+                (pathItem.graphicRoadmap?.globalResources?.length || 0);
+              const hasRoadmap =
+                pathItem.graphicRoadmap &&
+                pathItem.graphicRoadmap.enabled !== false &&
+                (stageCount > 0 ||
+                  toolCount > 0 ||
+                  Boolean(pathItem.graphicRoadmap.diagramImageUrl?.trim()) ||
+                  Boolean(pathItem.graphicRoadmap.overviewText?.trim()));
+
+              return (
+                <div key={pathItem.id} className="bg-card border border-border/80 hover:border-violet-500/40 rounded-2xl p-5 flex flex-col justify-between shadow-xs hover:shadow-md transition-all">
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {pathItem.iconUrl?.trim() ? (
+                          <img src={pathItem.iconUrl} alt="" className="w-8 h-8 rounded-lg object-contain bg-muted/50 p-1 border border-border/70 shrink-0" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-500 flex items-center justify-center shrink-0">
+                            <Sparkles className="w-4 h-4" />
+                          </div>
+                        )}
+                        <h3 className="font-bold text-sm sm:text-base text-foreground truncate">{pathItem.title}</h3>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {pathItem.language && (
+                          <span className="px-2 py-0.5 rounded-md bg-muted border border-border text-[10px] font-black uppercase text-muted-foreground">
+                            {pathItem.language.toLowerCase().includes('ar') ? 'AR' : 'EN'}
+                          </span>
+                        )}
+                        <span className="px-2 py-0.5 rounded-md bg-violet-500/10 border border-violet-500/20 text-violet-600 dark:text-violet-400 text-[11px] font-black">
+                          {pathItem.courseIds.length} {isRtl ? 'قائمة تشغيل' : t('courses_linked', 'Playlists')}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
+                      {pathItem.description}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground pt-2 border-t border-border/50">
+                      <span className={cn("font-semibold", hasRoadmap ? "text-emerald-500" : "text-muted-foreground")}>
+                        {hasRoadmap
+                          ? (isRtl ? '✓ الخريطة التفاعلية مفعّلة' : '✓ Interactive Mind Map Active')
+                          : (isRtl ? 'بدون خريطة تفاعلية' : 'No Graphic Roadmap Configured')}
+                      </span>
+                      {stageCount > 0 && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{stageCount} {isRtl ? 'مراحل' : 'Interactive Stages'}</span>
+                        </>
+                      )}
+                      {toolCount > 0 && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{toolCount} {isRtl ? 'أدوات وروابط' : 'Tools & Links'}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-2 pt-3 border-t border-border/60">
+                    <a
+                      href={`/path/${pathItem.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-bold text-muted-foreground hover:text-primary inline-flex items-center gap-1 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>{isRtl ? 'فتح صفحة المسار' : 'Open Path Page'}</span>
+                    </a>
+                    <div className="flex items-center gap-1.5">
+                      <button 
+                        onClick={() => setEditingItem({ type: 'path', item: pathItem })}
+                        className="px-3 py-1.5 text-xs font-bold text-violet-600 dark:text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 rounded-lg cursor-pointer flex items-center gap-1.5 transition-colors"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                        <span>{isRtl ? 'تعديل المسار والخريطة' : 'Edit Path & Roadmap'}</span>
+                      </button>
+                      {isAdmin && (
+                        <button 
+                          onClick={() => setDeleteDialog({ type: 'path', id: pathItem.id, title: pathItem.title })} 
+                          className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer"
+                          title="Delete Path"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-auto flex items-center justify-end gap-1.5 pt-3 border-t border-border/60">
-                  <button 
-                    onClick={() => setEditingItem({ type: 'path', item: pathItem })}
-                    className="p-1.5 text-primary hover:bg-primary/10 rounded-lg cursor-pointer"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onClick={() => setDeleteDialog({ type: 'path', id: pathItem.id, title: pathItem.title })} 
-                    className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

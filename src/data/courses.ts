@@ -40,6 +40,7 @@ export interface Course {
   category: string;
   subCategory?: string;
   isSingleVideo?: boolean;
+  isProject?: boolean;
   language?: string;
   isApproved?: boolean;
   resources?: VideoResource[];
@@ -60,12 +61,47 @@ export const categories: Category[] = [
   { name: "Cyber Security", subCategories: ["Networking", "Ethical Hacking", "Certifications"] }
 ];
 
+export interface LearningPathRoadmapResource {
+  title: string;
+  url: string;
+  type?: 'tool' | 'doc' | 'repo' | 'article' | 'video' | 'other';
+  logoUrl?: string;
+}
+
+export interface LearningPathRoadmapStep {
+  id: string;
+  title: string;
+  subtitle?: string;
+  description: string;
+  durationEstimate?: string;
+  imageUrl?: string;
+  linkedCourseId?: string;
+  skills?: string[];
+  tools?: LearningPathRoadmapResource[];
+  resources?: LearningPathRoadmapResource[];
+}
+
+export interface LearningPathGraphicRoadmap {
+  enabled?: boolean;
+  defaultExpanded?: boolean;
+  title?: string;
+  subtitle?: string;
+  overviewText?: string;
+  diagramImageUrl?: string;
+  essentialTools?: LearningPathRoadmapResource[];
+  globalResources?: LearningPathRoadmapResource[];
+  steps?: LearningPathRoadmapStep[];
+}
+
 export interface LearningPath {
   id: string;
   title: string;
   description: string;
   courseIds: string[];
   icon: string;
+  iconUrl?: string;
+  language?: string;
+  graphicRoadmap?: LearningPathGraphicRoadmap;
   createdAt?: number;
 }
 
@@ -197,7 +233,95 @@ export interface LearningPath {
     title: "Frontend Developer Path",
     description: "Master the fundamentals of frontend web development from HTML to React.",
     courseIds: ["html-crash-course", "css-grid", "javascript-basics", "react-basics"],
-    icon: "Code"
+    icon: "Code",
+    graphicRoadmap: {
+      enabled: true,
+      defaultExpanded: true,
+      title: "Frontend Engineering Interactive Roadmap",
+      subtitle: "Your distraction-free visual guide: exact sequence, required tools, official docs, and milestones from zero to job-ready Frontend Engineer.",
+      overviewText: "Follow this interactive roadmap step-by-step alongside the video playlists below. Before jumping into frameworks, make sure your local coding environment is configured and master each stage in sequence.",
+      essentialTools: [
+        { title: "VS Code Editor", url: "https://code.visualstudio.com/", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vscode/vscode-original.svg" },
+        { title: "Node.js (LTS)", url: "https://nodejs.org/", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" },
+        { title: "Git & GitHub", url: "https://github.com/", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" },
+        { title: "Chrome DevTools", url: "https://developer.chrome.com/docs/devtools", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/chrome/chrome-original.svg" }
+      ],
+      globalResources: [
+        { title: "MDN Web Docs (Official Reference)", url: "https://developer.mozilla.org/", type: "doc" },
+        { title: "Frontend Mentor (Real-World Practice)", url: "https://www.frontendmentor.io/", type: "other" },
+        { title: "Can I Use (Browser Support Tables)", url: "https://caniuse.com/", type: "doc" }
+      ],
+      steps: [
+        {
+          id: "step_html_foundations",
+          title: "Semantic HTML5 & Web Architecture",
+          subtitle: "Stage 1 · Core Structure & Accessibility",
+          description: "Understand how browsers parse HTML, structure semantic documents, build accessible forms, and apply SEO best practices before writing a single line of styling.",
+          durationEstimate: "Week 1",
+          linkedCourseId: "html-crash-course",
+          skills: ["Semantic Tags", "Forms & Validation", "DOM Tree", "Web Accessibility (A11y)", "SEO Meta Tags"],
+          tools: [
+            { title: "Live Server Extension", url: "https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer", type: "tool" },
+            { title: "W3C Markup Validator", url: "https://validator.w3.org/", type: "tool" }
+          ],
+          resources: [
+            { title: "MDN HTML5 Reference Guide", url: "https://developer.mozilla.org/en-US/docs/Web/HTML", type: "doc" },
+            { title: "HTML5 Semantic Elements Cheatsheet", url: "https://web.dev/learn/html/", type: "article" }
+          ]
+        },
+        {
+          id: "step_css_layouts",
+          title: "Modern CSS3, Flexbox & CSS Grid Systems",
+          subtitle: "Stage 2 · Responsive Layouts & Visual Polish",
+          description: "Master the Box Model, positioning, Flexbox 1D alignments, and 2D CSS Grid layouts to craft fluid interfaces that adapt to mobile, tablet, and desktop screens.",
+          durationEstimate: "Weeks 2–3",
+          linkedCourseId: "css-grid",
+          skills: ["Box Model", "Flexbox", "CSS Grid", "Media Queries", "CSS Variables", "Transitions"],
+          tools: [
+            { title: "Figma (Free Dev Mode)", url: "https://www.figma.com/", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/figma/figma-original.svg" },
+            { title: "Tailwind CSS Play", url: "https://play.tailwindcss.com/", type: "tool" }
+          ],
+          resources: [
+            { title: "CSS-Tricks Complete Guide to Grid", url: "https://css-tricks.com/snippets/css/complete-guide-grid/", type: "article" },
+            { title: "Flexbox Froggy Interactive Game", url: "https://flexboxfroggy.com/", type: "other" }
+          ]
+        },
+        {
+          id: "step_js_logic",
+          title: "JavaScript (ES6+), DOM Manipulation & Async APIs",
+          subtitle: "Stage 3 · Interactive Programming & Data Fetching",
+          description: "Bring pages to life with variables, functions, array methods, DOM events, Fetch API, Promises, and Async/Await for dynamic client-side logic.",
+          durationEstimate: "Weeks 4–6",
+          linkedCourseId: "javascript-basics",
+          skills: ["ES6+ Syntax", "DOM Events", "Array Methods", "Fetch API & JSON", "Async / Await", "LocalStorage"],
+          tools: [
+            { title: "Console & Network Inspector", url: "https://developer.chrome.com/docs/devtools/console", type: "tool" },
+            { title: "Postman / Hoppscotch API Tester", url: "https://hoppscotch.io/", type: "tool" }
+          ],
+          resources: [
+            { title: "JavaScript.info Modern Tutorial", url: "https://javascript.info/", type: "doc" },
+            { title: "You Don't Know JS (Open Book)", url: "https://github.com/getify/You-Dont-Know-JS", type: "repo" }
+          ]
+        },
+        {
+          id: "step_react_apps",
+          title: "React.js, Component Architecture & State Management",
+          subtitle: "Stage 4 · Production Single-Page Applications",
+          description: "Build scalable modular web applications with React components, Hooks (useState, useEffect), client-side routing, and deployment to production.",
+          durationEstimate: "Weeks 7–10",
+          linkedCourseId: "react-basics",
+          skills: ["JSX & Components", "Props & State", "React Hooks", "React Router", "Vite Bundler", "Vercel Deployment"],
+          tools: [
+            { title: "Vite Build Tool", url: "https://vitejs.dev/", type: "tool" },
+            { title: "React Developer Tools", url: "https://react.dev/learn/react-developer-tools", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" }
+          ],
+          resources: [
+            { title: "Official React.dev Interactive Docs", url: "https://react.dev/learn", type: "doc" },
+            { title: "Vercel Free Frontend Hosting", url: "https://vercel.com/", type: "tool" }
+          ]
+        }
+      ]
+    }
   },
   {
     id: "cyber-security-expert",
@@ -211,7 +335,60 @@ export interface LearningPath {
     title: "مسار تطوير الويب وتطبيقات الموبايل",
     description: "تعلم بناء المواقع وتطبيقات الهواتف الذكية من الصفر باستخدام ووردبريس وفلاتر ودارت باحترافية.",
     courseIds: ["ipkxu", "l02pbl"],
-    icon: "Code"
+    icon: "Code",
+    graphicRoadmap: {
+      enabled: true,
+      defaultExpanded: true,
+      title: "خريطة الطريق التفاعلية لتطوير الويب وتطبيقات الموبايل",
+      subtitle: "دليلك العملي خطوة بخطوة: التسلسل الصحيح للتعلم، الأدوات والبرامج المطلوبة، والروابط الرسمية بدون تشتت.",
+      overviewText: "اتبع هذه الخريطة التفاعلية بالترتيب مع قوائم التشغيل بالأسفل. ابدأ بتجهيز بيئة العمل الأساسية ثم انتقل من أساسيات بناء المواقع إلى برمجة تطبيقات الهواتف الذكية باستخدام Flutter & Dart.",
+      essentialTools: [
+        { title: "محرر الأكواد VS Code", url: "https://code.visualstudio.com/", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vscode/vscode-original.svg" },
+        { title: "حزمة تطوير Flutter SDK", url: "https://docs.flutter.dev/get-started/install", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/flutter/flutter-original.svg" },
+        { title: "بيئة Android Studio", url: "https://developer.android.com/studio", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/androidstudio/androidstudio-original.svg" },
+        { title: "Git & GitHub", url: "https://github.com/", type: "tool", logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" }
+      ],
+      globalResources: [
+        { title: "التوثيق الرسمي لـ Flutter", url: "https://docs.flutter.dev/", type: "doc" },
+        { title: "مرجع لغة البرمجة Dart", url: "https://dart.dev/guides", type: "doc" },
+        { title: "مكتبة حزم وإضافات pub.dev", url: "https://pub.dev/", type: "other" }
+      ],
+      steps: [
+        {
+          id: "ar_step_web_cms",
+          title: "تأسيس وبناء المواقع الاحترافية وإدارة المحتوى",
+          subtitle: "المرحلة 1 · هيكلة المواقع والاستضافة وتخصيص القوالب",
+          description: "تعلم كيفية إعداد بيئة الاستضافة المحلية، وتنصيب وإدارة المواقع خطوة بخطوة، وتخصيص الواجهات والأداء لتكون جاهزة للنشر.",
+          durationEstimate: "الأسبوع 1–2",
+          linkedCourseId: "ipkxu",
+          skills: ["إعداد الاستضافة", "هيكلة الصفحات", "تخصيص القوالب", "تحسين السرعة و SEO"],
+          tools: [
+            { title: "LocalWP (بيئة ووردبريس محلية)", url: "https://localwp.com/", type: "tool" },
+            { title: "أدوات مطوري المتصفح DevTools", url: "https://developer.chrome.com/docs/devtools", type: "tool" }
+          ],
+          resources: [
+            { title: "دليل مطوري ووردبريس الرسمي", url: "https://developer.wordpress.org/", type: "doc" }
+          ]
+        },
+        {
+          id: "ar_step_flutter_mobile",
+          title: "احتراف برمجة تطبيقات الموبايل باستخدام Flutter و Dart",
+          subtitle: "المرحلة 2 · بناء تطبيقات أندرويد و iOS بكود برمجي واحد",
+          description: "إتقان أساسيات لغة Dart والبرمجة الكائنية، ثم بناء واجهات المستخدم التفاعلية في Flutter وربط التطبيقات بقواعد البيانات والواجهات البرمجية APIs.",
+          durationEstimate: "الأسبوع 3–8",
+          linkedCourseId: "l02pbl",
+          skills: ["أساسيات لغة Dart", "Flutter Widgets", "إدارة الحالة State Management", "التعامل مع REST APIs"],
+          tools: [
+            { title: "DartPad (تجربة الكود مباشرة بالمتصفح)", url: "https://dartpad.dev/", type: "tool" },
+            { title: "Flutter SDK", url: "https://flutter.dev/", type: "tool" }
+          ],
+          resources: [
+            { title: "كتالوج عناصر واجهة Flutter الرسمي", url: "https://docs.flutter.dev/ui/widgets", type: "doc" },
+            { title: "تطبيقات ومشاريع Flutter مفتوحة المصدر", url: "https://flutter.dev/showcase", type: "article" }
+          ]
+        }
+      ]
+    }
   },
   {
     id: "ai-marketing-ar",
@@ -614,6 +791,117 @@ export const courses: Course[] = [
         title: "الدرس (1): مقدمة عن برنامج سكتش آب SketchUp",
         duration: "17:16",
         youtubeId: "oaye0GKPJIg"
+      }
+    ]
+  },
+  {
+    id: "project-fullstack-saas-ai",
+    title: "Build & Deploy a Full-Stack AI SaaS Platform (Next.js, Stripe & Tailwind)",
+    description: "Real-world end-to-end project build: Architect, code, and deploy a complete production AI SaaS platform with authentication, Stripe subscriptions, database integration, and modern responsive UI.",
+    instructor: "JavaScript Mastery",
+    instructorUrl: "https://www.youtube.com/@javascriptmastery",
+    thumbnail: "https://img.youtube.com/vi/Ahwoks_dawU/maxresdefault.jpg",
+    category: "Web Development",
+    subCategory: "Full-Stack SaaS",
+    isSingleVideo: true,
+    isProject: true,
+    language: "English",
+    createdAt: 1785000001000,
+    videos: [
+      {
+        id: "proj_saas_v1",
+        title: "Build and Deploy a Full Stack AI SaaS Application — Complete Hands-On Project",
+        duration: "04:42:18",
+        youtubeId: "Ahwoks_dawU"
+      }
+    ]
+  },
+  {
+    id: "project-mern-ecommerce-playlist",
+    title: "Build a Complete E-Commerce Store From Scratch (React, Node & MongoDB)",
+    description: "Step-by-step practical project playlist: Build a real online store with product catalog, shopping cart, JWT authentication, admin dashboard, and checkout workflow.",
+    instructor: "Traversy Media",
+    instructorUrl: "https://www.youtube.com/@TraversyMedia",
+    thumbnail: "https://img.youtube.com/vi/3d23M7gS1cE/maxresdefault.jpg",
+    category: "Web Development",
+    subCategory: "E-Commerce Build",
+    isSingleVideo: false,
+    isProject: true,
+    language: "English",
+    createdAt: 1785000002000,
+    videos: [
+      {
+        id: "proj_ecom_1",
+        title: "Project Architecture, UI Setup & Product Grid",
+        duration: "34:15",
+        youtubeId: "3d23M7gS1cE"
+      },
+      {
+        id: "proj_ecom_2",
+        title: "Shopping Cart State, Backend API & Database Models",
+        duration: "41:20",
+        youtubeId: "w7ejDZ8SWv8"
+      },
+      {
+        id: "proj_ecom_3",
+        title: "User Authentication, Admin Order Panel & Production Deployment",
+        duration: "38:50",
+        youtubeId: "Ke90Tje7VS0"
+      }
+    ]
+  },
+  {
+    id: "project-ar-fullstack-web-app",
+    title: "بناء مشروع موقع ومتجر متكامل من الصفر خطوة بخطوة (تطبيق عملي شامل)",
+    description: "مشروع تطبيقي عملي لبناء وبرمجة موقع كامل من الصفر حتى رفعه على الاستضافة، يشمل تصميم الواجهات المتجاوبة وبرمجة الخصائص التفاعلية كاملة.",
+    instructor: "Elzero Web School",
+    instructorUrl: "https://www.youtube.com/@ElzeroWebSchool",
+    thumbnail: "https://img.youtube.com/vi/c2M-rlkkT5o/maxresdefault.jpg",
+    category: "Web Development",
+    subCategory: "مشروع ويب متكامل",
+    isSingleVideo: false,
+    isProject: true,
+    language: "Arabic",
+    createdAt: 1785000003000,
+    videos: [
+      {
+        id: "proj_ar_1",
+        title: "الجزء الأول: تخطيط المشروع وبناء الهيكل الأساسي والتصميم المتجاوب",
+        duration: "32:10",
+        youtubeId: "c2M-rlkkT5o"
+      },
+      {
+        id: "proj_ar_2",
+        title: "الجزء الثاني: برمجة الأقسام التفاعلية، القوائم الذكية، وتحسين الأداء",
+        duration: "29:45",
+        youtubeId: "ctEAYHFcbHk"
+      },
+      {
+        id: "proj_ar_3",
+        title: "الجزء الثالث: مراجعة الكود النهائي ونشر المشروع الحقيقي على الإنترنت",
+        duration: "26:15",
+        youtubeId: "eO23K1vA68E"
+      }
+    ]
+  },
+  {
+    id: "project-ar-flutter-real-app",
+    title: "مشروع عملي كامل: بناء تطبيق موبايل احترافي باستخدام Flutter & Dart",
+    description: "تطبيق عملي شامل في فيديو مطول لبناء تطبيق هاتف ذكي حقيقي من الصفر بواجهات احترافية وربطه بقاعدة البيانات خطوة بخطوة.",
+    instructor: "Wael abo hamza",
+    thumbnail: "https://img.youtube.com/vi/6bSP4vazmyw/maxresdefault.jpg",
+    category: "Programming",
+    subCategory: "مشروع تطبيق موبايل",
+    isSingleVideo: true,
+    isProject: true,
+    language: "Arabic",
+    createdAt: 1785000004000,
+    videos: [
+      {
+        id: "proj_ar_fl_1",
+        title: "ورشة بناء تطبيق Flutter كامل من الصفر للاحتراف (تطبيق عملي)",
+        duration: "03:15:00",
+        youtubeId: "6bSP4vazmyw"
       }
     ]
   }

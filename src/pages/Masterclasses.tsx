@@ -35,7 +35,8 @@ import {
   matchCourseCategory, 
   getCategoryDisplayName, 
   getCourseTimestamp, 
-  isCourseNew 
+  isCourseNew,
+  isProjectCourse
 } from '../lib/courseUtils';
 
 type DurationFilter = 'all' | 'under_1h' | '1_to_3h' | 'over_3h';
@@ -100,9 +101,10 @@ export function Masterclasses() {
     }
   }, [searchParams]);
 
-  // Base masterclasses (single video courses)
+  // Base masterclasses (single video courses, excluding real-world project builds)
   const baseMasterclasses = useMemo(() => {
     return filterByLanguage(courses, language).filter(c => {
+      if (isProjectCourse(c)) return false;
       return c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true';
     });
   }, [courses, language]);

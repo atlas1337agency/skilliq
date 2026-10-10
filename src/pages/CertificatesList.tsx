@@ -25,7 +25,7 @@ import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
 import { PreviewCertificateModal } from '../components/PreviewCertificateModal';
 import { cn } from '../lib/utils';
-import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
+import { isCertificateEligible, isProjectCertificateEligible, resolveCourseEducator, buildCertificateId } from '../lib/courseUtils';
 
 export function CertificatesList() {
   const { t, i18n } = useTranslation();
@@ -34,7 +34,7 @@ export function CertificatesList() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'playlist' | 'path'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'playlist' | 'path' | 'project'>('all');
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(searchParams.get('preview') === 'true');
   const [copiedCertId, setCopiedCertId] = useState<string | null>(null);
 
@@ -46,7 +46,7 @@ export function CertificatesList() {
     return ids;
   }, [learningPaths]);
 
-  // Completed courses eligible for certificates (Playlists & Path Playlists only — excludes Masterclasses)
+  // Completed courses eligible for certificates (Playlists, Path Playlists & Project Playlists — excludes Masterclasses)
   const completedCourses = useMemo(() => {
     return courses.filter(c => progress[c.id]?.isCompleted && isCertificateEligible(c));
   }, [courses, progress]);
@@ -64,11 +64,14 @@ export function CertificatesList() {
 
       if (!matchesSearch) return false;
 
+      if (filterType === 'project') {
+        return isProjectCertificateEligible(c);
+      }
       if (filterType === 'path') {
         return pathCourseIdsSet.has(c.id);
       }
       if (filterType === 'playlist') {
-        return isCertificateEligible(c);
+        return isCertificateEligible(c) && !isProjectCertificateEligible(c);
       }
       return true;
     });
@@ -266,6 +269,17 @@ export function CertificatesList() {
           >
             {isRtl ? 'مسارات التعلم' : 'Learning Paths'}
           </button>
+          <button
+            onClick={() => setFilterType('project')}
+            className={cn(
+              "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer",
+              filterType === 'project'
+                ? "bg-emerald-600 text-white shadow-xs font-bold"
+                : "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+            )}
+          >
+            {isRtl ? 'مشاريع عملية' : 'Project Builds'}
+          </button>
         </div>
       </div>
 
@@ -324,9 +338,7 @@ export function CertificatesList() {
               day: 'numeric'
             });
 
-            const userIdPrefix = user?.uid ? user.uid.substring(0, 5) : 'DEMO';
-            const cIdPrefix = course.id ? course.id.substring(0, 4) : 'XXXX';
-            const certId = `NX-${userIdPrefix}-${cIdPrefix}`.toUpperCase();
+            const certId = buildCertificateId(course.id, user?.uid, courseProgress?.completionDate, false);
             const educator = resolveCourseEducator(course);
 
             return (

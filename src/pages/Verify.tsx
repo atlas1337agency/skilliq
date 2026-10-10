@@ -18,7 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { SEO } from '../components/SEO';
-import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
+import { isCertificateEligible, resolveCourseEducator, matchCourseFromCertificateId } from '../lib/courseUtils';
 
 export function Verify() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -32,17 +32,8 @@ export function Verify() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [result, setResult] = useState<'valid' | 'invalid' | 'demo' | null>(null);
 
-  // Match course prefix from certificate ID (format: NX-USERID-COURSEPREFIX-TIMESTAMP or NX-USERID-COURSEPREFIX)
-  const matchedCourse = (() => {
-    const parts = certId.trim().toUpperCase().split('-');
-    if (parts.length >= 3 && parts[0] === 'NX') {
-      const coursePrefix = parts[2].toLowerCase();
-      return courses.find(
-        c => isCertificateEligible(c) && c.id.toLowerCase().startsWith(coursePrefix)
-      ) || null;
-    }
-    return null;
-  })();
+  // Match course from certificate ID (format: ATLAS1337-SKILLIQ-<CODE>)
+  const matchedCourse = matchCourseFromCertificateId(certId, courses);
   const matchedEducator = resolveCourseEducator(matchedCourse);
 
   useEffect(() => {
@@ -63,13 +54,16 @@ export function Verify() {
       const cleanId = idToVerify.trim().toUpperCase();
       if (cleanId.includes('DEMO')) {
         setResult('demo');
-      } else if (cleanId.startsWith('NX-') && cleanId.length > 8) {
+      } else if (
+        (cleanId.startsWith('ATLAS1337-SKILLIQ-') && cleanId.replace('ATLAS1337-SKILLIQ-', '').length >= 4) ||
+        (cleanId.startsWith('NX-') && cleanId.length > 8)
+      ) {
         setResult('valid');
       } else {
         setResult('invalid');
       }
       setIsVerifying(false);
-    }, 1000);
+    }, 600);
   };
 
   return (
@@ -114,7 +108,7 @@ export function Verify() {
             type="text"
             value={certId}
             onChange={(e) => setCertId(e.target.value.toUpperCase())}
-            placeholder="e.g. NX-DEMO-SKILLIQ-VERIFIED"
+            placeholder="e.g. ATLAS1337-SKILLIQ-DEMO77X9"
             className="w-full bg-card border-2 border-border focus:border-primary rounded-2xl py-3.5 ps-12 pe-4 outline-none font-mono uppercase tracking-wider text-center text-sm sm:text-base transition-colors shadow-xs"
           />
         </form>

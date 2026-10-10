@@ -21,15 +21,20 @@ import { FavoriteButton } from './FavoriteButton';
 
 export function PopularCoursesSection() {
   const { t, i18n } = useTranslation();
-  const { user, courses, setIsAuthModalOpen, language } = useStore();
+  const { user, courses, learningPaths, setIsAuthModalOpen, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  // Filter out single-video courses (masterclasses)
+  // Filter out single-video courses (masterclasses), real project builds, and playlists assigned to paths
   const allPlaylists = useMemo(() => {
+    const pathCourseIds = new Set<string>();
+    (learningPaths || []).forEach(p => (p.courseIds || []).forEach(id => pathCourseIds.add(id)));
     return filterByLanguage(courses, language).filter(
-      c => !(c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true')
+      c =>
+        !(c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true') &&
+        !(c.isProject === true || String((c as any).isProject).toLowerCase() === 'true') &&
+        !pathCourseIds.has(c.id)
     );
-  }, [courses, language]);
+  }, [courses, learningPaths, language]);
 
   // Top 8 popular courses
   const displayedCourses = useMemo(() => {

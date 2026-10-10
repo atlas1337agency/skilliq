@@ -249,6 +249,13 @@ export function Header() {
       color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
     },
     {
+      to: '/projects',
+      label: isRtl ? 'المشاريع العملية (Projects)' : t('projects', 'Projects'),
+      desc: isRtl ? 'بناء مشاريع وتطبيقات حقيقية خطوة بخطوة (تطبيق عملي)' : 'Hands-on real project builds (playlists & full builds)',
+      icon: Sparkles,
+      color: 'text-teal-500 bg-teal-500/10 border-teal-500/20',
+    },
+    {
       to: '/masterclasses',
       label: t('masterclasses', 'Masterclasses'),
       desc: isRtl ? 'جلسات مكثفة وشاملة في فيديو واحد' : 'Single-session comprehensive deep dives',

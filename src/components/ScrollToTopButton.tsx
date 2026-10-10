@@ -77,7 +77,7 @@ export function ScrollToTopButton() {
           transition={{ duration: 0.2 }}
           aria-label={t('footer_scroll_top', 'Back to top')}
           title={t('footer_scroll_top', 'Back to top')}
-          className="fixed bottom-22 md:bottom-8 end-5 md:end-8 z-40 w-12 h-12 rounded-full bg-card/85 hover:bg-card text-foreground backdrop-blur-md border border-border/80 shadow-lg hover:shadow-xl flex items-center justify-center cursor-pointer group transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+          className="fixed bottom-20 md:bottom-6 left-4 sm:left-6 md:left-8 z-40 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-card/90 hover:bg-card text-foreground backdrop-blur-md border border-border/80 shadow-lg hover:shadow-xl flex items-center justify-center cursor-pointer group transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50"
         >
           {/* Subtle Progress Ring */}
           <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none p-0.5">

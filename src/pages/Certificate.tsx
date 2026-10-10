@@ -23,13 +23,14 @@ import * as htmlToImage from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { CertificateDocument, CertificateData } from '../components/CertificateDocument';
 import { ResponsiveCertificateViewer } from '../components/ResponsiveCertificateViewer';
-import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
+import { isCertificateEligible, isProjectCertificateEligible, resolveCourseEducator, buildCertificateId } from '../lib/courseUtils';
 
 export function Certificate() {
   const { courseId } = useParams<{ courseId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const isPreview = searchParams.get('preview') === 'true' || courseId === 'demo';
+  const isPreview = searchParams.get('preview') === 'true' || courseId === 'demo' || courseId === 'demo-project';
+  const isProjectPreview = searchParams.get('type') === 'project' || courseId === 'demo-project';
   const { t, i18n } = useTranslation();
   const { progress, userName, user, courses, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
@@ -39,19 +40,13 @@ export function Certificate() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
 
-  // Calculate certificate ID
+  const courseRaw = courses.find(c => c.id === courseId);
+  const isProjectCert = Boolean((courseRaw && isProjectCertificateEligible(courseRaw)) || isProjectPreview);
+
+  // Calculate official certificate ID: ATLAS1337-SKILLIQ-<CODE>
   useEffect(() => {
-    if (isPreview) {
-      setCertId('NX-SKILLIQ-DEMO-VERIFIED');
-    } else {
-      const userIdPrefix = user?.uid ? user.uid.substring(0, 6) : 'DEMO';
-      const cIdPrefix = courseId ? courseId.substring(0, 4) : 'DEMO';
-      const timestamp = progress[courseId || '']?.completionDate 
-        ? new Date(progress[courseId || ''].completionDate!).getTime().toString().slice(-6)
-        : '889120';
-        
-      setCertId(`NX-${userIdPrefix}-${cIdPrefix}-${timestamp}`.toUpperCase());
-    }
+    const completionDate = progress[courseId || '']?.completionDate;
+    setCertId(buildCertificateId(courseId, user?.uid, completionDate, isPreview));
   }, [user, courseId, progress, isPreview]);
 
   // If not logged in and not preview
@@ -81,12 +76,15 @@ export function Certificate() {
     }
   };
 
-  const courseRaw = courses.find(c => c.id === courseId);
   const course = courseRaw || (isPreview ? { 
-    title: isRtl 
-      ? 'تطوير تطبيقات الويب المتكاملة وهندسة البرمجيات الحديثة' 
-      : 'Full-Stack Web Development & Modern Software Architecture', 
-    id: 'demo',
+    title: isProjectCert
+      ? (isRtl
+          ? 'بناء مشروع متجر إلكتروني متكامل من الصفر خطوة بخطوة (تطبيق عملي شامل)'
+          : 'Build a Complete E-Commerce Store From Scratch (React, Node & MongoDB)')
+      : (isRtl 
+          ? 'تطوير تطبيقات الويب المتكاملة وهندسة البرمجيات الحديثة' 
+          : 'Full-Stack Web Development & Modern Software Architecture'), 
+    id: isProjectCert ? 'demo-project' : 'demo',
     instructor: isRtl ? 'Elzero Web School' : 'Traversy Media',
     professorName: isRtl ? 'Prof. Osama Elzero' : 'Prof. Brad Traversy',
     youtubeChannelName: isRtl ? 'Elzero Web School' : 'Traversy Media'
@@ -173,7 +171,8 @@ export function Certificate() {
     youtubeChannelName: educator.youtubeChannelName,
     issueDate: dateFormatted,
     verificationUrl: `${window.location.origin}/verify?id=${certId}`,
-    isDemo: isPreview
+    isDemo: isPreview,
+    isProjectBuild: isProjectCert
   };
 
   const handleDownloadPDF = async () => {

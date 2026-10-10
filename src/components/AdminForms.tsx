@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Course, LearningPath, AppNotification, AdBannerData, Book } from '../data/courses';
+import { Course, LearningPath, LearningPathRoadmapStep, LearningPathRoadmapResource, AppNotification, AdBannerData, Book } from '../data/courses';
 import { addOrUpdateCourse, addOrUpdatePath, addOrUpdateNotification, addOrUpdateBanner, addOrUpdateBook } from '../lib/firestoreContent';
 import { 
   X, 
@@ -35,7 +35,11 @@ import {
   ThumbsUp,
   MessageSquare,
   Users,
-  RefreshCw
+  RefreshCw,
+  Map as MapIcon,
+  Wrench,
+  Layers,
+  Search
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { 
@@ -52,9 +56,10 @@ import {
   formatCompactNumber
 } from '../lib/youtube';
 import { useTranslation } from 'react-i18next';
-import { cn } from '../lib/utils';
-import { normalizeCategory } from '../lib/courseUtils';
+import { cn, filterByLanguage } from '../lib/utils';
+import { normalizeCategory, isMasterclassCourse } from '../lib/courseUtils';
 import { BookCoverVisual, AmazonIcon, RichFormattedText, FormattedInlineText } from './BookVideoModal';
+import { PathGraphicRoadmap } from './PathGraphicRoadmap';
 
 const POPULAR_BOOK_CATEGORIES = [
   'Software Engineering',
@@ -113,11 +118,15 @@ export function AdminForms({
   onClose: () => void 
 }) {
   const { t } = useTranslation();
-  const { loadContent } = useStore();
+  const { loadContent, allCourses, language } = useStore();
   const isAdmin = useStore.getState().user?.role === 'admin';
 
   // Active step for course wizard
   const [courseStep, setCourseStep] = useState<'basics' | 'videos' | 'instructor' | 'resources'>('basics');
+
+  // Active step for path wizard (Basics & Courses, Graphic Roadmap & Stages, Tools & Resources, Live Preview)
+  const [pathStep, setPathStep] = useState<'basics' | 'roadmap' | 'toolkit' | 'preview'>('basics');
+  const [pathCourseSearch, setPathCourseSearch] = useState('');
 
   const [course, setCourse] = useState<Partial<Course>>(itemToEdit || {
     id: 'course_' + Math.random().toString(36).substring(2, 9),
@@ -136,13 +145,48 @@ export function AdminForms({
     createdAt: Date.now(),
   });
 
-  const [path, setPath] = useState<Partial<LearningPath>>(itemToEdit || {
-    id: 'path_' + Math.random().toString(36).substring(2, 9),
-    title: '',
-    description: '',
-    icon: 'Code',
-    courseIds: [],
-    createdAt: Date.now(),
+  const [path, setPath] = useState<Partial<LearningPath>>(() => {
+    if (itemToEdit && type === 'path') {
+      const detectedAr = /[\u0600-\u06FF]/.test(`${itemToEdit.title || ''} ${itemToEdit.description || ''}`);
+      return {
+        ...itemToEdit,
+        iconUrl: itemToEdit.iconUrl || '',
+        language: itemToEdit.language || (detectedAr ? 'Arabic' : 'English'),
+        courseIds: itemToEdit.courseIds || [],
+        graphicRoadmap: {
+          enabled: itemToEdit.graphicRoadmap?.enabled !== false,
+          defaultExpanded: itemToEdit.graphicRoadmap?.defaultExpanded !== false,
+          title: itemToEdit.graphicRoadmap?.title || '',
+          subtitle: itemToEdit.graphicRoadmap?.subtitle || '',
+          overviewText: itemToEdit.graphicRoadmap?.overviewText || '',
+          diagramImageUrl: itemToEdit.graphicRoadmap?.diagramImageUrl || '',
+          essentialTools: itemToEdit.graphicRoadmap?.essentialTools || [],
+          globalResources: itemToEdit.graphicRoadmap?.globalResources || [],
+          steps: itemToEdit.graphicRoadmap?.steps || [],
+        },
+      };
+    }
+    return {
+      id: 'path_' + Math.random().toString(36).substring(2, 9),
+      title: '',
+      description: '',
+      icon: 'Code',
+      iconUrl: '',
+      language: language === 'ar' ? 'Arabic' : 'English',
+      courseIds: [],
+      graphicRoadmap: {
+        enabled: true,
+        defaultExpanded: true,
+        title: '',
+        subtitle: '',
+        overviewText: '',
+        diagramImageUrl: '',
+        essentialTools: [],
+        globalResources: [],
+        steps: [],
+      },
+      createdAt: Date.now(),
+    };
   });
 
   const [notification, setNotification] = useState<Partial<AppNotification>>(itemToEdit || {
@@ -664,12 +708,31 @@ export function AdminForms({
     setFormError(null);
     if (!path.title?.trim()) {
       setFormError("Path title is required.");
+      setPathStep('basics');
       return;
     }
 
     setIsSaving(true);
     try {
       const cleanPath = JSON.parse(JSON.stringify(path));
+      cleanPath.courseIds = (cleanPath.courseIds || []).map((id: string) => id.trim()).filter(Boolean);
+      if (cleanPath.graphicRoadmap) {
+        cleanPath.graphicRoadmap.essentialTools = (cleanPath.graphicRoadmap.essentialTools || []).filter(
+          (t: any) => t && t.title?.trim()
+        );
+        cleanPath.graphicRoadmap.globalResources = (cleanPath.graphicRoadmap.globalResources || []).filter(
+          (r: any) => r && r.title?.trim()
+        );
+        cleanPath.graphicRoadmap.steps = (cleanPath.graphicRoadmap.steps || [])
+          .filter((s: any) => s && s.title?.trim())
+          .map((s: any, idx: number) => ({
+            ...s,
+            id: s.id || `step_${idx + 1}_${Date.now()}`,
+            tools: (s.tools || []).filter((t: any) => t && t.title?.trim()),
+            resources: (s.resources || []).filter((r: any) => r && r.title?.trim()),
+            skills: (s.skills || []).map((sk: string) => sk.trim()).filter(Boolean)
+          }));
+      }
       await addOrUpdatePath(cleanPath as LearningPath);
       await loadContent();
       onClose();
@@ -978,24 +1041,39 @@ export function AdminForms({
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 md:p-6 overflow-y-auto">
       <div
+        dir={language === 'ar' ? 'rtl' : 'ltr'}
         className={cn(
           "bg-card w-full h-[100dvh] sm:h-[90vh] max-h-[100dvh] sm:max-h-[94vh] rounded-t-3xl sm:rounded-3xl border border-border/80 shadow-2xl flex flex-col overflow-hidden text-start my-auto",
-          type === 'book' ? "max-w-6xl" : "max-w-4xl"
+          type === 'book' || type === 'path' ? "max-w-6xl" : "max-w-4xl"
         )}
       >
         
         {/* FIXED HEADER */}
         <div className="px-4 py-3.5 sm:p-5 border-b border-border/80 bg-muted/30 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
-              {type === 'course' || type === 'book' ? <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" /> : type === 'notification' ? <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" /> : <Plus className="w-4 h-4 sm:w-5 sm:h-5" />}
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
+              {type === 'course' || type === 'book' ? <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" /> : type === 'path' ? <MapIcon className="w-4 h-4 sm:w-5 sm:h-5" /> : type === 'notification' ? <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" /> : <Plus className="w-4 h-4 sm:w-5 sm:h-5" />}
             </div>
             <div className="min-w-0">
               <h2 className="text-sm sm:text-lg font-black text-foreground tracking-tight truncate">
-                {itemToEdit ? 'Edit' : 'Create New'} {type === 'course' ? 'Course / Masterclass' : type === 'book' ? 'Book & Video Summary' : type === 'path' ? 'Learning Path' : type === 'notification' ? 'Push Notification' : 'Ad Banner'}
+                {type === 'path'
+                  ? language === 'ar'
+                    ? itemToEdit
+                      ? 'تعديل المسار التعليمي وخريطة الطريق التفاعلية'
+                      : 'إنشاء مسار تعليمي جديد وخريطة طريق تفاعلية'
+                    : `${itemToEdit ? 'Edit' : 'Create New'} Learning Path & Interactive Roadmap`
+                  : `${itemToEdit ? 'Edit' : 'Create New'} ${type === 'course' ? 'Course / Masterclass' : type === 'book' ? 'Book & Video Summary' : type === 'notification' ? 'Push Notification' : 'Ad Banner'}`}
               </h2>
               <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 line-clamp-1 sm:line-clamp-2">
-                {type === 'course' ? 'Configure course details, curriculum videos, and instructor profile.' : type === 'book' ? 'Add English & Arabic YouTube video links, auto-fetch channel info, and customize cover, author, summary & Amazon buy buttons.' : 'Manage platform content stored in Firestore.'}
+                {type === 'course'
+                  ? 'Configure course details, curriculum videos, and instructor profile.'
+                  : type === 'book'
+                    ? 'Add English & Arabic YouTube video links, auto-fetch channel info, and customize cover, author, summary & Amazon buy buttons.'
+                    : type === 'path'
+                      ? language === 'ar'
+                        ? 'رتب الدورات يدوياً، وأضف شرحاً بصرياً وخريطة طريق تفاعلية مع الأدوات والروابط والصور لمساعدة الطلاب دون تشتيت.'
+                        : 'Organize sequential courses manually, build an interactive graphic roadmap, or clear & customize stages, tools, images, and links.'
+                      : 'Manage platform content stored in Firestore.'}
               </p>
             </div>
           </div>
@@ -1007,6 +1085,81 @@ export function AdminForms({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* STEP / TAB NAVIGATION (When editing/creating a path) */}
+        {type === 'path' && (
+          <div className="px-3 sm:px-6 py-2.5 border-b border-border/60 bg-card/95 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => setPathStep('basics')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5 border",
+                pathStep === 'basics'
+                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                  : "bg-muted/40 border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/70"
+              )}
+            >
+              <BookOpen className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {language === 'ar'
+                  ? `1. بيانات المسار وترتيب الدورات (${path.courseIds?.filter(Boolean).length || 0})`
+                  : `1. Path Details & Sequential Courses (${path.courseIds?.filter(Boolean).length || 0})`}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPathStep('roadmap')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5 border",
+                pathStep === 'roadmap'
+                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                  : "bg-muted/40 border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/70"
+              )}
+            >
+              <MapIcon className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {language === 'ar'
+                  ? `2. الشرح التوضيحي وخريطة الطريق (${path.graphicRoadmap?.steps?.length || 0} مراحل)`
+                  : `2. Graphic Explain & Interactive Roadmap (${path.graphicRoadmap?.steps?.length || 0} Stages)`}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPathStep('toolkit')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5 border",
+                pathStep === 'toolkit'
+                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                  : "bg-muted/40 border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/70"
+              )}
+            >
+              <Wrench className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {language === 'ar'
+                  ? `3. الأدوات والمصادر الشاملة (${(path.graphicRoadmap?.essentialTools?.length || 0) + (path.graphicRoadmap?.globalResources?.length || 0)})`
+                  : `3. Global Tools & Resources (${(path.graphicRoadmap?.essentialTools?.length || 0) + (path.graphicRoadmap?.globalResources?.length || 0)})`}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPathStep('preview')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5 border",
+                pathStep === 'preview'
+                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                  : "bg-muted/40 border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/70"
+              )}
+            >
+              <Eye className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {language === 'ar' ? '4. معاينة حية لواجهة الطالب' : '4. Live Student UI/UX Preview'}
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* STEP / TAB NAVIGATION (When editing/creating a course) */}
         {type === 'course' && (
@@ -1143,15 +1296,29 @@ export function AdminForms({
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-3 self-end sm:pb-3">
+                    <div className="flex flex-col gap-2.5 self-end sm:pb-2">
                       <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-foreground">
                         <input 
                           type="checkbox" 
-                          checked={course.isSingleVideo} 
+                          checked={Boolean(course.isSingleVideo)} 
                           onChange={e => setCourse({ ...course, isSingleVideo: e.target.checked })} 
                           className="w-4 h-4 rounded text-primary focus:ring-primary" 
                         />
-                        <span>Is this a Masterclass? (Single 2h+ Video)</span>
+                        <span>Is this a Masterclass / Single Long Video? (2h+ Video)</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-3 py-2 rounded-xl">
+                        <input 
+                          type="checkbox" 
+                          checked={Boolean(course.isProject)} 
+                          onChange={e => setCourse({ ...course, isProject: e.target.checked })} 
+                          className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500" 
+                        />
+                        <span>
+                          {language === 'ar'
+                            ? 'هل هذا مشروع عملي حقيقي؟ (Real Project Build — يظهر في صفحة المشاريع)'
+                            : 'Is this a Real-World Project Build? (Appears on Projects Page)'}
+                        </span>
                       </label>
                     </div>
 
@@ -1651,87 +1818,1662 @@ export function AdminForms({
             </div>
           )}
 
-          {/* PATH FORM */}
-          {type === 'path' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-foreground mb-1">Path Title *</label>
-                  <input 
-                    value={path.title || ''} 
-                    onChange={e => setPath({ ...path, title: e.target.value })} 
-                    className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground" 
-                    placeholder="e.g. Full-Stack Web Development Path" 
-                  />
-                </div>
+          {/* PATH FORM (With Graphic Explain & Interactive Roadmap Builder) */}
+          {type === 'path' && (() => {
+            const isArUI = language === 'ar';
+            const gRoadmap = path.graphicRoadmap || {
+              enabled: true,
+              defaultExpanded: true,
+              title: '',
+              subtitle: '',
+              overviewText: '',
+              diagramImageUrl: '',
+              essentialTools: [],
+              globalResources: [],
+              steps: []
+            };
 
-                <div>
-                  <label className="block text-xs font-bold text-foreground mb-1">Icon Name</label>
-                  <select 
-                    value={path.icon} 
-                    onChange={e => setPath({ ...path, icon: e.target.value })} 
-                    className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground"
-                  >
-                    <option value="Code">Code</option>
-                    <option value="Terminal">Terminal</option>
-                    <option value="Layout">Layout</option>
-                    <option value="Database">Database</option>
-                    <option value="Shield">Shield</option>
-                  </select>
-                </div>
+            const updateGraphicRoadmap = (patch: Partial<typeof gRoadmap>) => {
+              setPath(prev => ({
+                ...prev,
+                graphicRoadmap: {
+                  ...(prev.graphicRoadmap || {
+                    enabled: true,
+                    defaultExpanded: true,
+                    title: '',
+                    subtitle: '',
+                    overviewText: '',
+                    diagramImageUrl: '',
+                    essentialTools: [],
+                    globalResources: [],
+                    steps: []
+                  }),
+                  ...patch
+                }
+              }));
+            };
 
-                <div className="col-span-1 sm:col-span-2">
-                  <label className="block text-xs font-bold text-foreground mb-1">Description</label>
-                  <textarea 
-                    value={path.description || ''} 
-                    onChange={e => setPath({ ...path, description: e.target.value })} 
-                    className="w-full bg-card border border-border/80 rounded-xl p-3 text-xs sm:text-sm text-foreground" 
-                    rows={3} 
-                    placeholder="Describe this career roadmap..."
-                  />
-                </div>
-              </div>
+            const handleClearRoadmapAndStartManual = () => {
+              updateGraphicRoadmap({
+                enabled: true,
+                defaultExpanded: true,
+                title: '',
+                subtitle: '',
+                overviewText: '',
+                diagramImageUrl: '',
+                essentialTools: [],
+                globalResources: [],
+                steps: [
+                  {
+                    id: `step_manual_${Date.now()}`,
+                    title: '',
+                    subtitle: isArUI ? 'المرحلة 1' : 'Stage 1',
+                    description: '',
+                    durationEstimate: isArUI ? 'الأسبوع 1' : 'Week 1',
+                    imageUrl: '',
+                    linkedCourseId: path.courseIds?.[0] || '',
+                    skills: [],
+                    tools: [],
+                    resources: []
+                  }
+                ]
+              });
+            };
 
-              <div className="pt-2">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-bold text-foreground">Linked Course IDs</h3>
-                  <button 
-                    onClick={() => setPath({ ...path, courseIds: [...(path.courseIds || []), ''] })} 
-                    className="text-xs px-2.5 py-1 rounded bg-primary/10 text-primary font-bold hover:bg-primary/20"
-                  >
-                    + Add Course ID
-                  </button>
-                </div>
+            const handleMoveCourse = (fromIdx: number, toIdx: number) => {
+              const current = [...(path.courseIds || [])];
+              if (toIdx < 0 || toIdx >= current.length) return;
+              const [moved] = current.splice(fromIdx, 1);
+              current.splice(toIdx, 0, moved);
+              setPath({ ...path, courseIds: current });
+            };
 
-                <div className="space-y-2">
-                  {path.courseIds?.map((cId, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <input 
-                        value={cId} 
-                        onChange={e => {
-                          const newIds = [...(path.courseIds || [])];
-                          newIds[idx] = e.target.value;
-                          setPath({ ...path, courseIds: newIds });
-                        }} 
-                        className="flex-1 bg-muted/30 border border-border/80 rounded-xl px-3 py-2 text-xs font-mono" 
-                        placeholder="Paste course ID..." 
-                      />
-                      <button 
-                        onClick={() => {
-                          const newIds = [...(path.courseIds || [])];
-                          newIds.splice(idx, 1);
-                          setPath({ ...path, courseIds: newIds });
-                        }} 
-                        className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+            const handleApplyRoadmapTemplate = (preset: 'frontend' | 'frontend_ar' | 'cyber' | 'linked_courses') => {
+              if (preset === 'frontend') {
+                updateGraphicRoadmap({
+                  enabled: true,
+                  defaultExpanded: true,
+                  title: path.title ? `${path.title} — Interactive Graphic Roadmap` : 'Frontend Engineering Interactive Roadmap',
+                  subtitle: 'Your distraction-free visual guide: exact sequence, required tools, official docs, and milestones from zero to job-ready Frontend Engineer.',
+                  overviewText: 'Follow this interactive roadmap step-by-step alongside the video playlists below. Before jumping into frameworks, make sure your local coding environment is configured and master each stage in sequence.',
+                  essentialTools: [
+                    { title: 'VS Code Editor', url: 'https://code.visualstudio.com/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vscode/vscode-original.svg' },
+                    { title: 'Node.js (LTS)', url: 'https://nodejs.org/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg' },
+                    { title: 'Git & GitHub', url: 'https://github.com/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg' },
+                    { title: 'Chrome DevTools', url: 'https://developer.chrome.com/docs/devtools', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/chrome/chrome-original.svg' }
+                  ],
+                  globalResources: [
+                    { title: 'MDN Web Docs (Official Reference)', url: 'https://developer.mozilla.org/', type: 'doc' },
+                    { title: 'Frontend Mentor (Real-World Practice)', url: 'https://www.frontendmentor.io/', type: 'other' },
+                    { title: 'Can I Use (Browser Support Tables)', url: 'https://caniuse.com/', type: 'doc' }
+                  ],
+                  steps: [
+                    {
+                      id: 'step_1_' + Date.now(),
+                      title: 'Semantic HTML5 & Web Architecture',
+                      subtitle: 'Stage 1 · Core Structure & Accessibility',
+                      description: 'Understand how browsers parse HTML, structure semantic documents, build accessible forms, and apply SEO best practices before writing a single line of styling.',
+                      durationEstimate: 'Week 1',
+                      linkedCourseId: path.courseIds?.[0] || 'html-crash-course',
+                      skills: ['Semantic Tags', 'Forms & Validation', 'DOM Tree', 'Web Accessibility (A11y)', 'SEO Meta Tags'],
+                      tools: [
+                        { title: 'Live Server Extension', url: 'https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer', type: 'tool' },
+                        { title: 'W3C Markup Validator', url: 'https://validator.w3.org/', type: 'tool' }
+                      ],
+                      resources: [
+                        { title: 'MDN HTML5 Reference Guide', url: 'https://developer.mozilla.org/en-US/docs/Web/HTML', type: 'doc' },
+                        { title: 'HTML5 Semantic Elements Cheatsheet', url: 'https://web.dev/learn/html/', type: 'article' }
+                      ]
+                    },
+                    {
+                      id: 'step_2_' + Date.now(),
+                      title: 'Modern CSS3, Flexbox & CSS Grid Systems',
+                      subtitle: 'Stage 2 · Responsive Layouts & Visual Polish',
+                      description: 'Master the Box Model, positioning, Flexbox 1D alignments, and 2D CSS Grid layouts to craft fluid interfaces that adapt to mobile, tablet, and desktop screens.',
+                      durationEstimate: 'Weeks 2–3',
+                      linkedCourseId: path.courseIds?.[1] || 'css-grid',
+                      skills: ['Box Model', 'Flexbox', 'CSS Grid', 'Media Queries', 'CSS Variables'],
+                      tools: [
+                        { title: 'Figma (Free Dev Mode)', url: 'https://www.figma.com/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/figma/figma-original.svg' },
+                        { title: 'Tailwind CSS Play', url: 'https://play.tailwindcss.com/', type: 'tool' }
+                      ],
+                      resources: [
+                        { title: 'CSS-Tricks Complete Guide to Grid', url: 'https://css-tricks.com/snippets/css/complete-guide-grid/', type: 'article' },
+                        { title: 'Flexbox Froggy Interactive Game', url: 'https://flexboxfroggy.com/', type: 'other' }
+                      ]
+                    },
+                    {
+                      id: 'step_3_' + Date.now(),
+                      title: 'JavaScript (ES6+), DOM Manipulation & Async APIs',
+                      subtitle: 'Stage 3 · Interactive Programming & Data Fetching',
+                      description: 'Bring pages to life with variables, functions, array methods, DOM events, Fetch API, Promises, and Async/Await for dynamic client-side logic.',
+                      durationEstimate: 'Weeks 4–6',
+                      linkedCourseId: path.courseIds?.[2] || 'javascript-basics',
+                      skills: ['ES6+ Syntax', 'DOM Events', 'Array Methods', 'Fetch API & JSON', 'Async / Await'],
+                      tools: [
+                        { title: 'Console & Network Inspector', url: 'https://developer.chrome.com/docs/devtools/console', type: 'tool' },
+                        { title: 'Hoppscotch API Tester', url: 'https://hoppscotch.io/', type: 'tool' }
+                      ],
+                      resources: [
+                        { title: 'JavaScript.info Modern Tutorial', url: 'https://javascript.info/', type: 'doc' },
+                        { title: "You Don't Know JS (Open Book)", url: 'https://github.com/getify/You-Dont-Know-JS', type: 'repo' }
+                      ]
+                    },
+                    {
+                      id: 'step_4_' + Date.now(),
+                      title: 'React.js, Component Architecture & State Management',
+                      subtitle: 'Stage 4 · Production Single-Page Applications',
+                      description: 'Build scalable modular web applications with React components, Hooks (useState, useEffect), client-side routing, and deployment to production.',
+                      durationEstimate: 'Weeks 7–10',
+                      linkedCourseId: path.courseIds?.[3] || 'react-basics',
+                      skills: ['JSX & Components', 'Props & State', 'React Hooks', 'React Router', 'Vite Bundler'],
+                      tools: [
+                        { title: 'Vite Build Tool', url: 'https://vitejs.dev/', type: 'tool' },
+                        { title: 'React Developer Tools', url: 'https://react.dev/learn/react-developer-tools', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg' }
+                      ],
+                      resources: [
+                        { title: 'Official React.dev Interactive Docs', url: 'https://react.dev/learn', type: 'doc' },
+                        { title: 'Vercel Free Frontend Hosting', url: 'https://vercel.com/', type: 'tool' }
+                      ]
+                    }
+                  ]
+                });
+              } else if (preset === 'frontend_ar') {
+                updateGraphicRoadmap({
+                  enabled: true,
+                  defaultExpanded: true,
+                  title: path.title ? `${path.title} — خريطة الطريق التفاعلية` : 'خريطة الطريق التفاعلية لتطوير الواجهات وتطبيقات الويب',
+                  subtitle: 'دليلك البصري خطوة بخطوة: الترتيب الصحيح للتعلم، الأدوات الأساسية، والروابط والمصادر الرسمية للتعلم بدون تشتيت.',
+                  overviewText: 'اتبع هذه الخريطة التفاعلية بالترتيب مع قوائم التشغيل بالأسفل. جهّز بيئة العمل والأدوات المطلوبة في كل مرحلة وطبق عملياً قبل الانتقال للمرحلة التالية.',
+                  essentialTools: [
+                    { title: 'محرر الأكواد VS Code', url: 'https://code.visualstudio.com/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vscode/vscode-original.svg' },
+                    { title: 'Node.js (LTS)', url: 'https://nodejs.org/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg' },
+                    { title: 'Git & GitHub', url: 'https://github.com/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg' },
+                    { title: 'أدوات مطوري متصفح Chrome', url: 'https://developer.chrome.com/docs/devtools', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/chrome/chrome-original.svg' }
+                  ],
+                  globalResources: [
+                    { title: 'موسوعة MDN Web Docs الرسمية', url: 'https://developer.mozilla.org/ar/', type: 'doc' },
+                    { title: 'منصة Frontend Mentor للتدريب العملي', url: 'https://www.frontendmentor.io/', type: 'other' },
+                    { title: 'أكاديمية حسوب — مقالات البرمجة العربية', url: 'https://academy.hsoub.com/', type: 'article' }
+                  ],
+                  steps: [
+                    {
+                      id: 'step_ar_1_' + Date.now(),
+                      title: 'أساسيات HTML5 وبناء هيكل صفحات الويب',
+                      subtitle: 'المرحلة 1 · البنية الدلالية والنماذج ومعايير الوصول',
+                      description: 'فهم كيفية عمل المتصفح، كتابة عناصر HTML5 الدلالية، إنشاء النماذج التفاعلية، وتطبيق أساسيات تحسين محركات البحث SEO قبل البدء بالتنسيق.',
+                      durationEstimate: 'الأسبوع 1',
+                      linkedCourseId: path.courseIds?.[0] || '',
+                      skills: ['عناصر HTML5 الدلالية', 'النماذج والجداول', 'شجرة DOM', 'تحسين محركات البحث SEO'],
+                      tools: [
+                        { title: 'إضافة Live Server', url: 'https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer', type: 'tool' }
+                      ],
+                      resources: [
+                        { title: 'دليل HTML الشامل من MDN', url: 'https://developer.mozilla.org/en-US/docs/Web/HTML', type: 'doc' }
+                      ]
+                    },
+                    {
+                      id: 'step_ar_2_' + Date.now(),
+                      title: 'تنسيق الواجهات بـ CSS3 و Flexbox و CSS Grid',
+                      subtitle: 'المرحلة 2 · التصميم المتجاوب مع الهاتف والتابلت والكمبيوتر',
+                      description: 'إتقان تصميم واجهات عصرية متجاوبة بالكامل مع جميع الشاشات باستخدام Flexbox و CSS Grid والمتغيرات.',
+                      durationEstimate: 'الأسبوع 2 – 3',
+                      linkedCourseId: path.courseIds?.[1] || '',
+                      skills: ['Box Model', 'Flexbox', 'CSS Grid', 'التصميم المتجاوب Responsive', 'الوضع الليلي والنهاري'],
+                      tools: [
+                        { title: 'أداة التصميم Figma', url: 'https://www.figma.com/', type: 'tool', logoUrl: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/figma/figma-original.svg' }
+                      ],
+                      resources: [
+                        { title: 'لعبة Flexbox Froggy التفاعلية', url: 'https://flexboxfroggy.com/#ar', type: 'other' }
+                      ]
+                    },
+                    {
+                      id: 'step_ar_3_' + Date.now(),
+                      title: 'برمجة التفاعل بـ JavaScript (ES6+) وربط الـ APIs',
+                      subtitle: 'المرحلة 3 · المنطق البرمجي والتعامل مع البيانات',
+                      description: 'تحويل الصفحات الثابتة إلى تطبيقات تفاعلية والتعامل مع الأحداث والبيانات غير المتزامنة عبر Fetch API و Async/Await.',
+                      durationEstimate: 'الأسبوع 4 – 6',
+                      linkedCourseId: path.courseIds?.[2] || '',
+                      skills: ['أساسيات ES6+', 'التحكم في DOM', 'المصفوفات والكائنات', 'Fetch API & JSON'],
+                      tools: [
+                        { title: 'Hoppscotch لاختبار الـ APIs', url: 'https://hoppscotch.io/', type: 'tool' }
+                      ],
+                      resources: [
+                        { title: 'المرجع الحديث للغة JavaScript', url: 'https://ar.javascript.info/', type: 'doc' }
+                      ]
+                    },
+                    {
+                      id: 'step_ar_4_' + Date.now(),
+                      title: 'بناء تطبيقات متكاملة باستخدام React.js ونشر المشاريع',
+                      subtitle: 'المرحلة 4 · المكونات وإدارة الحالة والرفع على الإنترنت',
+                      description: 'بناء تطبيقات ويب حديثة قابلة للتوسع باستخدام المكونات والخطافات (Hooks) ورفع مشاريعك في معرض أعمال احترافي.',
+                      durationEstimate: 'الأسبوع 7 – 10',
+                      linkedCourseId: path.courseIds?.[3] || '',
+                      skills: ['مكونات React', 'React Hooks', 'التنقل بين الصفحات', 'رفع المشاريع على Vercel'],
+                      tools: [
+                        { title: 'أداة البناء السريعة Vite', url: 'https://vitejs.dev/', type: 'tool' }
+                      ],
+                      resources: [
+                        { title: 'التوثيق الرسمي لـ React.dev', url: 'https://ar.react.dev/learn', type: 'doc' }
+                      ]
+                    }
+                  ]
+                });
+              } else if (preset === 'cyber') {
+                updateGraphicRoadmap({
+                  enabled: true,
+                  defaultExpanded: true,
+                  title: path.title ? `${path.title} — Cyber Defense Roadmap` : 'Cybersecurity & Ethical Hacking Interactive Roadmap',
+                  subtitle: 'Step-by-step security engineering progression: Networking fundamentals, Linux administration, Python automation, and Penetration Testing.',
+                  overviewText: 'Follow each stage sequentially. Always practice inside isolated virtual labs or authorized platforms before running network or security tools.',
+                  essentialTools: [
+                    { title: 'Kali Linux / VirtualBox', url: 'https://www.kali.org/', type: 'tool' },
+                    { title: 'Wireshark Packet Analyzer', url: 'https://www.wireshark.org/', type: 'tool' },
+                    { title: 'Burp Suite Community', url: 'https://portswigger.net/burp/communitydownload', type: 'tool' }
+                  ],
+                  globalResources: [
+                    { title: 'OWASP Top 10 Security Risks', url: 'https://owasp.org/www-project-top-ten/', type: 'doc' },
+                    { title: 'TryHackMe Guided Cyber Labs', url: 'https://tryhackme.com/', type: 'other' }
+                  ],
+                  steps: [
+                    {
+                      id: 'cyber_1_' + Date.now(),
+                      title: 'Networking Fundamentals & TCP/IP Protocols',
+                      subtitle: 'Stage 1 · OSI Model, DNS, HTTP & Subnetting',
+                      description: 'Master how data travels across networks, IP addressing, routing, ports, and packet inspection.',
+                      durationEstimate: 'Weeks 1–2',
+                      linkedCourseId: path.courseIds?.[0] || '',
+                      skills: ['OSI & TCP/IP', 'Subnetting & CIDR', 'DNS / DHCP', 'Packet Analysis'],
+                      tools: [{ title: 'Wireshark', url: 'https://www.wireshark.org/', type: 'tool' }],
+                      resources: [{ title: 'Professor Messer Network+ Notes', url: 'https://www.professormesser.com/', type: 'doc' }]
+                    },
+                    {
+                      id: 'cyber_2_' + Date.now(),
+                      title: 'Operating Systems, Linux CLI & System Hardening',
+                      subtitle: 'Stage 2 · Permissions, Bash Scripting & Services',
+                      description: 'Navigate Linux filesystems, manage users and permissions, configure firewalls, and automate tasks via Bash.',
+                      durationEstimate: 'Weeks 3–4',
+                      linkedCourseId: path.courseIds?.[1] || '',
+                      skills: ['Linux CLI', 'File Permissions', 'Bash Scripting', 'Systemd & Logs'],
+                      tools: [{ title: 'Ubuntu / Kali VM', url: 'https://ubuntu.com/', type: 'tool' }],
+                      resources: [{ title: 'Linux Journey Interactive Guide', url: 'https://linuxjourney.com/', type: 'doc' }]
+                    },
+                    {
+                      id: 'cyber_3_' + Date.now(),
+                      title: 'Python for Security & Recon Automation',
+                      subtitle: 'Stage 3 · Custom Scripts, Sockets & Web Requests',
+                      description: 'Write custom security scripts, automate reconnaissance, parse logs, and interact with web APIs using Python.',
+                      durationEstimate: 'Weeks 5–7',
+                      linkedCourseId: path.courseIds?.[2] || '',
+                      skills: ['Python Scripting', 'Socket Programming', 'HTTP Requests', 'Regex Parsing'],
+                      tools: [{ title: 'Python 3 + VS Code', url: 'https://www.python.org/', type: 'tool' }],
+                      resources: [{ title: 'Automate the Boring Stuff with Python', url: 'https://automatetheboringstuff.com/', type: 'doc' }]
+                    }
+                  ]
+                });
+              } else if (preset === 'linked_courses') {
+                const validCourseIds = (path.courseIds || []).filter(Boolean);
+                const generatedSteps: LearningPathRoadmapStep[] = validCourseIds.map((cId, idx) => {
+                  const foundCourse = allCourses.find(c => c.id === cId);
+                  return {
+                    id: `step_${idx + 1}_${Date.now()}`,
+                    title: foundCourse ? foundCourse.title : isArUI ? `المرحلة ${idx + 1}` : `Stage ${idx + 1}`,
+                    subtitle: isArUI
+                      ? `المرحلة ${idx + 1} · ${foundCourse?.category || 'المنهج الأساسي'}`
+                      : `Stage ${idx + 1} · ${foundCourse?.category || 'Core Curriculum'}`,
+                    description:
+                      foundCourse?.description ||
+                      (isArUI
+                        ? 'أكمل جميع الدروس المرئية والتطبيقات العملية في هذه المرحلة قبل الانتقال للمرحلة التالية.'
+                        : 'Complete all video lessons and hands-on exercises in this stage before moving to the next milestone.'),
+                    durationEstimate: isArUI ? `المرحلة ${idx + 1}` : `Stage ${idx + 1}`,
+                    linkedCourseId: cId,
+                    imageUrl: foundCourse?.thumbnail || '',
+                    skills: [foundCourse?.category || 'Core Concepts', foundCourse?.subCategory || 'Practical Lab'].filter(Boolean),
+                    tools: [],
+                    resources: (foundCourse?.resources || []).map(r => ({
+                      title: r.title,
+                      url: r.url,
+                      logoUrl: r.logoUrl,
+                      type: 'doc'
+                    }))
+                  };
+                });
+                updateGraphicRoadmap({
+                  enabled: true,
+                  defaultExpanded: true,
+                  title: path.title
+                    ? isArUI
+                      ? `${path.title} — خريطة الطريق التفاعلية`
+                      : `${path.title} — Interactive Learning Roadmap`
+                    : isArUI
+                      ? 'خريطة الطريق التفاعلية للمسار'
+                      : 'Interactive Learning Roadmap',
+                  subtitle: isArUI
+                    ? 'اتبع كل مرحلة بالترتيب، جهز أدواتك، وأكمل قوائم التشغيل المرتبطة بدون تشتيت.'
+                    : 'Follow each stage in order, set up your tools, and complete the linked video playlists without distraction.',
+                  steps: generatedSteps
+                });
+              }
+            };
+
+            const selectedPathLang: 'en' | 'ar' =
+              (path.language || '').toLowerCase().includes('ar') ? 'ar' : 'en';
+
+            // Only include multi-video Playlists (exclude single-video Masterclass short videos) that match the selected Path Language
+            const languagePlaylistsOnly = filterByLanguage(
+              allCourses.filter(c => !isMasterclassCourse(c)),
+              selectedPathLang
+            );
+
+            const filteredCatalogCourses = languagePlaylistsOnly.filter(c => {
+              if (!pathCourseSearch.trim()) return true;
+              const q = pathCourseSearch.toLowerCase();
+              return (
+                c.title.toLowerCase().includes(q) ||
+                (c.instructor || '').toLowerCase().includes(q) ||
+                (c.category || '').toLowerCase().includes(q) ||
+                c.id.toLowerCase().includes(q)
+              );
+            });
+
+            return (
+              <div className="space-y-6">
+                {/* STEP 1: PATH BASICS & SEQUENTIAL COURSES (MANUAL ORGANIZER + 1-CLICK PICKER) */}
+                {pathStep === 'basics' && (
+                  <div className="space-y-6">
+                    {/* Path Core Metadata Card */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-muted/20 border border-border/80 space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                        {/* Path Title */}
+                        <div className="sm:col-span-5">
+                          <label className="block text-xs font-bold text-foreground mb-1.5">
+                            {isArUI ? 'عنوان المسار التعليمي *' : 'Path Title *'}
+                          </label>
+                          <input
+                            dir="auto"
+                            value={path.title || ''}
+                            onChange={e => setPath({ ...path, title: e.target.value })}
+                            className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all"
+                            placeholder={
+                              selectedPathLang === 'ar'
+                                ? 'مثال: مسار تطوير الواجهات الأمامية Frontend Path'
+                                : 'e.g. Frontend Path / Full-Stack Web Development'
+                            }
+                          />
+                        </div>
+
+                        {/* Path Version Language Selector (English vs Arabic) */}
+                        <div className="sm:col-span-4">
+                          <label className="block text-xs font-bold text-foreground mb-1.5">
+                            {isArUI
+                              ? 'نسخة لغة المسار (تحدد قوائم التشغيل المعروضة)'
+                              : 'Path Language Version (Filters Playlists)'}
+                          </label>
+                          <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-card border border-border/80">
+                            <button
+                              type="button"
+                              onClick={() => setPath({ ...path, language: 'English' })}
+                              className={cn(
+                                'py-2 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5',
+                                selectedPathLang === 'en'
+                                  ? 'bg-primary text-primary-foreground shadow-2xs'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              )}
+                            >
+                              <span>🇬🇧 English Path</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPath({ ...path, language: 'Arabic' })}
+                              className={cn(
+                                'py-2 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5',
+                                selectedPathLang === 'ar'
+                                  ? 'bg-primary text-primary-foreground shadow-2xs'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              )}
+                            >
+                              <span>🇸🇦 مسار عربي</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Path Preset Icon Selector */}
+                        <div className="sm:col-span-3">
+                          <label className="block text-xs font-bold text-foreground mb-1.5">
+                            {isArUI ? 'أيقونة المسار الافتراضية' : 'Path Icon Preset'}
+                          </label>
+                          <select
+                            value={path.icon || 'Code'}
+                            onChange={e => setPath({ ...path, icon: e.target.value })}
+                            className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all"
+                          >
+                            <option value="Code">Code (Development / برمجة)</option>
+                            <option value="Layout">Layout (Frontend & UI / واجهات)</option>
+                            <option value="Terminal">Terminal (CLI & DevOps / أنظمة)</option>
+                            <option value="Database">Database (Backend & Data / بيانات)</option>
+                            <option value="Shield">Shield (Cybersecurity / أمن سيبراني)</option>
+                            <option value="Zap">Zap (AI & Automation / ذكاء اصطناعي)</option>
+                            <option value="Layers">Layers (Full-Stack / متكامل)</option>
+                            <option value="Compass">Compass (Career Roadmap / مسار مهني)</option>
+                          </select>
+                        </div>
+
+                        {/* Custom Path Icon Image URL Input + Live Preview */}
+                        <div className="sm:col-span-12">
+                          <label className="block text-xs font-bold text-foreground mb-1.5">
+                            {isArUI
+                              ? 'رابط أيقونة مخصصة للمسار (Path Icon URL — اختياري، يظهر بدلاً من الأيقونة الافتراضية)'
+                              : 'Custom Path Icon URL (Optional — overrides preset icon with your custom logo/SVG/PNG)'}
+                          </label>
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-card border border-border/80 flex items-center justify-center shrink-0 overflow-hidden p-1.5">
+                              {path.iconUrl ? (
+                                <img
+                                  src={path.iconUrl}
+                                  alt="Path icon preview"
+                                  className="w-full h-full object-contain"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                              )}
+                            </div>
+                            <input
+                              dir="ltr"
+                              value={path.iconUrl || ''}
+                              onChange={e => setPath({ ...path, iconUrl: e.target.value })}
+                              placeholder="https://... (Paste custom icon/logo image URL, e.g. React, Python, or Frontend SVG)"
+                              className="flex-1 bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs font-mono text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all"
+                            />
+                            {path.iconUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setPath({ ...path, iconUrl: '' })}
+                                className="px-2.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-xs font-bold text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                              >
+                                {isArUI ? 'مسح' : 'Clear'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-12">
+                          <label className="block text-xs font-bold text-foreground mb-1.5">
+                            {isArUI ? 'وصف المسار التعليمي (يدعم العربية والإنجليزية)' : 'Path Overview Description (Supports English & Arabic)'}
+                          </label>
+                          <textarea
+                            dir="auto"
+                            value={path.description || ''}
+                            onChange={e => setPath({ ...path, description: e.target.value })}
+                            className="w-full bg-card border border-border/80 rounded-xl p-3 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all leading-relaxed"
+                            rows={3}
+                            placeholder={
+                              isArUI
+                                ? 'اشرح ما سيتعلمه الطالب في هذا المسار وما المهارات التي سيكتسبها...'
+                                : 'Describe what students will master in this learning path...'
+                            }
+                          />
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
+
+                    {/* Linked Courses Manager: Manual Sequence Organizer + 1-Click Catalog Selector */}
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
+                      {/* Left Column: Sequential Courses in This Path (With Manual Reordering Controls) */}
+                      <div className="lg:col-span-6 p-4 sm:p-5 rounded-2xl bg-card border border-border/80 flex flex-col justify-between space-y-4 shadow-xs">
+                        <div className="space-y-4">
+                          <div className="flex flex-wrap items-start justify-between gap-2.5 pb-3 border-b border-border/60">
+                            <div>
+                              <h3 className="text-xs sm:text-sm font-black text-foreground flex items-center gap-2">
+                                <Layers className="w-4 h-4 text-primary shrink-0" />
+                                <span>
+                                  {isArUI
+                                    ? `قوائم التشغيل المتسلسلة في هذا المسار (${path.courseIds?.filter(Boolean).length || 0})`
+                                    : `Sequential Courses in This Path (${path.courseIds?.filter(Boolean).length || 0})`}
+                                </span>
+                              </h3>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                {isArUI
+                                  ? 'رتب الدورات يدوياً (أعلى / أسفل / تغيير الرقم) لتظهر للطلاب بهذا التسلسل الدقيق.'
+                                  : 'Organize playlists manually (Move Up / Down / Jump position) — students see this exact sequence.'}
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              {(path.courseIds?.length || 0) > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPath({ ...path, courseIds: [] })}
+                                  className="text-[11px] px-2.5 py-1.5 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-bold hover:bg-red-500/20 transition-colors cursor-pointer flex items-center gap-1"
+                                  title={isArUI ? 'حذف جميع الدورات من القائمة' : 'Clear all courses from path'}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>{isArUI ? 'مسح الكل' : 'Clear All'}</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setPath({ ...path, courseIds: [...(path.courseIds || []), ''] })}
+                                className="text-xs px-3 py-1.5 rounded-xl bg-primary/10 text-primary border border-primary/20 font-bold hover:bg-primary/20 transition-colors cursor-pointer flex items-center gap-1"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>{isArUI ? 'إضافة خانة يدوية' : 'Add Manual Slot'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2.5 max-h-[380px] overflow-y-auto pe-1">
+                            {(path.courseIds || []).map((cId, idx) => {
+                              const matchedCourse = allCourses.find(c => c.id === cId);
+                              const totalItems = (path.courseIds || []).length;
+                              return (
+                                <div
+                                  key={`${idx}-${cId}`}
+                                  className="p-3 rounded-2xl bg-muted/25 hover:bg-muted/40 border border-border/80 transition-all space-y-2.5"
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    {/* Direct Sequence Position Selector for fast manual organizing */}
+                                    <div className="flex flex-col items-center shrink-0">
+                                      <select
+                                        value={idx}
+                                        onChange={e => handleMoveCourse(idx, Number(e.target.value))}
+                                        title={isArUI ? 'تغيير ترتيب الدورة مباشرة' : 'Jump to position'}
+                                        className="w-11 h-8 rounded-xl bg-card border border-border text-xs font-mono font-black text-primary text-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                      >
+                                        {Array.from({ length: totalItems }).map((_, posIdx) => (
+                                          <option key={posIdx} value={posIdx}>
+                                            #{posIdx + 1}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    {matchedCourse?.thumbnail && (
+                                      <img
+                                        src={matchedCourse.thumbnail}
+                                        alt=""
+                                        className="w-12 h-8 rounded-lg object-cover bg-muted border border-border/60 shrink-0 hidden sm:block"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    )}
+
+                                    <div className="flex-1 min-w-0">
+                                      <input
+                                        dir="auto"
+                                        value={cId}
+                                        onChange={e => {
+                                          const newIds = [...(path.courseIds || [])];
+                                          newIds[idx] = e.target.value;
+                                          setPath({ ...path, courseIds: newIds });
+                                        }}
+                                        className="w-full bg-card border border-border/80 rounded-xl px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                                        placeholder={isArUI ? 'معرف قائمة التشغيل (مثال: html-crash-course)' : 'Playlist ID (e.g. html-crash-course)'}
+                                      />
+                                    </div>
+
+                                    {/* Manual Up / Down / Remove Buttons */}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={idx === 0}
+                                        onClick={() => handleMoveCourse(idx, idx - 1)}
+                                        className="px-2 py-1.5 rounded-lg bg-card border border-border/80 hover:bg-muted disabled:opacity-30 text-foreground text-[11px] font-bold cursor-pointer transition-colors"
+                                        title={isArUI ? 'تحريك لأعلى' : 'Move Up'}
+                                      >
+                                        ↑
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={idx === totalItems - 1}
+                                        onClick={() => handleMoveCourse(idx, idx + 1)}
+                                        className="px-2 py-1.5 rounded-lg bg-card border border-border/80 hover:bg-muted disabled:opacity-30 text-foreground text-[11px] font-bold cursor-pointer transition-colors"
+                                        title={isArUI ? 'تحريك لأسفل' : 'Move Down'}
+                                      >
+                                        ↓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const newIds = [...(path.courseIds || [])];
+                                          newIds.splice(idx, 1);
+                                          setPath({ ...path, courseIds: newIds });
+                                        }}
+                                        className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer transition-colors"
+                                        title={isArUI ? 'حذف من المسار' : 'Remove Course from Path'}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Quick Course Selector Dropdown (Filtered by Path Language & Playlists Only) */}
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-border/40 text-[11px]">
+                                    <select
+                                      value={matchedCourse ? matchedCourse.id : ''}
+                                      onChange={e => {
+                                        if (!e.target.value) return;
+                                        const newIds = [...(path.courseIds || [])];
+                                        newIds[idx] = e.target.value;
+                                        setPath({ ...path, courseIds: newIds });
+                                      }}
+                                      className="bg-card/80 border border-border/70 rounded-lg px-2.5 py-1 text-[11px] text-foreground max-w-full sm:max-w-[260px] truncate"
+                                    >
+                                      <option value="">
+                                        {isArUI
+                                          ? `— اختر قائمة تشغيل (${selectedPathLang === 'ar' ? 'عربي' : 'English'}) —`
+                                          : `— Select ${selectedPathLang === 'ar' ? 'Arabic' : 'English'} Playlist —`}
+                                      </option>
+                                      {languagePlaylistsOnly.map(courseOption => (
+                                        <option key={courseOption.id} value={courseOption.id}>
+                                          {courseOption.title} ({courseOption.videos?.length || 0} videos)
+                                        </option>
+                                      ))}
+                                    </select>
+
+                                    {matchedCourse ? (
+                                      <span className="text-primary font-bold truncate">
+                                        ✓ {matchedCourse.title} ({matchedCourse.videos?.length || 0}{' '}
+                                        {isArUI ? 'درس' : 'videos'})
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground italic">
+                                        {isArUI ? 'اكتب المعرف يدوياً أو اختر من القائمة' : 'Enter Playlist ID or choose from dropdown'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {(!path.courseIds || path.courseIds.length === 0) && (
+                              <div className="p-8 text-center rounded-2xl bg-muted/15 border border-dashed border-border space-y-2">
+                                <Layers className="w-7 h-7 text-muted-foreground/50 mx-auto" />
+                                <p className="text-xs font-bold text-foreground">
+                                  {isArUI ? 'لا توجد قوائم تشغيل مضافة في هذا المسار بعد' : 'No Sequential Playlists Linked Yet'}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground max-w-xs mx-auto">
+                                  {isArUI
+                                    ? 'اضغط على قوائم التشغيل من الكتالوج المجاور لإضافتها، أو اضغط "إضافة خانة يدوية" لترتيبها يدوياً.'
+                                    : 'Click playlists from the catalog picker or click "+ Add Manual Slot" to build your sequence.'}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Column: 1-Click Course Picker from Catalog (Filtered by Path Language & Playlists Only) */}
+                      <div className="lg:col-span-6 p-4 sm:p-5 rounded-2xl bg-card border border-border/80 space-y-3.5 shadow-xs">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-xs sm:text-sm font-black text-foreground flex items-center gap-2">
+                              <span>
+                                {isArUI
+                                  ? 'إضافة سريعة بنقرة واحدة من كتالوج قوائم التشغيل'
+                                  : '1-Click Add from Courses Catalog'}
+                              </span>
+                            </h3>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              {selectedPathLang === 'ar'
+                                ? isArUI
+                                  ? 'يعرض فقط قوائم التشغيل العربية الكاملة (يستثني الفيديوهات القصيرة Masterclasses).'
+                                  : 'Showing Arabic full Playlists only (Masterclass short videos are excluded).'
+                                : isArUI
+                                  ? 'يعرض فقط قوائم التشغيل الإنجليزية الكاملة (يستثني الفيديوهات القصيرة Masterclasses).'
+                                  : 'Showing English full Playlists only (Masterclass short videos are excluded).'}
+                            </p>
+                          </div>
+
+                          <span className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20 text-[10px] font-black shrink-0">
+                            {selectedPathLang === 'ar'
+                              ? `🇸🇦 ${filteredCatalogCourses.length} قائمة تشغيل عربية`
+                              : `🇬🇧 ${filteredCatalogCourses.length} English Playlists`}
+                          </span>
+                        </div>
+
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-muted-foreground absolute top-1/2 -translate-y-1/2 start-3" />
+                          <input
+                            dir="auto"
+                            type="text"
+                            value={pathCourseSearch}
+                            onChange={e => setPathCourseSearch(e.target.value)}
+                            placeholder={
+                              isArUI
+                                ? 'ابحث باسم الدورة أو القسم أو المدرب...'
+                                : 'Search courses by title, category, or instructor...'
+                            }
+                            className="w-full ps-8 pe-3 py-2.5 bg-muted/20 border border-border/80 rounded-xl text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </div>
+
+                        <div className="space-y-2 max-h-[340px] overflow-y-auto pe-1">
+                          {filteredCatalogCourses.map(c => {
+                            const selectedIdx = (path.courseIds || []).indexOf(c.id);
+                            const isSelected = selectedIdx !== -1;
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  const current = (path.courseIds || []).filter(Boolean);
+                                  if (isSelected) {
+                                    setPath({ ...path, courseIds: current.filter(id => id !== c.id) });
+                                  } else {
+                                    setPath({ ...path, courseIds: [...current, c.id] });
+                                  }
+                                }}
+                                className={cn(
+                                  'w-full text-start p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2.5 cursor-pointer',
+                                  isSelected
+                                    ? 'bg-primary/10 border-primary text-foreground shadow-2xs'
+                                    : 'bg-card hover:bg-muted/40 border-border/70 text-foreground'
+                                )}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  {c.thumbnail && (
+                                    <img
+                                      src={c.thumbnail}
+                                      alt=""
+                                      className="w-11 h-8 rounded-lg object-cover bg-muted shrink-0 border border-border/50"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-bold truncate" dir="auto">
+                                      {c.title}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground truncate">
+                                      {c.category} · {c.videos?.length || 0} {isArUI ? 'فيديو' : 'videos'} · ID: {c.id}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <span
+                                  className={cn(
+                                    'px-2.5 py-1 rounded-lg text-[10px] font-black shrink-0',
+                                    isSelected
+                                      ? 'bg-primary text-primary-foreground'
+                                      : 'bg-muted text-muted-foreground'
+                                  )}
+                                >
+                                  {isSelected
+                                    ? isArUI
+                                      ? `مضاف #${selectedIdx + 1} ✓`
+                                      : `Step #${selectedIdx + 1} ✓`
+                                    : isArUI
+                                      ? '+ إضافة'
+                                      : '+ Add'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 2: GRAPHIC EXPLAIN & INTERACTIVE ROADMAP STAGES BUILDER */}
+                {pathStep === 'roadmap' && (
+                  <div className="space-y-6">
+                    {/* Top Enable Toggle + 1-Click Smart Templates + 1-Click Clean All & Add Manual */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-muted/25 border border-border/80 space-y-4 shadow-xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <h3 className="text-sm sm:text-base font-black text-foreground flex items-center gap-2">
+                            <MapIcon className="w-4 h-4 text-primary shrink-0" />
+                            <span>
+                              {isArUI
+                                ? 'إعدادات الشرح التوضيحي وخريطة الطريق التفاعلية'
+                                : 'Graphic Explain & Interactive Roadmap Configuration'}
+                            </span>
+                          </h3>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {isArUI
+                              ? 'يمكن للطلاب استعراض المراحل والأدوات والروابط والصور التوضيحية، مع إمكانية إخفاء أو إظهار الخريطة في أي وقت للتعلم بدون تشتيت.'
+                              : 'Students can inspect stages, required tools, links, and diagrams — and toggle Hide/Visible anytime for distraction-free learning.'}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 shrink-0">
+                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-card border border-border/80 text-xs font-bold text-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={gRoadmap.enabled !== false}
+                              onChange={e => updateGraphicRoadmap({ enabled: e.target.checked })}
+                              className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer"
+                            />
+                            <span>{isArUI ? 'تفعيل خريطة الطريق' : 'Enable Graphic Roadmap'}</span>
+                          </label>
+
+                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-card border border-border/80 text-xs font-bold text-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={gRoadmap.defaultExpanded !== false}
+                              onChange={e => updateGraphicRoadmap({ defaultExpanded: e.target.checked })}
+                              className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer"
+                            />
+                            <span>{isArUI ? 'ظاهرة افتراضياً' : 'Visible by Default'}</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Quick-Fill Roadmap Starter Templates + 1-Click Clean All & Add Manually */}
+                      <div className="pt-3.5 border-t border-border/60 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-black text-foreground me-1">
+                            {isArUI ? 'قوالب جاهزة سريعة:' : 'Quick-Fill Roadmap Starter Templates:'}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => handleApplyRoadmapTemplate('frontend')}
+                            className="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-bold cursor-pointer transition-colors"
+                          >
+                            {isArUI ? 'قالب Frontend (إنجليزي)' : 'Frontend Template (EN)'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleApplyRoadmapTemplate('frontend_ar')}
+                            className="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-bold cursor-pointer transition-colors"
+                          >
+                            {isArUI ? 'قالب تطوير الويب (عربي متكامل)' : 'Arabic Web Roadmap Template (AR)'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleApplyRoadmapTemplate('cyber')}
+                            className="px-3 py-1.5 rounded-xl bg-card hover:bg-muted border border-border/80 text-foreground text-xs font-bold cursor-pointer transition-colors"
+                          >
+                            {isArUI ? 'قالب الأمن السيبراني' : 'Cybersecurity Template'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleApplyRoadmapTemplate('linked_courses')}
+                            disabled={!(path.courseIds && path.courseIds.filter(Boolean).length > 0)}
+                            className="px-3 py-1.5 rounded-xl bg-card hover:bg-muted disabled:opacity-40 border border-border/80 text-foreground text-xs font-bold cursor-pointer transition-colors"
+                          >
+                            {isArUI
+                              ? `توليد تلقائي من الدورات المختارة (${path.courseIds?.filter(Boolean).length || 0})`
+                              : `Auto-Generate from Linked Courses (${path.courseIds?.filter(Boolean).length || 0})`}
+                          </button>
+                        </div>
+
+                        {/* 1-CLICK CLEAN ALL & ADD MANUALLY BUTTON */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleClearRoadmapAndStartManual}
+                            className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/25 text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-2xs"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              {isArUI
+                                ? 'مسح الكل بنقرة واحدة والإضافة يدوياً'
+                                : '1-Click Clean All & Add Manually'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Graphic Explain Header, Overview Manual & Visual Infographic Image */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-card border border-border/80 grid grid-cols-1 sm:grid-cols-2 gap-4 shadow-xs">
+                      <div>
+                        <label className="block text-xs font-bold text-foreground mb-1.5">
+                          {isArUI ? 'عنوان قسم خريطة الطريق (يدعم العربية والإنجليزية)' : 'Roadmap Section Title (Optional)'}
+                        </label>
+                        <input
+                          dir="auto"
+                          value={gRoadmap.title || ''}
+                          onChange={e => updateGraphicRoadmap({ title: e.target.value })}
+                          placeholder={
+                            isArUI
+                              ? 'مثال: خريطة الطريق التفاعلية لتطوير الواجهات'
+                              : 'e.g. Frontend Engineering Interactive Roadmap'
+                          }
+                          className="w-full bg-muted/20 border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-foreground mb-1.5">
+                          {isArUI ? 'العنوان الفرعي / الوصف المختصر' : 'Roadmap Subtitle / Tagline (Optional)'}
+                        </label>
+                        <input
+                          dir="auto"
+                          value={gRoadmap.subtitle || ''}
+                          onChange={e => updateGraphicRoadmap({ subtitle: e.target.value })}
+                          placeholder={
+                            isArUI
+                              ? 'مثال: دليلك العملي خطوة بخطوة مع الأدوات والمصادر'
+                              : 'e.g. Step-by-step guide, required tools, and study resources'
+                          }
+                          className="w-full bg-muted/20 border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+
+                      <div className="col-span-1 sm:col-span-2">
+                        <label className="block text-xs font-bold text-foreground mb-1.5">
+                          {isArUI
+                            ? 'رابط صورة الشرح البصري / الانفوجرافيك الشامل للمسار (اختياري)'
+                            : 'Manual Graphic / Architecture Diagram Image URL (Optional Infographic)'}
+                        </label>
+                        <input
+                          dir="ltr"
+                          value={gRoadmap.diagramImageUrl || ''}
+                          onChange={e => updateGraphicRoadmap({ diagramImageUrl: e.target.value })}
+                          placeholder="https://... (Paste an infographic, architecture diagram, or visual roadmap image URL)"
+                          className="w-full bg-muted/20 border border-border/80 rounded-xl px-3.5 py-2.5 text-xs font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+
+                      <div className="col-span-1 sm:col-span-2">
+                        <label className="block text-xs font-bold text-foreground mb-1.5">
+                          {isArUI
+                            ? 'دليل الدراسة والشرح اليدوي للطلاب (يدعم النص العريض **Bold** والتمييز ==Highlight== والعناوين ###)'
+                            : 'Manual Study Guide & Explanation (Supports **Bold**, ==Highlight==, ### Headings & Bullet Lists)'}
+                        </label>
+                        <textarea
+                          dir="auto"
+                          value={gRoadmap.overviewText || ''}
+                          onChange={e => updateGraphicRoadmap({ overviewText: e.target.value })}
+                          rows={3}
+                          placeholder={
+                            isArUI
+                              ? 'اشرح للطلاب كيف يبدأون هذا المسار، ما البرامج التي يجب تثبيتها أولاً، وكيف يتعلمون بتركيز دون تشتيت...'
+                              : 'Explain how students should approach this path, what to install first, and how to study without distractions...'
+                          }
+                          className="w-full bg-muted/20 border border-border/80 rounded-xl p-3 text-xs text-foreground leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Interactive Roadmap Stages / Milestones List */}
+                    <div className="space-y-4 pt-2 border-t border-border/60">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                          <h3 className="text-sm font-black text-foreground">
+                            {isArUI
+                              ? `مراحل خريطة الطريق التفاعلية (${gRoadmap.steps?.length || 0} مراحل)`
+                              : `Interactive Roadmap Stages (${gRoadmap.steps?.length || 0} Stages)`}
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            {isArUI
+                              ? 'كل مرحلة تظهر كبطاقة تفاعلية في صفحة تفاصيل المسار وتحتوي على شرحها وأدواتها وروابطها وصورتها والدورة المرتبطة بها.'
+                              : 'Each stage becomes an interactive node on the Path Details page with its own description, skills, tools, links, image, and linked playlist.'}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {(gRoadmap.steps?.length || 0) > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => updateGraphicRoadmap({ steps: [] })}
+                              className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>{isArUI ? 'حذف جميع المراحل' : 'Delete All Stages'}</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextNum = (gRoadmap.steps?.length || 0) + 1;
+                              const newStep: LearningPathRoadmapStep = {
+                                id: `step_${Date.now()}`,
+                                title: isArUI ? `المرحلة ${nextNum}: عنوان المرحلة` : `Stage ${nextNum}: Milestone Title`,
+                                subtitle: isArUI ? `المرحلة ${nextNum}` : `Stage ${nextNum}`,
+                                description: '',
+                                durationEstimate: isArUI ? `الأسبوع ${nextNum}` : `Week ${nextNum}`,
+                                imageUrl: '',
+                                linkedCourseId: path.courseIds?.[nextNum - 1] || '',
+                                skills: [],
+                                tools: [],
+                                resources: []
+                              };
+                              updateGraphicRoadmap({
+                                steps: [...(gRoadmap.steps || []), newStep]
+                              });
+                            }}
+                            className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 flex items-center gap-1.5 cursor-pointer shadow-xs"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>{isArUI ? 'إضافة مرحلة جديدة' : 'Add Roadmap Stage'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        {(gRoadmap.steps || []).map((step, sIdx) => {
+                          const updateStep = (stepPatch: Partial<LearningPathRoadmapStep>) => {
+                            const nextSteps = [...(gRoadmap.steps || [])];
+                            nextSteps[sIdx] = { ...nextSteps[sIdx], ...stepPatch };
+                            updateGraphicRoadmap({ steps: nextSteps });
+                          };
+
+                          return (
+                            <div
+                              key={step.id || sIdx}
+                              className="p-4 sm:p-5 rounded-2xl bg-card border border-border/80 space-y-4 shadow-xs"
+                            >
+                              <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-mono font-bold shrink-0">
+                                    {isArUI ? `المرحلة #${sIdx + 1}` : `Stage #${sIdx + 1}`}
+                                  </span>
+                                  <span className="text-xs font-bold text-foreground truncate" dir="auto">
+                                    {step.title || (isArUI ? `المرحلة ${sIdx + 1}` : `Stage ${sIdx + 1}`)}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {sIdx > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextSteps = [...(gRoadmap.steps || [])];
+                                        const temp = nextSteps[sIdx - 1];
+                                        nextSteps[sIdx - 1] = nextSteps[sIdx];
+                                        nextSteps[sIdx] = temp;
+                                        updateGraphicRoadmap({ steps: nextSteps });
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-muted hover:bg-muted/80 text-[11px] font-bold text-foreground cursor-pointer"
+                                    >
+                                      {isArUI ? '↑ لأعلى' : '↑ Up'}
+                                    </button>
+                                  )}
+                                  {sIdx < (gRoadmap.steps?.length || 0) - 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextSteps = [...(gRoadmap.steps || [])];
+                                        const temp = nextSteps[sIdx + 1];
+                                        nextSteps[sIdx + 1] = nextSteps[sIdx];
+                                        nextSteps[sIdx] = temp;
+                                        updateGraphicRoadmap({ steps: nextSteps });
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-muted hover:bg-muted/80 text-[11px] font-bold text-foreground cursor-pointer"
+                                    >
+                                      {isArUI ? '↓ لأسفل' : '↓ Down'}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextSteps = [...(gRoadmap.steps || [])];
+                                      nextSteps.splice(sIdx, 1);
+                                      updateGraphicRoadmap({ steps: nextSteps });
+                                    }}
+                                    className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer"
+                                    title={isArUI ? 'حذف المرحلة' : 'Delete Stage'}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="sm:col-span-2">
+                                  <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                                    {isArUI ? 'عنوان المرحلة *' : 'Stage Title *'}
+                                  </label>
+                                  <input
+                                    dir="auto"
+                                    value={step.title || ''}
+                                    onChange={e => updateStep({ title: e.target.value })}
+                                    placeholder={isArUI ? 'مثال: أساسيات HTML5 وهيكلة الويب' : 'e.g. Semantic HTML5 & Web Architecture'}
+                                    className="w-full bg-muted/20 border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                                    {isArUI ? 'المدة التقديرية' : 'Duration / Time Estimate'}
+                                  </label>
+                                  <input
+                                    dir="auto"
+                                    value={step.durationEstimate || ''}
+                                    onChange={e => updateStep({ durationEstimate: e.target.value })}
+                                    placeholder={isArUI ? 'مثال: الأسبوع 1 / 10 ساعات' : 'e.g. Week 1 / 12 Hours'}
+                                    className="w-full bg-muted/20 border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                                    {isArUI ? 'عنوان فرعي / محور التركيز' : 'Stage Subtitle / Focus'}
+                                  </label>
+                                  <input
+                                    dir="auto"
+                                    value={step.subtitle || ''}
+                                    onChange={e => updateStep({ subtitle: e.target.value })}
+                                    placeholder={isArUI ? 'مثال: المرحلة 1 · البنية الأساسية' : 'e.g. Stage 1 · Structure & Accessibility'}
+                                    className="w-full bg-muted/20 border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                                    {isArUI ? 'قائمة التشغيل المرتبطة بهذه المرحلة (اختياري)' : 'Linked Course Playlist (Optional)'}
+                                  </label>
+                                  <select
+                                    value={step.linkedCourseId || ''}
+                                    onChange={e => updateStep({ linkedCourseId: e.target.value })}
+                                    className="w-full bg-muted/20 border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground"
+                                  >
+                                    <option value="">{isArUI ? '— بدون دورة مرتبطة —' : '— None / Optional —'}</option>
+                                    {languagePlaylistsOnly.map(c => (
+                                      <option key={c.id} value={c.id}>
+                                        {c.title} ({c.id})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                                    {isArUI ? 'رابط صورة توضيحية للمرحلة (اختياري)' : 'Stage Illustration / Graphic Image URL'}
+                                  </label>
+                                  <input
+                                    dir="ltr"
+                                    value={step.imageUrl || ''}
+                                    onChange={e => updateStep({ imageUrl: e.target.value })}
+                                    placeholder="https://... (Optional image for this stage)"
+                                    className="w-full bg-muted/20 border border-border/80 rounded-xl px-3 py-2 text-xs font-mono text-foreground"
+                                  />
+                                </div>
+
+                                <div className="sm:col-span-3">
+                                  <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                                    {isArUI ? 'شرح المرحلة وما يجب على الطالب إنجازه' : 'Stage Explanation & What Students Should Do'}
+                                  </label>
+                                  <textarea
+                                    dir="auto"
+                                    value={step.description || ''}
+                                    onChange={e => updateStep({ description: e.target.value })}
+                                    rows={2}
+                                    placeholder={
+                                      isArUI
+                                        ? 'اشرح ما يجب التركيز عليه في هذه المرحلة، والأخطاء الشائعة لتجنبها، والمشروع العملي المطلوب...'
+                                        : 'Explain what to focus on in this stage, common mistakes to avoid, and what project or exercise to build...'
+                                    }
+                                    className="w-full bg-muted/20 border border-border/80 rounded-xl p-2.5 text-xs text-foreground leading-relaxed"
+                                  />
+                                </div>
+
+                                <div className="sm:col-span-3">
+                                  <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                                    {isArUI ? 'المهارات والمواضيع المغطاة (افصل بينها بفاصلة ,)' : 'Skills & Topics Covered (Comma-separated)'}
+                                  </label>
+                                  <input
+                                    dir="auto"
+                                    value={(step.skills || []).join(', ')}
+                                    onChange={e =>
+                                      updateStep({
+                                        skills: e.target.value
+                                          .split(/[,،]/)
+                                          .map(s => s.trim())
+                                          .filter(Boolean)
+                                      })
+                                    }
+                                    placeholder={
+                                      isArUI
+                                        ? 'مثال: Semantic HTML, Flexbox, CSS Grid, التصميم المتجاوب'
+                                        : 'e.g. Semantic HTML, Flexbox, CSS Grid, Responsive Design, Accessibility'
+                                    }
+                                    className="w-full bg-muted/20 border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Stage Tools & Stage Resources */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-border/50">
+                                {/* Tools for this stage */}
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-bold text-foreground flex items-center gap-1">
+                                      <Wrench className="w-3.5 h-3.5 text-primary" />
+                                      <span>
+                                        {isArUI
+                                          ? `أدوات المرحلة (${step.tools?.length || 0})`
+                                          : `Stage Tools (${step.tools?.length || 0})`}
+                                      </span>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateStep({
+                                          tools: [
+                                            ...(step.tools || []),
+                                            { title: '', url: '', type: 'tool', logoUrl: '' }
+                                          ]
+                                        })
+                                      }
+                                      className="text-[11px] px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-bold hover:bg-primary/20 cursor-pointer"
+                                    >
+                                      {isArUI ? '+ إضافة أداة' : '+ Add Tool'}
+                                    </button>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {(step.tools || []).map((tItem, tIdx) => (
+                                      <div key={tIdx} className="p-2.5 rounded-xl bg-muted/20 border border-border/60 space-y-1.5">
+                                        <div className="flex items-center gap-1.5">
+                                          <input
+                                            dir="auto"
+                                            value={tItem.title || ''}
+                                            onChange={e => {
+                                              const next = [...(step.tools || [])];
+                                              next[tIdx] = { ...next[tIdx], title: e.target.value };
+                                              updateStep({ tools: next });
+                                            }}
+                                            placeholder={isArUI ? 'اسم الأداة (مثال: VS Code / Figma)' : 'Tool Name (e.g. VS Code / Figma)'}
+                                            className="flex-1 bg-card border border-border/80 rounded-lg px-2.5 py-1.5 text-xs text-foreground"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const next = [...(step.tools || [])];
+                                              next.splice(tIdx, 1);
+                                              updateStep({ tools: next });
+                                            }}
+                                            className="p-1 text-red-500 hover:bg-red-500/10 rounded cursor-pointer"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                          <input
+                                            dir="ltr"
+                                            value={tItem.url || ''}
+                                            onChange={e => {
+                                              const next = [...(step.tools || [])];
+                                              next[tIdx] = { ...next[tIdx], url: e.target.value };
+                                              updateStep({ tools: next });
+                                            }}
+                                            placeholder="Download/Tool URL (https://...)"
+                                            className="bg-card border border-border/80 rounded-lg px-2 py-1 text-[11px] font-mono text-foreground"
+                                          />
+                                          <input
+                                            dir="ltr"
+                                            value={tItem.logoUrl || ''}
+                                            onChange={e => {
+                                              const next = [...(step.tools || [])];
+                                              next[tIdx] = { ...next[tIdx], logoUrl: e.target.value };
+                                              updateStep({ tools: next });
+                                            }}
+                                            placeholder="Icon/Logo URL (Optional)"
+                                            className="bg-card border border-border/80 rounded-lg px-2 py-1 text-[11px] font-mono text-foreground"
+                                          />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Resources / Links for this stage */}
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-bold text-foreground flex items-center gap-1">
+                                      <LinkIcon className="w-3.5 h-3.5 text-primary" />
+                                      <span>
+                                        {isArUI
+                                          ? `روابط ومصادر المرحلة (${step.resources?.length || 0})`
+                                          : `Stage Study Links & Docs (${step.resources?.length || 0})`}
+                                      </span>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateStep({
+                                          resources: [
+                                            ...(step.resources || []),
+                                            { title: '', url: '', type: 'doc', logoUrl: '' }
+                                          ]
+                                        })
+                                      }
+                                      className="text-[11px] px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-bold hover:bg-primary/20 cursor-pointer"
+                                    >
+                                      {isArUI ? '+ إضافة رابط' : '+ Add Link'}
+                                    </button>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {(step.resources || []).map((rItem, rIdx) => (
+                                      <div key={rIdx} className="p-2.5 rounded-xl bg-muted/20 border border-border/60 space-y-1.5">
+                                        <div className="flex items-center gap-1.5">
+                                          <input
+                                            dir="auto"
+                                            value={rItem.title || ''}
+                                            onChange={e => {
+                                              const next = [...(step.resources || [])];
+                                              next[rIdx] = { ...next[rIdx], title: e.target.value };
+                                              updateStep({ resources: next });
+                                            }}
+                                            placeholder={isArUI ? 'عنوان المصدر (مثال: توثيق MDN / ملخص)' : 'Resource Title (e.g. MDN Guide / Repo)'}
+                                            className="flex-1 bg-card border border-border/80 rounded-lg px-2.5 py-1.5 text-xs text-foreground"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const next = [...(step.resources || [])];
+                                              next.splice(rIdx, 1);
+                                              updateStep({ resources: next });
+                                            }}
+                                            className="p-1 text-red-500 hover:bg-red-500/10 rounded cursor-pointer"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                          <input
+                                            dir="ltr"
+                                            value={rItem.url || ''}
+                                            onChange={e => {
+                                              const next = [...(step.resources || [])];
+                                              next[rIdx] = { ...next[rIdx], url: e.target.value };
+                                              updateStep({ resources: next });
+                                            }}
+                                            placeholder="Resource URL (https://...)"
+                                            className="bg-card border border-border/80 rounded-lg px-2 py-1 text-[11px] font-mono text-foreground"
+                                          />
+                                          <input
+                                            dir="ltr"
+                                            value={rItem.logoUrl || ''}
+                                            onChange={e => {
+                                              const next = [...(step.resources || [])];
+                                              next[rIdx] = { ...next[rIdx], logoUrl: e.target.value };
+                                              updateStep({ resources: next });
+                                            }}
+                                            placeholder="Icon/Logo URL (Optional)"
+                                            className="bg-card border border-border/80 rounded-lg px-2 py-1 text-[11px] font-mono text-foreground"
+                                          />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {(!gRoadmap.steps || gRoadmap.steps.length === 0) && (
+                          <div className="p-8 text-center rounded-2xl bg-muted/15 border border-dashed border-border space-y-3">
+                            <MapIcon className="w-8 h-8 text-muted-foreground/60 mx-auto" />
+                            <p className="text-xs font-bold text-foreground">
+                              {isArUI ? 'لا توجد مراحل مضافة في خريطة الطريق حالياً' : 'No Interactive Roadmap Stages Added Yet'}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground max-w-md mx-auto">
+                              {isArUI
+                                ? 'اضغط على "إضافة مرحلة جديدة" بالأعلى لبناء خريطتك يدوياً، أو اختر أحد القوالب الجاهزة.'
+                                : 'Click "Add Roadmap Stage" above to build manually, or choose one of the Quick-Fill Starter Templates.'}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 3: GLOBAL PATH TOOLS & REFERENCE LINKS */}
+                {pathStep === 'toolkit' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Essential Tools */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-card border border-border/80 space-y-4 shadow-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <h3 className="text-sm font-black text-foreground flex items-center gap-1.5">
+                            <Wrench className="w-4 h-4 text-primary shrink-0" />
+                            <span>
+                              {isArUI
+                                ? `البرامج والأدوات الأساسية للمسار (${gRoadmap.essentialTools?.length || 0})`
+                                : `Essential Path Tools & Software (${gRoadmap.essentialTools?.length || 0})`}
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {isArUI
+                              ? 'محررات الأكواد أو البرامج التي يحتاج الطالب لتثبيتها للعمل على هذا المسار.'
+                              : 'Code editors, compilers, browsers, or CLI tools students must install for this path.'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {(gRoadmap.essentialTools?.length || 0) > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => updateGraphicRoadmap({ essentialTools: [] })}
+                              className="px-2.5 py-1.5 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-500/20 cursor-pointer"
+                            >
+                              {isArUI ? 'مسح' : 'Clear'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateGraphicRoadmap({
+                                essentialTools: [
+                                  ...(gRoadmap.essentialTools || []),
+                                  { title: '', url: '', type: 'tool', logoUrl: '' }
+                                ]
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 cursor-pointer shrink-0"
+                          >
+                            {isArUI ? '+ إضافة أداة' : '+ Add Essential Tool'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {(gRoadmap.essentialTools || []).map((tool, idx) => (
+                          <div key={idx} className="p-3 rounded-xl bg-muted/20 border border-border/70 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                dir="auto"
+                                value={tool.title || ''}
+                                onChange={e => {
+                                  const next = [...(gRoadmap.essentialTools || [])];
+                                  next[idx] = { ...next[idx], title: e.target.value };
+                                  updateGraphicRoadmap({ essentialTools: next });
+                                }}
+                                placeholder={isArUI ? 'اسم الأداة (مثال: VS Code / Node.js)' : 'Tool Name (e.g. VS Code Editor / Node.js LTS)'}
+                                className="flex-1 bg-card border border-border/80 rounded-lg px-3 py-1.5 text-xs text-foreground"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = [...(gRoadmap.essentialTools || [])];
+                                  next.splice(idx, 1);
+                                  updateGraphicRoadmap({ essentialTools: next });
+                                }}
+                                className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <input
+                                dir="ltr"
+                                value={tool.url || ''}
+                                onChange={e => {
+                                  const next = [...(gRoadmap.essentialTools || [])];
+                                  next[idx] = { ...next[idx], url: e.target.value };
+                                  updateGraphicRoadmap({ essentialTools: next });
+                                }}
+                                placeholder="Official Download URL (https://...)"
+                                className="bg-card border border-border/80 rounded-lg px-2.5 py-1.5 text-xs font-mono text-foreground"
+                              />
+                              <input
+                                dir="ltr"
+                                value={tool.logoUrl || ''}
+                                onChange={e => {
+                                  const next = [...(gRoadmap.essentialTools || [])];
+                                  next[idx] = { ...next[idx], logoUrl: e.target.value };
+                                  updateGraphicRoadmap({ essentialTools: next });
+                                }}
+                                placeholder="Tool Logo Image URL (Optional)"
+                                className="bg-card border border-border/80 rounded-lg px-2.5 py-1.5 text-xs font-mono text-foreground"
+                              />
+                            </div>
+                          </div>
+                        ))}
+
+                        {(!gRoadmap.essentialTools || gRoadmap.essentialTools.length === 0) && (
+                          <div className="p-6 text-center rounded-xl bg-muted/15 border border-dashed border-border text-xs text-muted-foreground">
+                            {isArUI ? 'لم تتم إضافة أدوات عامة بعد.' : 'No global tools added yet. Click "+ Add Essential Tool" above.'}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Global Reference Links & Resources */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-card border border-border/80 space-y-4 shadow-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <h3 className="text-sm font-black text-foreground flex items-center gap-1.5">
+                            <BookOpen className="w-4 h-4 text-primary shrink-0" />
+                            <span>
+                              {isArUI
+                                ? `المصادر والمراجع الشاملة للمسار (${gRoadmap.globalResources?.length || 0})`
+                                : `Global Reference Links & Docs (${gRoadmap.globalResources?.length || 0})`}
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {isArUI
+                              ? 'التوثيقات الرسمية، منصات التدريب التفاعلي، أو الملخصات المهمة للطلاب.'
+                              : 'Official documentation, practice platforms, cheatsheets, or community repos for this path.'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {(gRoadmap.globalResources?.length || 0) > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => updateGraphicRoadmap({ globalResources: [] })}
+                              className="px-2.5 py-1.5 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-500/20 cursor-pointer"
+                            >
+                              {isArUI ? 'مسح' : 'Clear'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateGraphicRoadmap({
+                                globalResources: [
+                                  ...(gRoadmap.globalResources || []),
+                                  { title: '', url: '', type: 'doc', logoUrl: '' }
+                                ]
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 cursor-pointer shrink-0"
+                          >
+                            {isArUI ? '+ إضافة مصدر' : '+ Add Reference Link'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {(gRoadmap.globalResources || []).map((res, idx) => (
+                          <div key={idx} className="p-3 rounded-xl bg-muted/20 border border-border/70 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                dir="auto"
+                                value={res.title || ''}
+                                onChange={e => {
+                                  const next = [...(gRoadmap.globalResources || [])];
+                                  next[idx] = { ...next[idx], title: e.target.value };
+                                  updateGraphicRoadmap({ globalResources: next });
+                                }}
+                                placeholder={isArUI ? 'عنوان المرجع (مثال: موسوعة MDN / Frontend Mentor)' : 'Resource Title (e.g. MDN Web Docs / Frontend Mentor)'}
+                                className="flex-1 bg-card border border-border/80 rounded-lg px-3 py-1.5 text-xs text-foreground"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = [...(gRoadmap.globalResources || [])];
+                                  next.splice(idx, 1);
+                                  updateGraphicRoadmap({ globalResources: next });
+                                }}
+                                className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <input
+                                dir="ltr"
+                                value={res.url || ''}
+                                onChange={e => {
+                                  const next = [...(gRoadmap.globalResources || [])];
+                                  next[idx] = { ...next[idx], url: e.target.value };
+                                  updateGraphicRoadmap({ globalResources: next });
+                                }}
+                                placeholder="URL (https://...)"
+                                className="bg-card border border-border/80 rounded-lg px-2.5 py-1.5 text-xs font-mono text-foreground"
+                              />
+                              <input
+                                dir="ltr"
+                                value={res.logoUrl || ''}
+                                onChange={e => {
+                                  const next = [...(gRoadmap.globalResources || [])];
+                                  next[idx] = { ...next[idx], logoUrl: e.target.value };
+                                  updateGraphicRoadmap({ globalResources: next });
+                                }}
+                                placeholder="Logo Image URL (Optional)"
+                                className="bg-card border border-border/80 rounded-lg px-2.5 py-1.5 text-xs font-mono text-foreground"
+                              />
+                            </div>
+                          </div>
+                        ))}
+
+                        {(!gRoadmap.globalResources || gRoadmap.globalResources.length === 0) && (
+                          <div className="p-6 text-center rounded-xl bg-muted/15 border border-dashed border-border text-xs text-muted-foreground">
+                            {isArUI ? 'لم تتم إضافة روابط مراجع عامة بعد.' : 'No global reference links added yet. Click "+ Add Reference Link" above.'}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 4: LIVE INTERACTIVE STUDENT UI/UX PREVIEW */}
+                {pathStep === 'preview' && (
+                  <div className="space-y-4">
+                    <div className="p-3.5 rounded-xl bg-muted/30 border border-border/80 flex items-center justify-between gap-3">
+                      <span className="text-xs font-bold text-foreground">
+                        {isArUI
+                          ? 'معاينة حية لواجهة الطالب — جرب الضغط على المراحل وتجربة زر (إخفاء / إظهار الخريطة) تماماً كما سيراها الطلاب في صفحة تفاصيل المسار:'
+                          : 'Live Student View Preview — Test clicking stages and toggling Hide/Show exactly as students see it on the Path Details page:'}
+                      </span>
+                    </div>
+
+                    <PathGraphicRoadmap
+                      path={{
+                        id: path.id || 'preview_path',
+                        title: path.title || (selectedPathLang === 'ar' ? 'مسار تعليمي جديد' : 'Untitled Learning Path'),
+                        description: path.description || '',
+                        courseIds: path.courseIds || [],
+                        icon: path.icon || 'Code',
+                        iconUrl: path.iconUrl || '',
+                        language: path.language || (selectedPathLang === 'ar' ? 'Arabic' : 'English'),
+                        graphicRoadmap: gRoadmap
+                      }}
+                      courses={allCourses}
+                      language={selectedPathLang}
+                      isPreview={true}
+                    />
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* NOTIFICATION FORM (Full Admin Customization) */}
           {type === 'notification' && (
@@ -2745,7 +4487,7 @@ export function AdminForms({
             onClick={onClose} 
             className="px-4 py-2 sm:py-2.5 rounded-xl border border-border/80 bg-card hover:bg-muted text-foreground text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-98"
           >
-            Cancel
+            {language === 'ar' ? 'إلغاء' : 'Cancel'}
           </button>
 
           <div className="flex items-center gap-2">
@@ -2759,7 +4501,7 @@ export function AdminForms({
                 }}
                 className="px-3.5 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition-all cursor-pointer"
               >
-                Previous Step
+                {language === 'ar' ? 'الخطوة السابقة' : 'Previous Step'}
               </button>
             )}
 
@@ -2773,7 +4515,35 @@ export function AdminForms({
                 }}
                 className="px-4 py-2 rounded-xl bg-secondary text-secondary-foreground text-xs font-bold hover:bg-secondary/90 transition-all cursor-pointer"
               >
-                Next Step
+                {language === 'ar' ? 'الخطوة التالية' : 'Next Step'}
+              </button>
+            ) : null}
+
+            {type === 'path' && pathStep !== 'basics' && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (pathStep === 'preview') setPathStep('toolkit');
+                  else if (pathStep === 'toolkit') setPathStep('roadmap');
+                  else if (pathStep === 'roadmap') setPathStep('basics');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition-all cursor-pointer"
+              >
+                {language === 'ar' ? 'الخطوة السابقة' : 'Previous Step'}
+              </button>
+            )}
+
+            {type === 'path' && pathStep !== 'preview' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (pathStep === 'basics') setPathStep('roadmap');
+                  else if (pathStep === 'roadmap') setPathStep('toolkit');
+                  else if (pathStep === 'toolkit') setPathStep('preview');
+                }}
+                className="px-4 py-2 rounded-xl bg-secondary text-secondary-foreground text-xs font-bold hover:bg-secondary/90 transition-all cursor-pointer"
+              >
+                {language === 'ar' ? 'الخطوة التالية' : 'Next Step'}
               </button>
             ) : null}
 
@@ -2790,7 +4560,21 @@ export function AdminForms({
               className="px-5 py-2 sm:py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 active:scale-98"
             >
               {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              <span>{isSaving ? 'Saving...' : type === 'course' ? 'Save & Publish Course' : type === 'book' ? 'Save & Publish Book' : 'Save Changes'}</span>
+              <span>
+                {isSaving
+                  ? language === 'ar'
+                    ? 'جاري الحفظ...'
+                    : 'Saving...'
+                  : type === 'course'
+                    ? 'Save & Publish Course'
+                    : type === 'book'
+                      ? 'Save & Publish Book'
+                      : type === 'path'
+                        ? language === 'ar'
+                          ? 'حفظ ونشر المسار التعليمي'
+                          : 'Save & Publish Path'
+                        : 'Save Changes'}
+              </span>
             </button>
           </div>
         </div>

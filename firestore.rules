@@ -322,11 +322,18 @@ service cloud.firestore {
     }
 
     match /reports/{reportId} {
-      allow read, write: if true;
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isValidReport(request.resource.data) && request.resource.data.id == reportId;
+      allow update, delete: if isAdmin();
     }
 
     match /form_submissions/{submissionId} {
-      allow read, write: if true;
+      allow read: if isAdmin();
+      allow create: if request.resource.data.id == submissionId &&
+        request.resource.data.type in ['dmca', 'contact', 'creator'] &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.createdAt is number;
+      allow update, delete: if isAdmin();
     }
 
     match /system_backups/{backupId} {
@@ -356,13 +363,14 @@ service cloud.firestore {
 
     match /user_presence/{presenceId} {
       allow read: if isAdmin() || (isAuthenticated() && presenceId == request.auth.uid);
-      allow create, update: if request.resource.data.id == presenceId;
+      allow create, update: if request.resource.data.id == presenceId &&
+        (isAdmin() || (isAuthenticated() && presenceId == request.auth.uid) || presenceId.matches('^anon_.*'));
       allow delete: if isAdmin();
     }
 
     match /platform_movements/{movementId} {
       allow read: if isAdmin();
-      allow create: if request.resource.data.id == movementId;
+      allow create: if request.resource.data.id == movementId && request.resource.data.timestamp is number;
       allow update, delete: if isAdmin();
     }
   }

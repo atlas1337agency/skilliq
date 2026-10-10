@@ -158,6 +158,1033 @@ Level: "${currentLevel}"`;
     return res.json({ success: true, plan: defaultPlan, isAiGenerated: false });
   });
 
+  // =========================================================================
+  // SKILLIQ LIVE PAGE-LINKED AI COPILOT & UNIVERSAL PLATFORM AGENT
+  // Directly linked with:
+  // 1) Courses Page (/courses) -> Playlists
+  // 2) Masterclasses Page (/masterclasses) -> Single Long Videos
+  // 3) Projects Page (/projects) -> Project Playlists & Project Masterclasses
+  // 4) Books Page (/books) -> Video-Explained Tech Books
+  // 5) Paths Page (/paths) -> Structured Career Roadmaps & Graphic Steps
+  // + Full Platform & Page Q&A Copilot (Certificates, Verify, Leaderboard, Community, Dashboard, Creator, Support)
+  // =========================================================================
+  const DAILY_AI_LIMIT = 20;
+  const userAiUsageMap = new Map<string, { date: string; count: number }>();
+
+  interface LearnedUserProfile {
+    preferredField?: string;
+    preferredTools: string[];
+    requestedMissingTopics: string[];
+    lastIntent?: 'recommend' | 'roadmap' | 'ticket' | 'general';
+    interactionCount: number;
+    updatedAt: number;
+  }
+  const userLearningMemory = new Map<string, LearnedUserProfile>();
+
+  const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+  const getUserQuotaStatus = (userId: string) => {
+    const today = getTodayKey();
+    const record = userAiUsageMap.get(userId);
+    if (!record || record.date !== today) {
+      userAiUsageMap.set(userId, { date: today, count: 0 });
+      return { used: 0, limit: DAILY_AI_LIMIT, remaining: DAILY_AI_LIMIT };
+    }
+    const remaining = Math.max(0, DAILY_AI_LIMIT - record.count);
+    return { used: record.count, limit: DAILY_AI_LIMIT, remaining };
+  };
+
+  app.get('/api/ai/agent/quota', (req, res) => {
+    const userId = String(req.query.userId || 'guest').trim();
+    const status = getUserQuotaStatus(userId);
+    res.json({
+      ...status,
+      hasCloudAi: Boolean(process.env.GEMINI_API_KEY)
+    });
+  });
+
+  app.post('/api/ai/agent', async (req, res) => {
+    const {
+      userId = 'guest',
+      userName = 'Student',
+      language = 'en',
+      message = '',
+      currentPath = '/',
+      currentCourse = null,
+      pageIndex = null,
+      catalogSummary = null,
+      clientMemory = null
+    } = req.body || {};
+
+    const uidKey = String(userId || 'guest');
+    const rawMsg = String(message || '').trim();
+    const lowerMsg = rawMsg.toLowerCase();
+
+    // Detect Arabic & Moroccan Darija (both Arabic script & Latin Arabizi)
+    const hasArabicScript = /[\u0600-\u06FF]/.test(rawMsg);
+    const hasDarijaArabicWords = /(واش|كيفاش|بغيت|عافاك|خويا|ختي|شنو|اشنو|فهاد|ديال|مزيان|بزاف|دابا|غادي|علاش|شحال|كاين|تبارك|زعما|نقدر|هادشي|المهم|ماشي|صفحة|هاد الصفحة)/.test(
+      rawMsg
+    );
+    const hasDarijaLatinWords = /\b(salam|slm|wach|kifach|kifash|bghit|chno|achno|3afak|afak|khoya|khti|mzyan|mezyan|dyal|dial|daba|bzzaf|bezzaf|3lach|ch7al|kayn|kayna|makaynch|fin|imta|bch7al|darija|merhba|chokran|shokran)\b/i.test(
+      rawMsg
+    );
+    const isDarija = hasDarijaArabicWords || hasDarijaLatinWords;
+    const isAr = language === 'ar' || hasArabicScript || isDarija;
+
+    // Update Self-Learning User Memory
+    const existingMem: LearnedUserProfile = userLearningMemory.get(uidKey) || {
+      preferredField: clientMemory?.preferredField || undefined,
+      preferredTools: Array.isArray(clientMemory?.preferredTools) ? clientMemory.preferredTools : [],
+      requestedMissingTopics: Array.isArray(clientMemory?.requestedMissingTopics)
+        ? clientMemory.requestedMissingTopics
+        : [],
+      interactionCount: Number(clientMemory?.interactionCount || 0),
+      updatedAt: Date.now()
+    };
+    existingMem.interactionCount += 1;
+    existingMem.updatedAt = Date.now();
+
+    // =========================================================================
+    // 0. OUT-OF-PLATFORM GUARD (SAVE 100% TOKENS — DO NOT ANSWER OFF-TOPIC QUERIES)
+    // =========================================================================
+    const outOfPlatformPatterns = [
+      /\b(weather|temperature|forecast|football|soccer|messi|ronaldo|real madrid|barcelona|champions league|fifa|nba|basketball)\b/i,
+      /\b(recipe|cooking|pizza|burger|pasta|couscous|tajine|ramen|kitchen|diet|weight loss|gym workout)\b/i,
+      /\b(movie|movies|netflix|cinema|actor|celebrity|song|lyrics|music|spotify|tiktok|instagram reels)\b/i,
+      /\b(bitcoin|crypto price|forex signal|stock market|betting|casino|gambling)\b/i,
+      /\b(president|prime minister|election|politics|war|news today|capital of|who won|world cup)\b/i,
+      /\b(joke|tell me a joke|poem|write a story|love letter|horoscope|astrology|girlfriend|boyfriend)\b/i,
+      /\b(medical advice|doctor|headache|stomach ache|medicine|symptom)\b/i,
+      /(الطقس|حالة الطقس|درجة الحرارة|كرة القدم|مباراة|ريال مدريد|برشلونة|رونالدو|ميسي|الطبخ|وصفة|طاجين|كسكس|أفلام|فيلم|أغنية|نكتة|قولي نكتة|السياسة|انتخابات|أخبار اليوم|عاصمة)/i
+    ];
+    const isMathOrTrivialEquation = /^[\d\s+\-*/=().,?]+$/.test(rawMsg);
+
+    if (isMathOrTrivialEquation || outOfPlatformPatterns.some(rx => rx.test(rawMsg))) {
+      return res.json({
+        success: true,
+        reply: isDarija
+          ? `سمح ليا يا **${userName}** 🙏، أنا **المساعد الذكي الخاص بمنصة SkilliQ فقط**، وما كنجاوبش على الأسئلة اللي خارج نطاق المنصة.\n\nنقدر نعاونك في البحث داخل صفحات المنصة:\n• **صفحة الدورات (/courses)** و **الماستركلاس (/masterclasses)**\n• **صفحة المشاريع العملية (/projects)**\n• **صفحة الكتب (/books)** و **المسارات التعليمية (/paths)**`
+          : isAr
+          ? `عذراً يا **${userName}** 🙏، أنا **المساعد الذكي المخصص لمنصة SkilliQ التعليمية فقط**، ولا أجيب على الأسئلة الخارجة عن نطاق المنصة.\n\nيمكنني البحث لك فوراً داخل صفحات المنصة:\n• **صفحة الدورات (/courses)** و **الماستركلاس (/masterclasses)**\n• **صفحة المشاريع (/projects)**\n• **صفحة الكتب (/books)** و **المسارات (/paths)**`
+          : `Sorry **${userName}** 🙏, I am exclusively the **SkilliQ Platform Copilot**, so I only answer questions related to SkilliQ pages, courses, masterclasses, projects, books, paths, and platform features.\n\nTell me any keyword, category, or page question and I'll scan the live platform for you!`,
+        recommendations: [],
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? ['ماذا يوجد في صفحة الدورات؟', 'ماذا يوجد في صفحة المشاريع؟', 'ماذا يوجد في صفحة الكتب؟', 'اشرح لي هذه الصفحة']
+          : ['What is inside Courses page?', 'What is inside Projects page?', 'What is inside Books page?', 'Explain this current page'],
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    // =========================================================================
+    // 1. BUILD LIVE MULTI-PAGE INDEX (AUTO-UPDATED WITH EVERY ADMIN ADDITION)
+    //    Separates and indexes every item by the EXACT page where it lives:
+    //    - Courses Page (Playlist): !isProject && !isSingleVideo
+    //    - Masterclasses Page (Single Long Video): !isProject && isSingleVideo
+    //    - Projects Page (Playlist & Masterclass): isProject === true
+    //    - Books Page: all books with categories, titles, authors
+    //    - Paths Page: all learning paths with included course titles & roadmap steps
+    // =========================================================================
+    const rawCourses: any[] = Array.isArray(catalogSummary?.courses) ? catalogSummary.courses : [];
+    const rawPaths: any[] = Array.isArray(catalogSummary?.paths) ? catalogSummary.paths : [];
+    const rawBooks: any[] = Array.isArray(catalogSummary?.books) ? catalogSummary.books : [];
+
+    // Page 1: Courses Page (Playlists)
+    const coursesPagePlaylists = Array.isArray(pageIndex?.coursesPage?.items)
+      ? pageIndex.coursesPage.items
+      : rawCourses.filter(c => !c.isProject && !c.isSingleVideo);
+
+    // Page 2: Masterclasses Page (Single Long Video)
+    const masterclassesPageItems = Array.isArray(pageIndex?.masterclassesPage?.items)
+      ? pageIndex.masterclassesPage.items
+      : rawCourses.filter(c => !c.isProject && Boolean(c.isSingleVideo));
+
+    // Page 3: Projects Page (Project Playlists & Project Masterclasses)
+    const projectsPageItems = Array.isArray(pageIndex?.projectsPage?.items)
+      ? pageIndex.projectsPage.items
+      : rawCourses.filter(c => Boolean(c.isProject));
+
+    // Page 4: Books Page
+    const booksPageItems = Array.isArray(pageIndex?.booksPage?.items)
+      ? pageIndex.booksPage.items
+      : rawBooks;
+
+    // Page 5: Paths Page
+    const pathsPageItems = Array.isArray(pageIndex?.pathsPage?.items)
+      ? pageIndex.pathsPage.items
+      : rawPaths;
+
+    // Extract live categories per page directly from the items inside each page
+    const getUniqueCategories = (items: any[]) =>
+      Array.from(new Set(items.map(i => (i.category || '').trim()).filter(Boolean)));
+    const getUniqueSubCategories = (items: any[]) =>
+      Array.from(new Set(items.map(i => (i.subCategory || '').trim()).filter(Boolean)));
+
+    const coursesPageCategories = getUniqueCategories(coursesPagePlaylists);
+    const masterclassesPageCategories = getUniqueCategories(masterclassesPageItems);
+    const projectsPageCategories = getUniqueCategories(projectsPageItems);
+    const booksPageCategories = getUniqueCategories(booksPageItems);
+
+    const allPlatformCategories = Array.from(
+      new Set([
+        ...coursesPageCategories,
+        ...masterclassesPageCategories,
+        ...projectsPageCategories,
+        ...booksPageCategories
+      ])
+    );
+
+    // Formatters with explicit Page Badge & Category/SubCategory info
+    const formatPageItemRec = (item: any, pageType: 'course_playlist' | 'masterclass' | 'project_playlist' | 'project_masterclass' | 'book' | 'path') => {
+      if (pageType === 'book') {
+        const title = isAr && item.titleAr ? item.titleAr : item.title;
+        const author = isAr && item.authorAr ? item.authorAr : item.author;
+        return {
+          type: 'book' as const,
+          id: item.id,
+          title,
+          subtitle: isAr
+            ? `صفحة الكتب (/books) • القسم: ${item.category || 'عام'} • ${author || ''}`
+            : `Books Page (/books) • Category: ${item.category || 'General'} • ${author || ''}`,
+          url: `/books?book=${encodeURIComponent(item.id)}`
+        };
+      }
+      if (pageType === 'path') {
+        const title = isAr && item.titleAr ? item.titleAr : item.title;
+        const count = Array.isArray(item.courseIds) ? item.courseIds.length : item.coursesCount || 0;
+        return {
+          type: 'path' as const,
+          id: item.id,
+          title,
+          subtitle: isAr
+            ? `صفحة المسارات (/paths) • يضم ${count} دورات متسلسلة`
+            : `Paths Page (/paths) • Includes ${count} sequential courses`,
+          url: `/path/${item.id}`
+        };
+      }
+
+      const catLabel = item.subCategory ? `${item.category} (${item.subCategory})` : item.category || 'General';
+      const lessonsCount = item.videosCount || (Array.isArray(item.videos) ? item.videos.length : 1);
+
+      if (pageType === 'project_playlist') {
+        return {
+          type: 'project' as const,
+          id: item.id,
+          title: item.title,
+          subtitle: isAr
+            ? `صفحة المشاريع (قائمة تشغيل • ${lessonsCount} دروس) • ${catLabel}`
+            : `Projects Page (Playlist • ${lessonsCount} lessons) • ${catLabel}`,
+          url: `/course/${item.id}`
+        };
+      }
+      if (pageType === 'project_masterclass') {
+        return {
+          type: 'project' as const,
+          id: item.id,
+          title: item.title,
+          subtitle: isAr
+            ? `صفحة المشاريع (ماستركلاس فيديو مطول) • ${catLabel}`
+            : `Projects Page (Full-Build Masterclass) • ${catLabel}`,
+          url: `/course/${item.id}`
+        };
+      }
+      if (pageType === 'masterclass') {
+        return {
+          type: 'masterclass' as const,
+          id: item.id,
+          title: item.title,
+          subtitle: isAr
+            ? `صفحة الماستركلاس (فيديو كامل) • ${catLabel}`
+            : `Masterclasses Page (Single Long Video) • ${catLabel}`,
+          url: `/course/${item.id}`
+        };
+      }
+      return {
+        type: 'course' as const,
+        id: item.id,
+        title: item.title,
+        subtitle: isAr
+          ? `صفحة الدورات (قائمة تشغيل • ${lessonsCount} دروس) • ${catLabel}`
+          : `Courses Page (Playlist • ${lessonsCount} lessons) • ${catLabel}`,
+        url: `/course/${item.id}`
+      };
+    };
+
+    // =========================================================================
+    // 2. UNIVERSAL PLATFORM & PAGES COPILOT Q&A
+    //    Answers questions about ANY page on the platform or the user's current page!
+    // =========================================================================
+
+    // 2A. User asks "Explain this page" / "Where am I?" / "What is on this page?"
+    const isCurrentPageQuestion =
+      /\b(this page|current page|where am i|explain this page|what is on this page|what is in this page)\b/i.test(lowerMsg) ||
+      /(هذه الصفحة|هاد الصفحة|أين أنا|اشرح لي هذه الصفحة|ماذا يوجد في هذه الصفحة|شنو كاين فهاد الصفحة)/i.test(rawMsg);
+
+    if (isCurrentPageQuestion) {
+      const p = String(currentPath || '/').toLowerCase();
+
+      if (p.startsWith('/course/') && currentCourse) {
+        const formatType = currentCourse.isProject
+          ? currentCourse.isSingleVideo
+            ? isAr ? 'مشروع عملي (ماستركلاس فيديو مطول)' : 'Project Masterclass (Single Long Video)'
+            : isAr ? 'مشروع عملي (قائمة تشغيل بشهادة مشروع)' : 'Project Playlist (Project Certificate Eligible)'
+          : currentCourse.isSingleVideo
+          ? isAr ? 'ماستركلاس (فيديو واحد مطول)' : 'Masterclass (Single Long Video)'
+          : isAr ? 'دورة تدريبية (قائمة تشغيل بشهادة معتمدة)' : 'Course Playlist (Certificate Eligible)';
+
+        return res.json({
+          success: true,
+          reply: isAr
+            ? `أنت الآن داخل **صفحة المشاهدة والتعلم** يا **${userName}** 🎬:\n\n• **العنوان**: ${currentCourse.title}\n• **النوع**: ${formatType}\n• **التصنيف**: ${currentCourse.category}${currentCourse.subCategory ? ` (${currentCourse.subCategory})` : ''}\n• **المدرب**: ${currentCourse.instructor}\n• **الدرس الحالي**: ${currentCourse.currentVideoTitle}\n\nيمكنك تدوين ملاحظاتك في **المفكرة الذكية (Smart Notes)**، أو الضغط بالأسفل لأقوم بتلخيص هذه الدورة وحفظها في ملاحظاتك تلقائياً!`
+            : `You are currently on the **Interactive Learning Player Page** for **"${currentCourse.title}"**, **${userName}** 🎬:\n\n• **Format**: ${formatType}\n• **Category**: ${currentCourse.category}${currentCourse.subCategory ? ` (${currentCourse.subCategory})` : ''}\n• **Instructor**: ${currentCourse.instructor}\n• **Active Lesson**: ${currentCourse.currentVideoTitle}\n\nYou can take timestamped **Smart Notes**, track your completion progress, or click below to let me summarize this course directly into your notes!`,
+          recommendations: [
+            formatPageItemRec(
+              currentCourse,
+              currentCourse.isProject
+                ? currentCourse.isSingleVideo
+                  ? 'project_masterclass'
+                  : 'project_playlist'
+                : currentCourse.isSingleVideo
+                ? 'masterclass'
+                : 'course_playlist'
+            )
+          ],
+          roadmap: null,
+          followUpSuggestions: isAr
+            ? [`لخّص دورة "${currentCourse.title}" واحفظ ملاحظة`, 'اقترح محتوى مشابه من نفس القسم']
+            : [`Summarize "${currentCourse.title}" & save note`, 'Show similar items in this category'],
+          suggestedAction: null,
+          learnedMemory: existingMem
+        });
+      }
+
+      if (p.startsWith('/courses')) {
+        return res.json({
+          success: true,
+          reply: isAr
+            ? `أنت الآن في **صفحة الدورات التدريبية (/courses - Course Playlists)** 📚:\n\n• تحتوي هذه الصفحة حالياً على **${coursesPagePlaylists.length} دورة تدريبية (قوائم تشغيل متسلسلة)**.\n• **الأقسام المتوفرة داخل الصفحة**: ${coursesPageCategories.join(' ، ')}.\n• **أبرز العناوين في هذه الصفحة**:\n${coursesPagePlaylists.slice(0, 6).map((c: any) => `  - **${c.title}** (${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''})`).join('\n')}\n• عند إكمال 100% من أي قائمة تشغيل هنا، تحصل على **شهادة إتمام الدورة المعتمدة**!`
+            : `You are currently on the **Courses Page (\`/courses\` — Multi-Video Playlists)** 📚:\n\n• Live Inventory: **${coursesPagePlaylists.length} Course Playlists**.\n• **Categories on this page**: ${coursesPageCategories.join(' • ')}.\n• **Titles inside this page**:\n${coursesPagePlaylists.slice(0, 6).map((c: any) => `  - **${c.title}** (${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''})`).join('\n')}\n• Completing 100% of any playlist here unlocks an official **SkilliQ Course Certificate**!`,
+          recommendations: coursesPagePlaylists.slice(0, 4).map((c: any) => formatPageItemRec(c, 'course_playlist')),
+          roadmap: null,
+          followUpSuggestions: coursesPageCategories.slice(0, 4),
+          suggestedAction: null,
+          learnedMemory: existingMem
+        });
+      }
+
+      if (p.startsWith('/masterclasses')) {
+        return res.json({
+          success: true,
+          reply: isAr
+            ? `أنت الآن في **صفحة الماستركلاس (/masterclasses - Single Long Videos)** 🎥:\n\n• تضم هذه الصفحة **${masterclassesPageItems.length} ماستركلاس (دورات كاملة في فيديو واحد مطول)**.\n• **الأقسام المتوفرة داخل الصفحة**: ${masterclassesPageCategories.join(' ، ')}.\n• **العناوين الموجودة في الصفحة**:\n${masterclassesPageItems.slice(0, 6).map((c: any) => `  - **${c.title}** (${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''})`).join('\n')}`
+            : `You are currently on the **Masterclasses Page (\`/masterclasses\` — Single Long-Form Videos)** 🎥:\n\n• Live Inventory: **${masterclassesPageItems.length} Full-Length Masterclasses**.\n• **Categories on this page**: ${masterclassesPageCategories.join(' • ')}.\n• **Titles inside this page**:\n${masterclassesPageItems.slice(0, 6).map((c: any) => `  - **${c.title}** (${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''})`).join('\n')}`,
+          recommendations: masterclassesPageItems.slice(0, 4).map((c: any) => formatPageItemRec(c, 'masterclass')),
+          roadmap: null,
+          followUpSuggestions: masterclassesPageCategories.slice(0, 4),
+          suggestedAction: null,
+          learnedMemory: existingMem
+        });
+      }
+
+      if (p.startsWith('/project')) {
+        const projPlaylists = projectsPageItems.filter((c: any) => !c.isSingleVideo);
+        const projMasterclasses = projectsPageItems.filter((c: any) => Boolean(c.isSingleVideo));
+        return res.json({
+          success: true,
+          reply: isAr
+            ? `أنت الآن في **صفحة المشاريع العملية (/projects - Real-World Project Builds)** 🚀:\n\n• تضم الصفحة **${projectsPageItems.length} مشاريع تطبيقية** مقسمة إلى:\n  1. **قوائم تشغيل المشاريع (Project Playlists)**: (${projPlaylists.length}) تمنحك شهادة بناء مشروع معتمدة.\n  2. **ماستركلاس المشاريع (Full-Build Masterclasses)**: (${projMasterclasses.length}) لبناء مشروع كامل في فيديو مطول.\n• **الأقسام المتاحة**: ${projectsPageCategories.join(' ، ')}.\n• **عناوين المشاريع في الصفحة**:\n${projectsPageItems.slice(0, 6).map((c: any) => `  - **${c.title}** (${c.subCategory || c.category})`).join('\n')}`
+            : `You are currently on the **Projects Page (\`/projects\` — Real-World Project Builds)** 🚀:\n\n• Live Inventory: **${projectsPageItems.length} Hands-On Projects** split into:\n  1. **Project Playlists** (${projPlaylists.length}): Multi-lesson builds that award the exclusive **Project Certificate**.\n  2. **Project Masterclasses** (${projMasterclasses.length}): Single long-form full-build sessions.\n• **Categories on this page**: ${projectsPageCategories.join(' • ')}.\n• **Titles inside this page**:\n${projectsPageItems.slice(0, 6).map((c: any) => `  - **${c.title}** (${c.subCategory || c.category})`).join('\n')}`,
+          recommendations: projectsPageItems
+            .slice(0, 4)
+            .map((c: any) => formatPageItemRec(c, c.isSingleVideo ? 'project_masterclass' : 'project_playlist')),
+          roadmap: null,
+          followUpSuggestions: projectsPageCategories.slice(0, 4),
+          suggestedAction: null,
+          learnedMemory: existingMem
+        });
+      }
+
+      if (p.startsWith('/books')) {
+        return res.json({
+          success: true,
+          reply: isAr
+            ? `أنت الآن في **صفحة مكتبة الكتب (/books)** 📖:\n\n• تضم الصفحة **${booksPageItems.length} كتاباً تقنياً ومعرفياً مشروحاً بالفيديو**.\n• **الأقسام المتوفرة**: ${booksPageCategories.join(' ، ')}.\n• **عناوين الكتب في الصفحة**:\n${booksPageItems.slice(0, 6).map((b: any) => `  - **${isAr && b.titleAr ? b.titleAr : b.title}** (${b.category})`).join('\n')}`
+            : `You are currently on the **Books Library Page (\`/books\`)** 📖:\n\n• Live Inventory: **${booksPageItems.length} Video-Explained Books**.\n• **Categories on this page**: ${booksPageCategories.join(' • ')}.\n• **Titles inside this page**:\n${booksPageItems.slice(0, 6).map((b: any) => `  - **${b.title}** (${b.category})`).join('\n')}`,
+          recommendations: booksPageItems.slice(0, 4).map((b: any) => formatPageItemRec(b, 'book')),
+          roadmap: null,
+          followUpSuggestions: booksPageCategories.slice(0, 4),
+          suggestedAction: null,
+          learnedMemory: existingMem
+        });
+      }
+
+      if (p.startsWith('/path')) {
+        return res.json({
+          success: true,
+          reply: isAr
+            ? `أنت الآن في **صفحة المسارات التعليمية وخرائط الطريق (/paths)** 🧭:\n\n• تحتوي الصفحة على **${pathsPageItems.length} مسارات احترافية متكاملة**:\n${pathsPageItems.map((pt: any) => `  - **${pt.titleAr || pt.title}**`).join('\n')}\n• كل مسار يرتب لك الدورات، الأدوات المطلوبة، والمراجع الرسمية خطوة بخطوة.`
+            : `You are currently on the **Learning Paths Page (\`/paths\`)** 🧭:\n\n• Live Inventory: **${pathsPageItems.length} Structured Career Paths**:\n${pathsPageItems.map((pt: any) => `  - **${pt.title}**`).join('\n')}\n• Each path includes an interactive graphic roadmap, required tools, and sequential course playlists.`,
+          recommendations: pathsPageItems.slice(0, 4).map((pt: any) => formatPageItemRec(pt, 'path')),
+          roadmap: null,
+          followUpSuggestions: pathsPageItems.slice(0, 4).map((pt: any) => (isAr && pt.titleAr ? pt.titleAr : pt.title)),
+          suggestedAction: null,
+          learnedMemory: existingMem
+        });
+      }
+
+      // Default overview for Home / Dashboard / Leaderboard / Community / Verify / Support
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `أنت الآن في صفحة **\`${currentPath}\`** داخل منصة **SkilliQ** 👋✨\n\nأنا مرتبط مباشرة بجميع صفحات المنصة وأعرف كل الأقسام والعناوين المضافة لحظياً:\n• **صفحة الدورات (\`/courses\`)**: ${coursesPagePlaylists.length} قوائم تشغيل (${coursesPageCategories.join('، ')})\n• **صفحة الماستركلاس (\`/masterclasses\`)**: ${masterclassesPageItems.length} فيديو مطول (${masterclassesPageCategories.join('، ')})\n• **صفحة المشاريع (\`/projects\`)**: ${projectsPageItems.length} مشاريع عملية\n• **صفحة الكتب (\`/books\`)**: ${booksPageItems.length} كتب مشروحة بالفيديو\n• **صفحة المسارات (\`/paths\`)**: ${pathsPageItems.length} خرائط طريق\n\nاكتب أي كلمة مفتاحية أو اسم قسم أو صفحة وسأعرض لك ما بداخلها فوراً!`
+          : `You are currently on **\`${currentPath}\`** inside **SkilliQ** 👋✨\n\nI am live-linked to every page on the platform and automatically stay updated with all categories and titles:\n• **Courses Page (\`/courses\`)**: ${coursesPagePlaylists.length} Playlists (${coursesPageCategories.join(', ')})\n• **Masterclasses Page (\`/masterclasses\`)**: ${masterclassesPageItems.length} Single Long Videos (${masterclassesPageCategories.join(', ')})\n• **Projects Page (\`/projects\`)**: ${projectsPageItems.length} Project Playlists & Masterclasses\n• **Books Page (\`/books\`)**: ${booksPageItems.length} Video Books\n• **Paths Page (\`/paths\`)**: ${pathsPageItems.length} Career Paths\n\nAsk me about any page, category, or keyword!`,
+        recommendations: [],
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? ['ماذا يوجد في صفحة الدورات؟', 'ماذا يوجد في صفحة الماستركلاس؟', 'ماذا يوجد في صفحة المشاريع؟', 'ماذا يوجد في صفحة الكتب؟']
+          : ['What is inside Courses page?', 'What is inside Masterclasses page?', 'What is inside Projects page?', 'What is inside Books page?'],
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    // 2B. Direct Questions about Platform Pages & Features (Verify, Certificates, Leaderboard, Community, Dashboard, Creator, Support)
+    if (
+      /\b(certificate|certificates|certification|verify|verification|atlas1337)\b/i.test(lowerMsg) ||
+      /(شهادة|شهادات|الشهادات|الشهادة|توثيق|التحقق من الشهادة)/i.test(rawMsg)
+    ) {
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `إليك كيف تعمل **صفحة الشهادات (\`/certificates\`) وصفحة التوثيق (\`/verify\`)** في المنصة 🎓:\n\n1. **شهادة الدورات (\`/courses\` و \`/paths\`)**: تُمنح تلقائياً فور إكمال **100%** من دروس أي قائمة تشغيل دورة (Course Playlist).\n2. **شهادة المشاريع (\`/projects\`)**: تُمنح عند إكمال **100%** من أي قائمة تشغيل مشروع عملي (Project Playlist).\n3. **الماستركلاس (الفيديو الواحد المطول)**: يمنحك نقاط خبرة XP وأوسمة في لوحة المتصدرين (بدون شهادة).\n4. **التوثيق الرسمي (\`/verify\`)**: كل شهادة تحمل كود تحقق رسمي بصيغة \`ATLAS1337-SKILLIQ-XXXXXX\` ورمز **QR Code** يمكن لأي جهة فحصه فوراً في صفحة التوثيق!`
+          : `Here is how the **Certificates (\`/certificates\`) & Verification (\`/verify\`) Pages** work on SkilliQ 🎓:\n\n1. **Course Certificate (\`/courses\` & \`/paths\`)**: Unlocked automatically when you complete **100%** of any multi-video Course Playlist.\n2. **Project Certificate (\`/projects\`)**: Unlocked when you complete **100%** of any multi-video Project Playlist.\n3. **Single-Video Masterclasses (\`/masterclasses\`)**: Award XP & profile trophies (no certificate).\n4. **Official Verification (\`/verify\`)**: Every certificate has a unique ID (\`ATLAS1337-SKILLIQ-XXXXXX\`) and scannable **QR Code** verifiable at \`/verify\`.`,
+        recommendations: [
+          ...coursesPagePlaylists.slice(0, 2).map((c: any) => formatPageItemRec(c, 'course_playlist')),
+          ...projectsPageItems.filter((c: any) => !c.isSingleVideo).slice(0, 2).map((c: any) => formatPageItemRec(c, 'project_playlist'))
+        ],
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? ['اعرض قوائم تشغيل الدورات (/courses)', 'اعرض قوائم تشغيل المشاريع (/projects)']
+          : ['Show Course Playlists (/courses)', 'Show Project Playlists (/projects)'],
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    if (
+      /\b(leaderboard|xp|points|rank|ranking|trophies|badges|community|forum|dashboard|profile|creator|instructors)\b/i.test(lowerMsg) ||
+      /(المتصدرين|نقاط|رتبة|المجتمع|لوحة التحكم|المدربين|صناع المحتوى)/i.test(rawMsg)
+    ) {
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `دليل صفحات التفاعل والمتابعة في منصة **SkilliQ** 🏆:\n\n• **لوحة التحكم (\`/dashboard\`)**: لمتابعة تقدمك في الدورات، ساعات التعلم، المفضلة، وملاحظاتك الذكية.\n• **لوحة المتصدرين (\`/leaderboard\`)**: تكسب نقاط **XP** مع كل درس تكمله وتنافس الطلاب للوصول للمراكز الأولى.\n• **مجتمع الطلاب (\`/community\`)**: لمشاركة مشاريعك، طرح الأسئلة، والتفاعل مع المتعلمين.\n• **صفحة صناع المحتوى (\`/creator\`)**: لاستعراض القنوات التعليمية والأساتذة المعتمدين في المنصة.\n• **مركز الدعم (\`/support\`)**: لفتح تذكرة مباشرة للإدارة لطلب إضافة دورة أو حل أي مشكلة.`
+          : `Here is how SkilliQ's interactive platform pages work 🏆:\n\n• **Dashboard (\`/dashboard\`)**: Track your active courses, completion %, saved favorites, and Smart Notes.\n• **Leaderboard (\`/leaderboard\`)**: Earn **XP points** & trophies for every completed lesson and climb the student rankings.\n• **Community (\`/community\`)**: Share project builds, ask questions, and connect with peers.\n• **Creators (\`/creator\`)**: Browse featured educators and YouTube channels.\n• **Support Tickets (\`/support\`)**: Open direct tickets to the Admin to request new courses or get technical help.`,
+        recommendations: [],
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? ['ماذا يوجد في صفحة الدورات؟', 'ماذا يوجد في صفحة المشاريع؟', 'فتح تذكرة للإدارة']
+          : ['What is inside Courses page?', 'What is inside Projects page?', 'Open Ticket to Admin'],
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    // 2C. Summarize Active Course & Save to Smart Notes
+    const isNoteOrSummaryIntent =
+      /\b(summarize|summary|resume|save note|add note|smart note)\b/i.test(lowerMsg) ||
+      /(لخص|ملخص|تلخيص|ملاحظة|ملاحظاتي|مفكرتي|احفظ ملاحظة)/i.test(rawMsg);
+
+    if (isNoteOrSummaryIntent && currentCourse) {
+      const lessonList = Array.isArray(currentCourse.videos)
+        ? currentCourse.videos.slice(0, 5).map((v: any) => v.title).join(' • ')
+        : currentCourse.currentVideoTitle || currentCourse.title;
+      const summaryText = isAr
+        ? `ملخص ذكي لدورة "${currentCourse.title}" (القسم: ${currentCourse.category}${currentCourse.subCategory ? ` / ${currentCourse.subCategory}` : ''} - المدرب: ${currentCourse.instructor}): تركز الدورة على إتقان: ${lessonList}.`
+        : `Smart Summary of "${currentCourse.title}" (${currentCourse.category}${currentCourse.subCategory ? ` / ${currentCourse.subCategory}` : ''} by ${currentCourse.instructor}): Key lessons covered: ${lessonList}.`;
+
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `قمت بتلخيص دورة **"${currentCourse.title}"** لك يا **${userName}** 📝:\n\n• **التصنيف**: ${currentCourse.category}${currentCourse.subCategory ? ` (${currentCourse.subCategory})` : ''}\n• **الدرس الحالي**: ${currentCourse.currentVideoTitle}\n• **الملخص**: ${summaryText}\n\nاضغط على الزر أدناه لحفظ هذا الملخص فوراً في **مفكرتك الذكية (Smart Notes)**!`
+          : `Here is the summary for **"${currentCourse.title}"**, **${userName}** 📝:\n\n• **Category**: ${currentCourse.category}${currentCourse.subCategory ? ` (${currentCourse.subCategory})` : ''}\n• **Current Lesson**: ${currentCourse.currentVideoTitle}\n• **Summary**: ${summaryText}\n\nClick the button below to save this directly into your **Smart Notes**!`,
+        recommendations: [],
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? ['اعرض محتوى مشابه في نفس القسم', 'فتح تذكرة للإدارة']
+          : ['Show related items in this category', 'Open Ticket to Admin'],
+        suggestedAction: {
+          type: 'save_note',
+          courseId: currentCourse.id,
+          courseTitle: currentCourse.title,
+          videoId: currentCourse.currentVideoId || 'v1',
+          videoTitle: currentCourse.currentVideoTitle || currentCourse.title,
+          noteText: summaryText,
+          tag: 'important'
+        },
+        learnedMemory: existingMem
+      });
+    }
+
+    // 2D. Explicit Support Ticket Request
+    const isExplicitTicketIntent =
+      /\b(open ticket|ticket to admin|contact admin|support ticket|request to admin)\b/i.test(lowerMsg) ||
+      /(فتح تذكرة|تذكرة دعم|تذكرة تواصل|تواصل مع الإدارة|تذكرة للإدارة|تذكرة للادمن|للأدمن)/i.test(rawMsg);
+
+    if (isExplicitTicketIntent) {
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `بكل سرور يا **${userName}**! 🎫 جهزت لك بالأسفل استمارة **تذكرة مباشرة للإدارة (Admin)**.\n\nاكتب اسم الدورة أو البرنامج الذي تريد إضافته في المنصة أو استفسارك، ثم اضغط **"إرسال التذكرة للإدارة الآن"**!`
+          : `Right away, **${userName}**! 🎫 I've prepared a direct **Admin Support & Course Request Ticket** below.\n\nEnter the course/tool you'd like added or your support question and click **"Submit Ticket to Admin Now"**!`,
+        recommendations: [],
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? ['ماذا يوجد في صفحة الدورات؟', 'ماذا يوجد في صفحة المشاريع؟']
+          : ['What is inside Courses page?', 'What is inside Projects page?'],
+        suggestedAction: {
+          type: 'create_ticket',
+          subject: isAr ? 'طلب إضافة دورة / تواصل مع الإدارة' : 'Course Request / Admin Support',
+          category: 'course_request',
+          priority: 'normal',
+          message: isAr
+            ? 'مرحباً إدارة SkilliQ، أود طلب إضافة دورة جديدة أو الاستفسار عن:'
+            : 'Hello SkilliQ Admin, I would like to request a new course or assistance regarding:'
+        },
+        learnedMemory: existingMem
+      });
+    }
+
+    // =========================================================================
+    // 3. DIRECT PAGE BROWSING QUERIES
+    //    When user asks about a specific page:
+    //    - "Courses page" / "Playlists"
+    //    - "Masterclass page" / "Single long video"
+    //    - "Project page" / "Project playlist" / "Project masterclass"
+    //    - "Book page"
+    //    - "Path page" / "Roadmap"
+    // =========================================================================
+    const asksOnlyCoursesPage =
+      /^(what is inside courses page\??|show course playlists( \(\/courses\))?|courses page|playlist courses|ماذا يوجد في صفحة الدورات\??|اعرض قوائم تشغيل الدورات( \(\/courses\))?|صفحة الدورات)$/i.test(
+        rawMsg
+      );
+    const asksOnlyMasterclassesPage =
+      /^(what is inside masterclasses page\??|show masterclasses|masterclasses page|masterclass page|ماذا يوجد في صفحة الماستركلاس\??|صفحة الماستركلاس|اعرض الماستركلاس)$/i.test(
+        rawMsg
+      );
+    const asksOnlyProjectsPage =
+      /^(what is inside projects page\??|show project playlists( \(\/projects\))?|projects page|project page|ماذا يوجد في صفحة المشاريع\??|اعرض قوائم تشغيل المشاريع( \(\/projects\))?|صفحة المشاريع)$/i.test(
+        rawMsg
+      );
+    const asksOnlyBooksPage =
+      /^(what is inside books page\??|books page|book page|show books|ماذا يوجد في صفحة الكتب\??|صفحة الكتب|اعرض الكتب)$/i.test(
+        rawMsg
+      );
+    const asksOnlyPathsPage =
+      /^(what is inside paths page\??|paths page|path page|give me a study roadmap|study roadmap|ماذا يوجد في صفحة المسارات\??|صفحة المسارات|خريطة طريق \(roadmap\)|خريطة طريق)$/i.test(
+        rawMsg
+      );
+
+    if (asksOnlyCoursesPage) {
+      const catSummary = coursesPageCategories
+        .map(cat => {
+          const items = coursesPagePlaylists.filter((c: any) => c.category === cat);
+          return `• **${cat}** (${items.length}): ${items.map((i: any) => i.title).join(' | ')}`;
+        })
+        .join('\n');
+
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `قمت بفحص **صفحة الدورات التدريبية (\`/courses\` — قوائم التشغيل Playlists)** مباشرة يا **${userName}** 📚:\n\n**الأقسام والعناوين المتوفرة حالياً في صفحة الدورات (${coursesPagePlaylists.length} دورة):**\n${catSummary}\n\nاختر أي دورة من البطاقات بالأسفل للانتقال إليها مباشرة، أو اكتب اسم أي قسم لتصفيته!`
+          : `I scanned the live **Courses Page (\`/courses\` — Playlists)** for you, **${userName}** 📚:\n\n**Categories & Titles currently inside the Courses Page (${coursesPagePlaylists.length} playlists):**\n${catSummary}\n\nClick any playlist card below to open it directly, or pick a category below!`,
+        recommendations: coursesPagePlaylists.slice(0, 6).map((c: any) => formatPageItemRec(c, 'course_playlist')),
+        roadmap: null,
+        followUpSuggestions: coursesPageCategories.slice(0, 5),
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    if (asksOnlyMasterclassesPage) {
+      const catSummary = masterclassesPageCategories
+        .map(cat => {
+          const items = masterclassesPageItems.filter((c: any) => c.category === cat);
+          return `• **${cat}** (${items.length}): ${items.map((i: any) => i.title).join(' | ')}`;
+        })
+        .join('\n');
+
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `قمت بفحص **صفحة الماستركلاس (\`/masterclasses\` — فيديو واحد مطول Single Long Video)** مباشرة يا **${userName}** 🎥:\n\n**الأقسام والعناوين المتوفرة حالياً في صفحة الماستركلاس (${masterclassesPageItems.length} ماستركلاس):**\n${catSummary}\n\nاضغط على أي ماستركلاس بالأسفل للبدء فوراً!`
+          : `I scanned the live **Masterclasses Page (\`/masterclasses\` — Single Long Videos)** for you, **${userName}** 🎥:\n\n**Categories & Titles currently inside the Masterclasses Page (${masterclassesPageItems.length} masterclasses):**\n${catSummary}\n\nClick any masterclass card below to start watching!`,
+        recommendations: masterclassesPageItems.slice(0, 6).map((c: any) => formatPageItemRec(c, 'masterclass')),
+        roadmap: null,
+        followUpSuggestions: masterclassesPageCategories.slice(0, 5),
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    if (asksOnlyProjectsPage) {
+      const projPlaylists = projectsPageItems.filter((c: any) => !c.isSingleVideo);
+      const projMasterclasses = projectsPageItems.filter((c: any) => Boolean(c.isSingleVideo));
+
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `قمت بفحص **صفحة المشاريع العملية (\`/projects\`)** مباشرة يا **${userName}** 🚀:\n\nتضم الصفحة **${projectsPageItems.length} مشاريع** موزعة على نوعين:\n\n1. **قوائم تشغيل المشاريع (Project Playlists — تمنح شهادة مشروع)**:\n${projPlaylists.map((p: any) => `• **${p.title}** (${p.category} / ${p.subCategory || ''})`).join('\n')}\n\n2. **ماستركلاس المشاريع (Project Masterclasses — فيديو واحد لبناء مشروع كامل)**:\n${projMasterclasses.map((p: any) => `• **${p.title}** (${p.category} / ${p.subCategory || ''})`).join('\n')}`
+          : `I scanned the live **Projects Page (\`/projects\`)** for you, **${userName}** 🚀:\n\nIt currently features **${projectsPageItems.length} Hands-On Projects** in two formats:\n\n1. **Project Playlists (Multi-Video — Eligible for Project Certificate)**:\n${projPlaylists.map((p: any) => `• **${p.title}** (${p.category} / ${p.subCategory || ''})`).join('\n')}\n\n2. **Project Masterclasses (Single Long-Video Full Builds)**:\n${projMasterclasses.map((p: any) => `• **${p.title}** (${p.category} / ${p.subCategory || ''})`).join('\n')}`,
+        recommendations: projectsPageItems
+          .slice(0, 6)
+          .map((c: any) => formatPageItemRec(c, c.isSingleVideo ? 'project_masterclass' : 'project_playlist')),
+        roadmap: null,
+        followUpSuggestions: projectsPageCategories.slice(0, 5),
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    if (asksOnlyBooksPage) {
+      const catSummary = booksPageCategories
+        .map(cat => {
+          const items = booksPageItems.filter((b: any) => b.category === cat);
+          return `• **${cat}** (${items.length}): ${items.map((b: any) => (isAr && b.titleAr ? b.titleAr : b.title)).join(' | ')}`;
+        })
+        .join('\n');
+
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `قمت بفحص **صفحة الكتب (\`/books\`)** مباشرة يا **${userName}** 📖:\n\n**الأقسام وعناوين الكتب المشروحة بالفيديو (${booksPageItems.length} كتاب):**\n${catSummary}\n\nاضغط على أي كتاب بالأسفل لفتحه ومشاهدة شرحه!`
+          : `I scanned the live **Books Page (\`/books\`)** for you, **${userName}** 📖:\n\n**Categories & Titles currently inside the Books Page (${booksPageItems.length} books):**\n${catSummary}\n\nClick any book card below to open its video explanation!`,
+        recommendations: booksPageItems.slice(0, 6).map((b: any) => formatPageItemRec(b, 'book')),
+        roadmap: null,
+        followUpSuggestions: booksPageCategories.slice(0, 5),
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    if (asksOnlyPathsPage) {
+      const pathsSummary = pathsPageItems
+        .map((pt: any) => {
+          const pTitle = isAr && pt.titleAr ? pt.titleAr : pt.title;
+          const includedTitles = Array.isArray(pt.courseTitles) && pt.courseTitles.length > 0
+            ? pt.courseTitles.join(' → ')
+            : `${(pt.courseIds || []).length} courses`;
+          return `• **${pTitle}**: ${includedTitles}`;
+        })
+        .join('\n');
+
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `قمت بفحص **صفحة المسارات التعليمية وخرائط الطريق (\`/paths\`)** مباشرة يا **${userName}** 🧭:\n\n**المسارات المتوفرة حالياً والدورات بداخلها (${pathsPageItems.length} مسارات):**\n${pathsSummary}\n\nاضغط على أي مسار بالأسفل لفتح خريطة الطريق التفاعلية الخاصة به!`
+          : `I scanned the live **Paths Page (\`/paths\` — Career Roadmaps)** for you, **${userName}** 🧭:\n\n**Structured Learning Paths & Included Courses (${pathsPageItems.length} paths):**\n${pathsSummary}\n\nClick any path card below to open its full interactive roadmap!`,
+        recommendations: pathsPageItems.slice(0, 6).map((pt: any) => formatPageItemRec(pt, 'path')),
+        roadmap: null,
+        followUpSuggestions: pathsPageItems.slice(0, 4).map((pt: any) => (isAr && pt.titleAr ? pt.titleAr : pt.title)),
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    // =========================================================================
+    // 4. KEYWORD vs. LIVE PAGES CATEGORIES & TITLES COMPARATOR ENGINE
+    //    Whenever the user asks about ANYTHING:
+    //    - Extract clean keywords & bilingual synonyms from user's message
+    //    - Compare user keywords directly against Categories, SubCategories, Titles, Instructors & Descriptions inside:
+    //      1) Courses Page (Playlists)
+    //      2) Masterclasses Page (Single Long Videos)
+    //      3) Projects Page (Playlists & Masterclasses)
+    //      4) Books Page
+    //      5) Paths Page
+    //    - Automatically detects ANY new course, project, masterclass, book, or path added by Admin!
+    // =========================================================================
+
+    // Bilingual keyword expansion map so Arabic/Darija/English terms match exact category/subCategory/title words
+    const KEYWORD_SYNONYMS: { trigger: RegExp; terms: string[]; excludeTerms?: string[] }[] = [
+      {
+        trigger: /\b(ui|ux|ui\/ux|figma|interface|claude design|ui system|web design|css grid|graphic)\b|(واجهات|تصميم واجهات|تجربة المستخدم|فيجما|جرافيك|تصميم مواقع)/i,
+        terms: ['ui', 'ux', 'claude design', 'ui system', 'ai design', 'css grid', 'css', 'واجهات', 'تصميم واجهات'],
+        excludeTerms: ['sketchup', '3d', 'سكتش', 'ثلاثي الأبعاد', 'معماري']
+      },
+      {
+        trigger: /\b(3d|sketchup|interior|architecture|architect|autocad|revit|blender|3ds max|rendering|render)\b|(ثري دي|ثلاثي الأبعاد|ثلاثية الأبعاد|سكتش|معماري|تصميم داخلي|داخلي|ديكور|اوتوكاد|أوتوكاد)/i,
+        terms: ['3d', 'sketchup', 'سكتش', 'ثلاثي الأبعاد', 'ثلاثية الأبعاد', 'معماري', 'داخلي', 'autocad'],
+        excludeTerms: ['css grid', 'claude design']
+      },
+      {
+        trigger: /\b(web|frontend|front-end|fullstack|full-stack|html|html5|javascript|js|react|reactjs|nextjs|next\.js|wordpress|saas|ecommerce|e-commerce|mern)\b|(ويب|مواقع|تطوير المواقع|تطوير الويب|فرونت|رياكت|جافاسكريبت|ووردبريس|متجر)/i,
+        terms: ['web development', 'frontend', 'html', 'javascript', 'react', 'wordpress', 'saas', 'e-commerce', 'موقع', 'ويب', 'ووردبريس']
+      },
+      {
+        trigger: /\b(mobile|flutter|dart|android|ios|app)\b|(موبايل|فلاتر|دارت|تطبيقات الهواتف|تطبيقات الموبايل|تطبيق موبايل|أندرويد)/i,
+        terms: ['flutter', 'dart', 'mobile', 'فلاتر', 'دارت', 'موبايل']
+      },
+      {
+        trigger: /\b(cyber|cybersecurity|security|hack|hacking|ethical hacking|network|networking|comptia|ceh|python)\b|(أمن سيبراني|الأمن السيبراني|امان|شبكات|الشبكات|اختراق|هكر|بايثون)/i,
+        terms: ['cyber security', 'cybersecurity', 'network', 'networking', 'comptia', 'ceh', 'ethical hacking', 'python']
+      },
+      {
+        trigger: /\b(ai|artificial intelligence|automation|n8n|no-code|nocode)\b|(ذكاء اصطناعي|الذكاء الاصطناعي|أتمتة|اتمتة)/i,
+        terms: ['ai', 'automation', 'n8n', 'ذكاء اصطناعي', 'أتمتة']
+      },
+      {
+        trigger: /\b(marketing|digital marketing|media buyer|media buying|ads|advertising)\b|(تسويق|التسويق الرقمي|ميديا باير|ميديا باينج|إعلانات|اعلانات)/i,
+        terms: ['digital marketing', 'marketing', 'media buyer', 'ads', 'ميديا باينج', 'تسويق', 'إعلانات']
+      },
+      {
+        trigger: /\b(programming|coding|code|clean code|algorithm|software)\b|(برمجة|البرمجة|كود|خوارزميات)/i,
+        terms: ['programming', 'javascript', 'flutter', 'python', 'software', 'code', 'برمجة']
+      }
+    ];
+
+    // Check if user is just greeting or clicking "Recommend Courses & Projects" with no specific keyword yet
+    const isGenericGreetingOrRecommend =
+      /^(hi|hello|hey|salam|slm|start|recommend courses & projects|recommend courses|اقترح دورات ومشاريع|مرحبا|أهلا|اهلا|السلام عليكم|سلام)[!.\s؟?]*$/i.test(
+        rawMsg
+      );
+
+    if (isGenericGreetingOrRecommend) {
+      return res.json({
+        success: true,
+        reply: isDarija
+          ? `أهلاً بيك يا **${userName}**! 👋✨ أنا مربوط مباشرة بجميع صفحات منصة **SkilliQ** وكنشوف جميع الأقسام والعناوين المضافة في كل صفحة:\n\n• **صفحة الدورات (\`/courses\`)**: ${coursesPagePlaylists.length} قوائم تشغيل (${coursesPageCategories.join('، ')})\n• **صفحة الماستركلاس (\`/masterclasses\`)**: ${masterclassesPageItems.length} فيديو طويل (${masterclassesPageCategories.join('، ')})\n• **صفحة المشاريع (\`/projects\`)**: ${projectsPageItems.length} مشاريع (Playlists & Masterclasses)\n• **صفحة الكتب (\`/books\`)**: ${booksPageItems.length} كتب مشروحة بالفيديو\n• **صفحة المسارات (\`/paths\`)**: ${pathsPageItems.length} مسارات وخرائط طريق\n\n**قولي أي كلمة مفتاحية، قسم، أو عنوان كتقلب عليه** وغادي نقارنو مع جميع الصفحات ونعطيك كلشي اللي يطابقو بالضبط!`
+          : isAr
+          ? `أهلاً بك يا **${userName}**! 👋✨ أنا متصل مباشرة بجميع صفحات منصة **SkilliQ** وأقرأ جميع الأقسام والعناوين لحظياً:\n\n• **صفحة الدورات (\`/courses\`)**: ${coursesPagePlaylists.length} قوائم تشغيل (${coursesPageCategories.join('، ')})\n• **صفحة الماستركلاس (\`/masterclasses\`)**: ${masterclassesPageItems.length} فيديو مطول (${masterclassesPageCategories.join('، ')})\n• **صفحة المشاريع (\`/projects\`)**: ${projectsPageItems.length} مشاريع عملية (قوائم تشغيل وماستركلاس)\n• **صفحة الكتب (\`/books\`)**: ${booksPageItems.length} كتب مشروحة بالفيديو (${booksPageCategories.join('، ')})\n• **صفحة المسارات (\`/paths\`)**: ${pathsPageItems.length} مسارات تعليمية\n\n**اكتب أي كلمة مفتاحية أو اختر قسماً بالأسفل** لأقارنها بعناوين وأقسام جميع الصفحات وأرشح لك المطابق بدقة!`
+          : `Hi **${userName}**! 👋✨ I am live-linked to all 5 content pages on **SkilliQ** and automatically index every category, sub-category, and title:\n\n• **Courses Page (\`/courses\`)**: ${coursesPagePlaylists.length} Playlists (${coursesPageCategories.join(', ')})\n• **Masterclasses Page (\`/masterclasses\`)**: ${masterclassesPageItems.length} Single Long Videos (${masterclassesPageCategories.join(', ')})\n• **Projects Page (\`/projects\`)**: ${projectsPageItems.length} Projects (Playlists & Masterclasses)\n• **Books Page (\`/books\`)**: ${booksPageItems.length} Books (${booksPageCategories.join(', ')})\n• **Paths Page (\`/paths\`)**: ${pathsPageItems.length} Career Paths\n\n**Type any keyword, category, or title** (or click below) and I will compare it across all pages and recommend the exact matches!`,
+        recommendations: [],
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? [
+              ...allPlatformCategories.slice(0, 4),
+              'ماذا يوجد في صفحة المشاريع؟',
+              'ماذا يوجد في صفحة الكتب؟'
+            ]
+          : [
+              ...allPlatformCategories.slice(0, 4),
+              'What is inside Projects page?',
+              'What is inside Books page?'
+            ],
+        suggestedAction: null,
+        learnedMemory: existingMem
+      });
+    }
+
+    // Extract raw user tokens + synonym expansions
+    const stopWords =
+      /^(what|where|which|show|give|find|search|recommend|want|need|learn|about|inside|page|pages|course|courses|playlist|playlists|masterclass|masterclasses|project|projects|book|books|path|paths|the|for|and|with|from|can|you|please|bro|bghit|wach|kifach|chno|kayn|من|في|على|عن|إلى|الى|هل|ما|ماذا|يوجد|صفحة|دورات|دورة|كورس|كورسات|مشاريع|مشروع|ماستركلاس|كتب|كتاب|مسار|مسارات|اعرض|أعطني|اريد|أريد|بغيت|نتعلم|تعلم)$/i;
+
+    const rawUserTokens = rawMsg
+      .replace(/[?؟!.,،/\\()[\]{}"'`~:;+-]/g, ' ')
+      .split(/\s+/)
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length >= 2 && !stopWords.test(t));
+
+    // Also check if user specifically asked to filter by a single page (e.g., "react in projects page" or "books about ai")
+    const filterOnlyCourses = /\b(in courses page|course playlist|on courses page)\b|(في صفحة الدورات)/i.test(rawMsg);
+    const filterOnlyMasterclasses = /\b(in masterclasses|masterclass page)\b|(في صفحة الماستركلاس)/i.test(rawMsg);
+    const filterOnlyProjects = /\b(in projects|project page|projects page)\b|(في صفحة المشاريع)/i.test(rawMsg);
+    const filterOnlyBooks = /\b(in books|book page|books page)\b|(في صفحة الكتب)/i.test(rawMsg);
+    const filterOnlyPaths = /\b(in paths|path page|paths page)\b|(في صفحة المسارات)/i.test(rawMsg);
+    const hasSpecificPageFilter =
+      filterOnlyCourses || filterOnlyMasterclasses || filterOnlyProjects || filterOnlyBooks || filterOnlyPaths;
+
+    // Collect expanded search terms & exclusions based on user's keywords
+    const matchedGroups = KEYWORD_SYNONYMS.filter(g => g.trigger.test(rawMsg));
+    const expandedTerms = Array.from(
+      new Set([
+        ...rawUserTokens,
+        ...matchedGroups.flatMap(g => g.terms.map(t => t.toLowerCase()))
+      ])
+    );
+    const excludedTerms = Array.from(
+      new Set(matchedGroups.flatMap(g => (g.excludeTerms || []).map(t => t.toLowerCase())))
+    );
+
+    // Score function that compares user keywords against an item's Title, Category, SubCategory, Instructor, and Description
+    const scoreCatalogItem = (item: any, isBookOrPath = false): number => {
+      const title = `${item.title || ''} ${item.titleAr || ''}`.toLowerCase();
+      const category = `${item.category || ''}`.toLowerCase();
+      const subCategory = `${item.subCategory || ''}`.toLowerCase();
+      const instructor = `${item.instructor || ''} ${item.author || ''} ${item.authorAr || ''}`.toLowerCase();
+      const desc = `${item.description || ''} ${(item.courseTitles || []).join(' ')}`.toLowerCase();
+      const fullHaystack = `${title} ${category} ${subCategory} ${instructor} ${desc}`;
+
+      // Strict Exclusion Check (e.g. so UI/UX never matches 3D/SketchUp!)
+      if (excludedTerms.length > 0 && excludedTerms.some(ex => fullHaystack.includes(ex))) {
+        return 0;
+      }
+
+      let score = 0;
+
+      // 1. Direct Raw User Token Comparison (Highest Priority: exact match with what user typed!)
+      for (const tok of rawUserTokens) {
+        if (title.includes(tok)) score += 35;
+        if (subCategory.includes(tok)) score += 30;
+        if (category.includes(tok)) score += 25;
+        if (instructor.includes(tok)) score += 18;
+        if (desc.includes(tok)) score += 10;
+      }
+
+      // 2. Expanded Synonym Comparison against Title, SubCategory, Category
+      for (const term of expandedTerms) {
+        if (rawUserTokens.includes(term)) continue; // already counted above
+        if (title.includes(term)) score += 16;
+        if (subCategory.includes(term)) score += 18;
+        if (category.includes(term)) score += 12;
+        if (isBookOrPath && desc.includes(term)) score += 8;
+      }
+
+      return score;
+    };
+
+    // Compare across all 5 live pages!
+    const matchedCoursePlaylists = (!hasSpecificPageFilter || filterOnlyCourses)
+      ? coursesPagePlaylists
+          .map((c: any) => ({ item: c, score: scoreCatalogItem(c) }))
+          .filter(x => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(x => x.item)
+      : [];
+
+    const matchedMasterclasses = (!hasSpecificPageFilter || filterOnlyMasterclasses)
+      ? masterclassesPageItems
+          .map((c: any) => ({ item: c, score: scoreCatalogItem(c) }))
+          .filter(x => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(x => x.item)
+      : [];
+
+    const matchedProjects = (!hasSpecificPageFilter || filterOnlyProjects)
+      ? projectsPageItems
+          .map((c: any) => ({ item: c, score: scoreCatalogItem(c) }))
+          .filter(x => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(x => x.item)
+      : [];
+
+    const matchedBooks = (!hasSpecificPageFilter || filterOnlyBooks)
+      ? booksPageItems
+          .map((b: any) => ({ item: b, score: scoreCatalogItem(b, true) }))
+          .filter(x => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(x => x.item)
+      : [];
+
+    const matchedPaths = (!hasSpecificPageFilter || filterOnlyPaths)
+      ? pathsPageItems
+          .map((p: any) => ({ item: p, score: scoreCatalogItem(p, true) }))
+          .filter(x => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(x => x.item)
+      : [];
+
+    // Check if the user typed a specific software/tool name that is NOT in any of the 5 pages yet (e.g. AutoCAD, Figma, Photoshop, Revit, Blender)
+    // Wait: if rawUserTokens has a specific tool word that had ZERO direct token matches in any item title/subCategory/category/description:
+    const hasDirectTokenHitInAnyPage =
+      rawUserTokens.length === 0 ||
+      rawUserTokens.some(tok => {
+        const allItemsHaystack = [
+          ...coursesPagePlaylists,
+          ...masterclassesPageItems,
+          ...projectsPageItems,
+          ...booksPageItems,
+          ...pathsPageItems
+        ]
+          .map(
+            (i: any) =>
+              `${i.title || ''} ${i.titleAr || ''} ${i.category || ''} ${i.subCategory || ''} ${i.description || ''}`.toLowerCase()
+          )
+          .join(' ');
+        return allItemsHaystack.includes(tok);
+      });
+
+    const totalMatchesCount =
+      matchedCoursePlaylists.length +
+      matchedMasterclasses.length +
+      matchedProjects.length +
+      matchedBooks.length +
+      matchedPaths.length;
+
+    if (totalMatchesCount > 0) {
+      // Build a crystal-clear breakdown showing exactly which PAGE, CATEGORY, and TITLE matched the user's keywords!
+      const sectionsAr: string[] = [];
+      const sectionsEn: string[] = [];
+      const combinedRecs: any[] = [];
+
+      if (matchedCoursePlaylists.length > 0) {
+        sectionsAr.push(
+          `📚 **صفحة الدورات (\`/courses\` — قوائم تشغيل Playlists):**\n` +
+            matchedCoursePlaylists
+              .slice(0, 3)
+              .map((c: any) => `• **${c.title}** — القسم: \`${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''}\``)
+              .join('\n')
+        );
+        sectionsEn.push(
+          `📚 **Courses Page (\`/courses\` — Playlists):**\n` +
+            matchedCoursePlaylists
+              .slice(0, 3)
+              .map((c: any) => `• **${c.title}** — Category: \`${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''}\``)
+              .join('\n')
+        );
+        matchedCoursePlaylists.slice(0, 2).forEach((c: any) => combinedRecs.push(formatPageItemRec(c, 'course_playlist')));
+      }
+
+      if (matchedMasterclasses.length > 0) {
+        sectionsAr.push(
+          `🎥 **صفحة الماستركلاس (\`/masterclasses\` — فيديو واحد مطول):**\n` +
+            matchedMasterclasses
+              .slice(0, 3)
+              .map((c: any) => `• **${c.title}** — القسم: \`${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''}\``)
+              .join('\n')
+        );
+        sectionsEn.push(
+          `🎥 **Masterclasses Page (\`/masterclasses\` — Single Long Video):**\n` +
+            matchedMasterclasses
+              .slice(0, 3)
+              .map((c: any) => `• **${c.title}** — Category: \`${c.category}${c.subCategory ? ` / ${c.subCategory}` : ''}\``)
+              .join('\n')
+        );
+        matchedMasterclasses.slice(0, 2).forEach((c: any) => combinedRecs.push(formatPageItemRec(c, 'masterclass')));
+      }
+
+      if (matchedProjects.length > 0) {
+        sectionsAr.push(
+          `🚀 **صفحة المشاريع العملية (\`/projects\` — Playlists & Masterclasses):**\n` +
+            matchedProjects
+              .slice(0, 3)
+              .map(
+                (c: any) =>
+                  `• **${c.title}** (${c.isSingleVideo ? 'ماستركلاس مشروع' : 'قائمة تشغيل مشروع'}) — القسم: \`${c.category}${
+                    c.subCategory ? ` / ${c.subCategory}` : ''
+                  }\``
+              )
+              .join('\n')
+        );
+        sectionsEn.push(
+          `🚀 **Projects Page (\`/projects\` — Playlists & Masterclasses):**\n` +
+            matchedProjects
+              .slice(0, 3)
+              .map(
+                (c: any) =>
+                  `• **${c.title}** (${c.isSingleVideo ? 'Project Masterclass' : 'Project Playlist'}) — Category: \`${
+                    c.category
+                  }${c.subCategory ? ` / ${c.subCategory}` : ''}\``
+              )
+              .join('\n')
+        );
+        matchedProjects
+          .slice(0, 2)
+          .forEach((c: any) =>
+            combinedRecs.push(formatPageItemRec(c, c.isSingleVideo ? 'project_masterclass' : 'project_playlist'))
+          );
+      }
+
+      if (matchedPaths.length > 0) {
+        sectionsAr.push(
+          `🧭 **صفحة المسارات التعليمية (\`/paths\`):**\n` +
+            matchedPaths
+              .slice(0, 2)
+              .map((p: any) => `• **${p.titleAr || p.title}**`)
+              .join('\n')
+        );
+        sectionsEn.push(
+          `🧭 **Paths Page (\`/paths\` — Career Roadmaps):**\n` +
+            matchedPaths
+              .slice(0, 2)
+              .map((p: any) => `• **${p.title}**`)
+              .join('\n')
+        );
+        matchedPaths.slice(0, 1).forEach((p: any) => combinedRecs.push(formatPageItemRec(p, 'path')));
+      }
+
+      if (matchedBooks.length > 0) {
+        sectionsAr.push(
+          `📖 **صفحة الكتب (\`/books\`):**\n` +
+            matchedBooks
+              .slice(0, 2)
+              .map((b: any) => `• **${b.titleAr || b.title}** — القسم: \`${b.category}\``)
+              .join('\n')
+        );
+        sectionsEn.push(
+          `📖 **Books Page (\`/books\`):**\n` +
+            matchedBooks
+              .slice(0, 2)
+              .map((b: any) => `• **${b.title}** — Category: \`${b.category}\``)
+              .join('\n')
+        );
+        matchedBooks.slice(0, 1).forEach((b: any) => combinedRecs.push(formatPageItemRec(b, 'book')));
+      }
+
+      // If the user's exact keyword wasn't literally in the title (e.g. they asked for "Figma" or "AutoCAD" and we matched its category),
+      // let them know clearly AND offer a 1-click ticket for that exact keyword!
+      const missingExactKeywordNoteAr = !hasDirectTokenHitInAnyPage
+        ? `\n\n💡 **ملاحظة ذكية**: العنوان الحرفي **"${rawMsg}"** غير مضاف كدورة منفصلة بعد، لذلك عرضت لك المحتوى المطابق من نفس القسم في صفحات المنصة، وجهزت لك بالأسفل **تذكرة لطلب إضافة "${rawMsg}" من الإدارة** بضغطة زر!`
+        : '';
+      const missingExactKeywordNoteEn = !hasDirectTokenHitInAnyPage
+        ? `\n\n💡 **Smart Note**: An exact title named **"${rawMsg}"** isn't added as a standalone item yet, so I pulled the closest matches from the same category across our pages—and prepared a **1-Click Admin Request Ticket** below if you want **"${rawMsg}"** added!`
+        : '';
+
+      return res.json({
+        success: true,
+        reply: isAr
+          ? `قمت بمقارنة طلبك (**"${rawMsg}"**) مع الأقسام والعناوين في جميع صفحات المنصة، ووجدت لك هذه النتائج المطابقة 🎯:\n\n${sectionsAr.join(
+              '\n\n'
+            )}${missingExactKeywordNoteAr}`
+          : `I compared your keywords (**"${rawMsg}"**) against the live categories and titles across all platform pages and found these matches 🎯:\n\n${sectionsEn.join(
+              '\n\n'
+            )}${missingExactKeywordNoteEn}`,
+        recommendations: combinedRecs.slice(0, 6),
+        roadmap: null,
+        followUpSuggestions: isAr
+          ? ['صفحة الدورات (/courses)', 'صفحة الماستركلاس (/masterclasses)', 'صفحة المشاريع (/projects)', 'صفحة الكتب (/books)']
+          : ['Courses Page (/courses)', 'Masterclasses Page (/masterclasses)', 'Projects Page (/projects)', 'Books Page (/books)'],
+        suggestedAction: !hasDirectTokenHitInAnyPage
+          ? {
+              type: 'create_ticket',
+              subject: isAr ? `طلب إضافة: ${rawMsg.slice(0, 50)}` : `Course Request: Please add "${rawMsg.slice(0, 50)}"`,
+              category: 'course_request',
+              priority: 'high',
+              message: isAr
+                ? `مرحباً إدارة SkilliQ، أرجو إضافة دورة أو محتوى حول "${rawMsg}" في المنصة. شكراً لكم!`
+                : `Hello SkilliQ Admin, please consider adding a course or project covering "${rawMsg}". Thank you!`
+            }
+          : null,
+        learnedMemory: existingMem
+      });
+    }
+
+    // =========================================================================
+    // 5. NO MATCH IN ANY PAGE -> HONEST REPORT ACROSS ALL 5 PAGES + ADMIN REQUEST TICKET
+    // =========================================================================
+    return res.json({
+      success: true,
+      reply: isAr
+        ? `قمت بالبحث ومقارنة **"${rawMsg}"** مع جميع الأقسام والعناوين داخل:\n• **صفحة الدورات (\`/courses\`)**\n• **صفحة الماستركلاس (\`/masterclasses\`)**\n• **صفحة المشاريع (\`/projects\`)**\n• **صفحة الكتب (\`/books\`)**\n• **صفحة المسارات (\`/paths\`)**\n\nولم أجد عنواناً أو قسماً يطابق **"${rawMsg}"** حالياً في المنصة.\n\n• **لإضافته لك**: جهزت لك بالأسفل **تذكرة طلب إضافة للإدارة (Admin)** جاهزة — اضغط فقط على **"إرسال التذكرة للإدارة الآن"**!\n• أو اختر أحد الأقسام المتوفرة حالياً في صفحات المنصة بالأسفل:`
+        : `I compared **"${rawMsg}"** against all categories, sub-categories, and titles inside:\n• **Courses Page (\`/courses\`)**\n• **Masterclasses Page (\`/masterclasses\`)**\n• **Projects Page (\`/projects\`)**\n• **Books Page (\`/books\`)**\n• **Paths Page (\`/paths\`)**\n\nThere is no item matching **"${rawMsg}"** in the catalog yet.\n\n• **Want it added?** I've pre-filled a **Course Request Ticket to the Admin** below—just click **"Submit Ticket to Admin Now"**!\n• Or explore one of our live platform categories below:`,
+      recommendations: [],
+      roadmap: null,
+      followUpSuggestions: allPlatformCategories.slice(0, 6),
+      suggestedAction: {
+        type: 'create_ticket',
+        subject: isAr
+          ? `طلب إضافة محتوى في المنصة: ${rawMsg.slice(0, 50)}`
+          : `Content Request: Please add "${rawMsg.slice(0, 50)}"`,
+        category: 'course_request',
+        priority: 'high',
+        message: isAr
+          ? `مرحباً إدارة SkilliQ، بحثت في صفحات المنصة عن "${rawMsg}" وأرجو إضافته قريباً. شكراً لكم!`
+          : `Hello SkilliQ Admin, I searched the platform pages for "${rawMsg}" and would love for you to add it. Thank you!`
+      },
+      learnedMemory: existingMem
+    });
+  });
+
   // OAuth Setup Helper
   const getOAuthClient = (req: any) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;

@@ -20,6 +20,12 @@ interface RichCommunityContentProps {
  * - `code` -> <code>
  * - raw https://... -> Clickable Link
  */
+const isSafeUrl = (rawUrl?: string): boolean => {
+  if (!rawUrl) return false;
+  const trimmed = rawUrl.trim();
+  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('/');
+};
+
 function renderInlineTokens(
   text: string,
   onImageClick?: (imageUrl: string) => void
@@ -38,7 +44,9 @@ function renderInlineTokens(
     const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (imgMatch) {
       const caption = imgMatch[1]?.trim();
-      const url = imgMatch[2]?.trim();
+      const rawUrl = imgMatch[2]?.trim();
+      const url = isSafeUrl(rawUrl) ? rawUrl : '';
+      if (!url) return null;
       return (
         <span key={idx} className="block my-4">
           <span
@@ -69,11 +77,12 @@ function renderInlineTokens(
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
       const label = linkMatch[1];
-      const url = linkMatch[2]?.trim();
+      const rawUrl = linkMatch[2]?.trim();
+      const safeHref = isSafeUrl(rawUrl) ? rawUrl : '#';
       return (
         <a
           key={idx}
-          href={url}
+          href={safeHref}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 font-bold text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary transition-colors mx-0.5"

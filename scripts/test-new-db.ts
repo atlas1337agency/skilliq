@@ -2,12 +2,12 @@ import { initializeApp } from 'firebase/app';
 import { initializeFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 
 const newConfig = {
-  apiKey: "AIzaSyAcVzXMmtcixXTn2sOGehfbo6s0NBQevYo",
-  authDomain: "skilliq-1337.firebaseapp.com",
-  projectId: "skilliq-1337",
-  storageBucket: "skilliq-1337.firebasestorage.app",
-  messagingSenderId: "336826489731",
-  appId: "1:336826489731:web:6fcfb5013b6e0898d774b6"
+  apiKey: process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "",
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN || "skilliq-1337.firebaseapp.com",
+  projectId: process.env.FIREBASE_PROJECT_ID || "skilliq-1337",
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "skilliq-1337.firebasestorage.app",
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "336826489731",
+  appId: process.env.FIREBASE_APP_ID || "1:336826489731:web:6fcfb5013b6e0898d774b6"
 };
 
 async function testWrite() {

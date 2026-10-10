@@ -17,29 +17,37 @@ import { motion } from 'motion/react';
 import { ResponsiveCertificateViewer } from './ResponsiveCertificateViewer';
 import { CertificateData } from './CertificateDocument';
 import { useStore } from '../store/useStore';
+import { buildCertificateId } from '../lib/courseUtils';
 
 interface PreviewCertificateModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialVariant?: 'default' | 'project';
 }
 
-export function PreviewCertificateModal({ isOpen, onClose }: PreviewCertificateModalProps) {
+export function PreviewCertificateModal({ isOpen, onClose, initialVariant = 'default' }: PreviewCertificateModalProps) {
   const { t, i18n } = useTranslation();
   const { user, userName, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
   const [isZoomed, setIsZoomed] = useState(false);
+  const [certVariant, setCertVariant] = useState<'default' | 'project'>(initialVariant);
 
   const studentDisplayName = user?.displayName || userName || (isRtl ? 'اسم الطالب (نموذج معتمد)' : 'Student Name (Verified Sample)');
 
   const certData: CertificateData = useMemo(() => {
-    const certId = 'NX-SKILLIQ-DEMO-VERIFIED';
+    const isProj = certVariant === 'project';
+    const certId = buildCertificateId(isProj ? 'demo-project' : 'demo', user?.uid, undefined, true);
     return {
       certId,
       studentName: studentDisplayName,
-      courseTitle: isRtl 
-        ? 'تطوير تطبيقات الويب المتكاملة وهندسة البرمجيات الحديثة'
-        : 'Full-Stack Web Development & Modern Software Architecture',
+      courseTitle: isProj
+        ? (isRtl
+            ? 'بناء مشروع متجر إلكتروني متكامل من الصفر خطوة بخطوة (تطبيق عملي شامل)'
+            : 'Build a Complete E-Commerce Store From Scratch (React, Node & MongoDB)')
+        : (isRtl 
+            ? 'تطوير تطبيقات الويب المتكاملة وهندسة البرمجيات الحديثة'
+            : 'Full-Stack Web Development & Modern Software Architecture'),
       instructorName: 'Mr. Marouan Anouar',
       professorName: isRtl ? 'Prof. Osama Elzero' : 'Prof. Brad Traversy',
       youtubeChannelName: isRtl ? 'Elzero Web School' : 'Traversy Media',
@@ -49,9 +57,10 @@ export function PreviewCertificateModal({ isOpen, onClose }: PreviewCertificateM
         day: 'numeric'
       }),
       verificationUrl: `${window.location.origin}/verify?id=${certId}`,
-      isDemo: true
+      isDemo: true,
+      isProjectBuild: isProj
     };
-  }, [studentDisplayName, isRtl]);
+  }, [studentDisplayName, isRtl, certVariant]);
 
   if (!isOpen) return null;
 
@@ -111,23 +120,50 @@ export function PreviewCertificateModal({ isOpen, onClose }: PreviewCertificateM
             </span>
           </div>
 
-          {/* Zoom toggle button for mobile/tablet */}
-          <button
-            onClick={() => setIsZoomed(!isZoomed)}
-            className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-card border border-border/80 text-[11px] font-bold text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
-          >
-            {isZoomed ? (
-              <>
-                <ZoomOut className="w-3.5 h-3.5 text-primary" />
-                <span>{isRtl ? 'ملاءمة الشاشة' : 'Fit Screen'}</span>
-              </>
-            ) : (
-              <>
-                <ZoomIn className="w-3.5 h-3.5 text-primary" />
-                <span>{isRtl ? 'تكبير 100%' : 'Zoom 100%'}</span>
-              </>
-            )}
-          </button>
+          {/* Certificate Style Switcher + Zoom toggle button */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center p-0.5 rounded-lg bg-card border border-border/80 text-[10.5px] font-bold">
+              <button
+                type="button"
+                onClick={() => setCertVariant('default')}
+                className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                  certVariant === 'default'
+                    ? 'bg-amber-500 text-slate-950 font-black'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {isRtl ? 'شهادة الدورات' : 'Course Certificate'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCertVariant('project')}
+                className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                  certVariant === 'project'
+                    ? 'bg-emerald-600 text-white font-black'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {isRtl ? 'شهادة المشاريع العملية' : 'Project Build Certificate'}
+              </button>
+            </div>
+
+            <button
+              onClick={() => setIsZoomed(!isZoomed)}
+              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-card border border-border/80 text-[11px] font-bold text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
+            >
+              {isZoomed ? (
+                <>
+                  <ZoomOut className="w-3.5 h-3.5 text-primary" />
+                  <span>{isRtl ? 'ملاءمة الشاشة' : 'Fit Screen'}</span>
+                </>
+              ) : (
+                <>
+                  <ZoomIn className="w-3.5 h-3.5 text-primary" />
+                  <span>{isRtl ? 'تكبير 100%' : 'Zoom 100%'}</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* CERTIFICATE PREVIEW VIEWPORT: 100% Full View from Top to Bottom */}

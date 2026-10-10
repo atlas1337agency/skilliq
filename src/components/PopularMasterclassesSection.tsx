@@ -49,10 +49,12 @@ export function PopularMasterclassesSection() {
   const { user, courses, setIsAuthModalOpen, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  // Single-video masterclasses only
+  // Single-video masterclasses only (excluding real-world project builds)
   const allMasterclasses = useMemo(() => {
     return filterByLanguage(courses, language).filter(
-      c => c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true'
+      c =>
+        (c.isSingleVideo === true || String(c.isSingleVideo).toLowerCase() === 'true') &&
+        !(c.isProject === true || String((c as any).isProject).toLowerCase() === 'true')
     );
   }, [courses, language]);
 

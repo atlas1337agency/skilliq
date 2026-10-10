@@ -187,7 +187,7 @@ export function AdminUsers() {
               pSnap.forEach((docSnap) => list.push(docSnap.data() as CourseProgressItem));
               return [uid, list] as const;
             } catch {
-              return [uid, []] as const;
+              return [uid, [] as CourseProgressItem[]] as const;
             }
           })
         );

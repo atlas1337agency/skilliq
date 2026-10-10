@@ -233,13 +233,96 @@ export function isMasterclassCourse(course?: Partial<Course> | null): boolean {
 }
 
 /**
+ * Checks whether a course is a Real-World Project Build (practical project playlist or long video).
+ */
+export function isProjectCourse(course?: Partial<Course> | null): boolean {
+  if (!course) return false;
+  return course.isProject === true || String((course as any).isProject).toLowerCase() === 'true';
+}
+
+/**
  * Checks whether a course is eligible for an official certificate.
- * Only structured Playlists (Courses page & Playlists inside Learning Paths) grant certificates.
- * Single-video Masterclasses do NOT grant certificates.
+ * Only structured Playlists (Courses page, Playlists inside Learning Paths, and Project Playlists) grant certificates.
+ * Single-video Masterclasses and single-video Full-Build sessions do NOT grant certificates.
  */
 export function isCertificateEligible(course?: Partial<Course> | null): boolean {
   if (!course) return false;
   return !isMasterclassCourse(course);
+}
+
+/**
+ * Checks whether a course is eligible for the exclusive Real-World Project Build Certificate
+ * (Must be a Project AND a multi-lesson Playlist, NOT a single-video masterclass).
+ */
+export function isProjectCertificateEligible(course?: Partial<Course> | null): boolean {
+  if (!course) return false;
+  return isProjectCourse(course) && !isMasterclassCourse(course);
+}
+
+/**
+ * Generates an official, deterministic verifiable Certificate ID in the format:
+ * ATLAS1337-SKILLIQ-<CODE>
+ * Encodes user, course, and completion signature into a clean alphanumeric code that can be verified anytime.
+ */
+export function buildCertificateId(
+  courseId?: string,
+  userId?: string,
+  completionDate?: string | number,
+  isDemo = false
+): string {
+  if (isDemo || !courseId || courseId === 'demo' || courseId === 'demo-project') {
+    return 'ATLAS1337-SKILLIQ-DEMO77X9';
+  }
+
+  const cleanCourse = courseId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4).padEnd(4, 'X');
+  const cleanUser = (userId || 'USER88').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 3).padEnd(3, '9');
+
+  // Create a deterministic 3-char alphanumeric hash from courseId + userId + completionDate
+  const seedStr = `${courseId}:${userId || 'anon'}:${completionDate || '2026'}`;
+  let hash = 2166136261;
+  for (let i = 0; i < seedStr.length; i++) {
+    hash ^= seedStr.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const suffix = Math.abs(hash).toString(36).toUpperCase().slice(0, 3).padEnd(3, '7');
+
+  return `ATLAS1337-SKILLIQ-${cleanCourse}${cleanUser}${suffix}`;
+}
+
+/**
+ * Matches a course from an official ATLAS1337-SKILLIQ-<CODE> (or legacy NX-*) certificate ID.
+ */
+export function matchCourseFromCertificateId(certId: string, allCourses: Course[]): Course | null {
+  const clean = certId.trim().toUpperCase();
+  if (!clean) return null;
+
+  if (clean.startsWith('ATLAS1337-SKILLIQ-')) {
+    const codePart = clean.replace('ATLAS1337-SKILLIQ-', '').trim();
+    if (codePart.length >= 4 && !codePart.startsWith('DEMO')) {
+      const coursePrefix = codePart.slice(0, 4).toLowerCase();
+      return (
+        allCourses.find(c => {
+          if (!isCertificateEligible(c)) return false;
+          const normId = c.id.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          return normId.startsWith(coursePrefix);
+        }) || null
+      );
+    }
+  }
+
+  // Legacy support for NX-* IDs
+  const parts = clean.split('-');
+  if (parts.length >= 3 && parts[0] === 'NX') {
+    const coursePrefix = (parts[1] === 'PROJ' ? parts[3] : parts[2])?.toLowerCase();
+    if (coursePrefix) {
+      return (
+        allCourses.find(c => isCertificateEligible(c) && c.id.toLowerCase().startsWith(coursePrefix)) ||
+        null
+      );
+    }
+  }
+
+  return null;
 }
 
 export interface CourseEducatorInfo {

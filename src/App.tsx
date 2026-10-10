@@ -18,6 +18,7 @@ import { Home } from './pages/Home';
 import { Courses } from './pages/Courses';
 import { Books } from './pages/Books';
 import { Paths } from './pages/Paths';
+import { Projects } from './pages/Projects';
 import { Course } from './pages/Course';
 import { Dashboard } from './pages/Dashboard';
 import { Certificate } from './pages/Certificate';
@@ -61,6 +62,8 @@ export default function App() {
             <Route path="courses" element={<Courses />} />
             <Route path="books" element={<Books />} />
             <Route path="paths" element={<Paths />} />
+            <Route path="projects" element={<Projects />} />
+            <Route path="project" element={<Projects />} />
             <Route path="masterclasses" element={<Masterclasses />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="certificates" element={<CertificatesList />} />
