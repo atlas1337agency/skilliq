@@ -128,7 +128,7 @@ export function AdminForms({
   const [pathStep, setPathStep] = useState<'basics' | 'roadmap' | 'toolkit' | 'preview'>('basics');
   const [pathCourseSearch, setPathCourseSearch] = useState('');
 
-  const [course, setCourse] = useState<Partial<Course>>(itemToEdit || {
+  const [course, setCourse] = useState<Partial<Course>>(() => ({
     id: 'course_' + Math.random().toString(36).substring(2, 9),
     title: '',
     description: '',
@@ -143,7 +143,8 @@ export function AdminForms({
     resources: [],
     isApproved: isAdmin ? true : false,
     createdAt: Date.now(),
-  });
+    ...(type === 'course' && itemToEdit ? itemToEdit : {}),
+  }));
 
   const [path, setPath] = useState<Partial<LearningPath>>(() => {
     if (itemToEdit && type === 'path') {
@@ -645,14 +646,23 @@ export function AdminForms({
     setIsSaving(true);
     try {
       const cleanCourse = JSON.parse(JSON.stringify(course));
+      if (!cleanCourse.id || typeof cleanCourse.id !== 'string' || !cleanCourse.id.trim()) {
+        cleanCourse.id = 'course_' + Math.random().toString(36).substring(2, 9);
+      } else {
+        cleanCourse.id = cleanCourse.id.trim();
+      }
+      cleanCourse.title = cleanCourse.title.trim();
+      cleanCourse.description = (cleanCourse.description || '').trim();
       cleanCourse.isSingleVideo = !!cleanCourse.isSingleVideo;
+      cleanCourse.isProject = !!cleanCourse.isProject;
+      cleanCourse.isApproved = cleanCourse.isApproved !== false;
+      cleanCourse.videos = Array.isArray(cleanCourse.videos) ? cleanCourse.videos : [];
+      cleanCourse.resources = Array.isArray(cleanCourse.resources) ? cleanCourse.resources : [];
       // Guarantee high timestamp for newly created courses so they are always at the top of the list
-      if (!itemToEdit || !cleanCourse.createdAt) {
+      if (!itemToEdit?.id || !cleanCourse.createdAt) {
         cleanCourse.createdAt = Date.now();
       }
-      if (cleanCourse.category) {
-        cleanCourse.category = normalizeCategory(cleanCourse.category);
-      }
+      cleanCourse.category = normalizeCategory(cleanCourse.category || 'Programming');
 
       // If first video has no stats yet or instructor subscribers/likes/comments are missing, fetch real-time stats automatically before saving
       if (Array.isArray(cleanCourse.videos) && cleanCourse.videos.length > 0) {
@@ -1058,11 +1068,11 @@ export function AdminForms({
               <h2 className="text-sm sm:text-lg font-black text-foreground tracking-tight truncate">
                 {type === 'path'
                   ? language === 'ar'
-                    ? itemToEdit
+                    ? itemToEdit?.id
                       ? 'تعديل المسار التعليمي وخريطة الطريق التفاعلية'
                       : 'إنشاء مسار تعليمي جديد وخريطة طريق تفاعلية'
-                    : `${itemToEdit ? 'Edit' : 'Create New'} Learning Path & Interactive Roadmap`
-                  : `${itemToEdit ? 'Edit' : 'Create New'} ${type === 'course' ? 'Course / Masterclass' : type === 'book' ? 'Book & Video Summary' : type === 'notification' ? 'Push Notification' : 'Ad Banner'}`}
+                    : `${itemToEdit?.id ? 'Edit' : 'Create New'} Learning Path & Interactive Roadmap`
+                  : `${itemToEdit?.id ? 'Edit' : 'Create New'} ${type === 'course' ? (course.isProject ? 'Real Project / Course' : 'Course / Masterclass') : type === 'book' ? 'Book & Video Summary' : type === 'notification' ? 'Push Notification' : 'Ad Banner'}`}
               </h2>
               <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 line-clamp-1 sm:line-clamp-2">
                 {type === 'course'

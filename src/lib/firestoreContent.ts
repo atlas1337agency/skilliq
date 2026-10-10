@@ -7,8 +7,17 @@ export async function fetchFirestoreContent() {
   try {
     const coursesSnapshot = await getDocs(collection(db, 'courses'));
     let coursesData: Course[] = [];
-    coursesSnapshot.forEach((doc) => {
-      coursesData.push(doc.data() as Course);
+    coursesSnapshot.forEach((d) => {
+      const data = d.data() as Course;
+      if (data) {
+        coursesData.push({
+          ...data,
+          id: (data.id && typeof data.id === 'string' && data.id.trim()) ? data.id.trim() : d.id,
+          title: data.title || 'Untitled Course',
+          category: data.category || 'Programming',
+          videos: Array.isArray(data.videos) ? data.videos : [],
+        });
+      }
     });
 
     const pathsSnapshot = await getDocs(collection(db, 'learningPaths'));
@@ -201,17 +210,26 @@ export async function runAutoBackup() {
 }
 
 export async function addOrUpdateCourse(course: Course) {
-  await setDoc(doc(db, 'courses', course.id), course);
+  const safeId = (course.id && typeof course.id === 'string' && course.id.trim())
+    ? course.id.trim()
+    : 'course_' + Math.random().toString(36).substring(2, 9);
+  const safeCourse: Course = { ...course, id: safeId };
+  await setDoc(doc(db, 'courses', safeId), safeCourse);
   await runAutoBackup();
 }
 
 export async function deleteCourseInFirestore(courseId: string) {
+  if (!courseId || typeof courseId !== 'string') return;
   await deleteDoc(doc(db, 'courses', courseId));
   await runAutoBackup();
 }
 
 export async function addOrUpdatePath(path: LearningPath) {
-  await setDoc(doc(db, 'learningPaths', path.id), path);
+  const safeId = (path.id && typeof path.id === 'string' && path.id.trim())
+    ? path.id.trim()
+    : 'path_' + Math.random().toString(36).substring(2, 9);
+  const safePath: LearningPath = { ...path, id: safeId };
+  await setDoc(doc(db, 'learningPaths', safeId), safePath);
   await runAutoBackup();
 }
 
