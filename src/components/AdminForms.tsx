@@ -133,7 +133,11 @@ export function AdminForms({
   const [savedCustomCategories, setSavedCustomCategories] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem('skilliq_custom_course_categories');
-      return raw ? JSON.parse(raw) : [];
+      const parsed: string[] = raw ? JSON.parse(raw) : [];
+      // Filter out any partial/corrupted tags and normalize cleanly
+      return parsed
+        .map(c => normalizeCategory(String(c || '').trim()))
+        .filter(c => c && c.length >= 2 && c !== 'Other');
     } catch {
       return [];
     }
@@ -142,41 +146,66 @@ export function AdminForms({
   const [savedCustomBookCategories, setSavedCustomBookCategories] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem('skilliq_custom_book_categories');
-      return raw ? JSON.parse(raw) : [];
+      const parsed: string[] = raw ? JSON.parse(raw) : [];
+      return parsed
+        .map(c => String(c || '').trim())
+        .filter(c => c && c.length >= 2);
     } catch {
       return [];
     }
   });
 
-  const rememberCourseCategory = (cat?: string) => {
-    const clean = (cat || '').trim();
-    if (!clean) return;
+  // Save last used category & add to custom categories only if it's a genuinely new category
+  const rememberCourseCategory = (cat?: string, saveNewCustomTag = false) => {
+    const rawClean = (cat || '').trim();
+    if (!rawClean) return;
+    const clean = normalizeCategory(rawClean);
     try {
       localStorage.setItem('skilliq_last_course_category', clean);
-      setSavedCustomCategories(prev => {
-        const exists = prev.some(c => c.toLowerCase() === clean.toLowerCase());
-        const next = exists
-          ? [clean, ...prev.filter(c => c.toLowerCase() !== clean.toLowerCase())]
-          : [clean, ...prev];
-        localStorage.setItem('skilliq_custom_course_categories', JSON.stringify(next.slice(0, 25)));
-        return next.slice(0, 25);
-      });
+      if (saveNewCustomTag) {
+        setSavedCustomCategories(prev => {
+          const alreadyInPopular = POPULAR_CATEGORIES.some(
+            p => normalizeCategory(p).toLowerCase() === clean.toLowerCase()
+          );
+          const alreadyInCourses = (allCourses || []).some(
+            c => c.category && normalizeCategory(c.category).toLowerCase() === clean.toLowerCase()
+          );
+          const existsInCustom = prev.some(
+            c => normalizeCategory(c).toLowerCase() === clean.toLowerCase()
+          );
+          if (alreadyInPopular || alreadyInCourses || existsInCustom) {
+            return prev;
+          }
+          const next = [...prev, clean].slice(-20);
+          localStorage.setItem('skilliq_custom_course_categories', JSON.stringify(next));
+          return next;
+        });
+      }
     } catch {}
   };
 
-  const rememberBookCategory = (cat?: string) => {
+  const rememberBookCategory = (cat?: string, saveNewCustomTag = false) => {
     const clean = (cat || '').trim();
     if (!clean) return;
     try {
       localStorage.setItem('skilliq_last_book_category', clean);
-      setSavedCustomBookCategories(prev => {
-        const exists = prev.some(c => c.toLowerCase() === clean.toLowerCase());
-        const next = exists
-          ? [clean, ...prev.filter(c => c.toLowerCase() !== clean.toLowerCase())]
-          : [clean, ...prev];
-        localStorage.setItem('skilliq_custom_book_categories', JSON.stringify(next.slice(0, 25)));
-        return next.slice(0, 25);
-      });
+      if (saveNewCustomTag) {
+        setSavedCustomBookCategories(prev => {
+          const alreadyInPopular = POPULAR_BOOK_CATEGORIES.some(
+            p => p.toLowerCase() === clean.toLowerCase()
+          );
+          const alreadyInBooks = (allBooks || []).some(
+            b => b.category && b.category.trim().toLowerCase() === clean.toLowerCase()
+          );
+          const existsInCustom = prev.some(c => c.toLowerCase() === clean.toLowerCase());
+          if (alreadyInPopular || alreadyInBooks || existsInCustom) {
+            return prev;
+          }
+          const next = [...prev, clean].slice(-20);
+          localStorage.setItem('skilliq_custom_book_categories', JSON.stringify(next));
+          return next;
+        });
+      }
     } catch {}
   };
 
@@ -216,34 +245,35 @@ export function AdminForms({
     };
   });
 
-  // Dynamically build live category tags from last-used, custom saved, existing courses, and popular defaults
+  // Stable, deduplicated recommended category tags (never adds extra tags while typing or clicking)
   const dynamicCourseCategories = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
     const addTag = (raw?: string) => {
-      const val = (raw || '').trim();
-      if (!val) return;
-      const key = val.toLowerCase();
+      const trimmed = (raw || '').trim();
+      if (!trimmed) return;
+      const canonical = normalizeCategory(trimmed);
+      if (!canonical || canonical === 'Other') return;
+      const key = canonical.toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
-        result.push(val);
+        result.push(canonical);
       }
     };
 
-    try {
-      const lastUsed = localStorage.getItem('skilliq_last_course_category');
-      if (lastUsed) addTag(lastUsed);
-    } catch {}
+    // 1. Standard recommended categories first (stable order)
+    POPULAR_CATEGORIES.forEach(addTag);
 
-    savedCustomCategories.forEach(addTag);
-    if (course.category?.trim()) addTag(course.category.trim());
+    // 2. Categories from existing published courses/projects
     (allCourses || []).forEach(c => {
       if (c.category) addTag(c.category);
     });
-    POPULAR_CATEGORIES.forEach(addTag);
+
+    // 3. Previously saved custom categories
+    savedCustomCategories.forEach(addTag);
 
     return result;
-  }, [allCourses, savedCustomCategories, course.category]);
+  }, [allCourses, savedCustomCategories]);
 
   const dynamicBookCategories = useMemo(() => {
     const seen = new Set<string>();
@@ -258,16 +288,11 @@ export function AdminForms({
       }
     };
 
-    try {
-      const lastUsed = localStorage.getItem('skilliq_last_book_category');
-      if (lastUsed) addTag(lastUsed);
-    } catch {}
-
-    savedCustomBookCategories.forEach(addTag);
+    POPULAR_BOOK_CATEGORIES.forEach(addTag);
     (allBooks || []).forEach(b => {
       if (b.category) addTag(b.category);
     });
-    POPULAR_BOOK_CATEGORIES.forEach(addTag);
+    savedCustomBookCategories.forEach(addTag);
 
     return result;
   }, [allBooks, savedCustomBookCategories]);
@@ -800,7 +825,7 @@ export function AdminForms({
       }
       const rawCategory = (cleanCourse.category || 'Programming').trim();
       cleanCourse.category = normalizeCategory(rawCategory);
-      rememberCourseCategory(cleanCourse.category);
+      rememberCourseCategory(cleanCourse.category, true);
 
       // If first video has no stats yet or instructor subscribers/likes/comments are missing, fetch real-time stats automatically before saving
       if (Array.isArray(cleanCourse.videos) && cleanCourse.videos.length > 0) {
@@ -1175,7 +1200,7 @@ export function AdminForms({
         createdAt: (!itemToEdit || !book.createdAt) ? Date.now() : book.createdAt
       };
 
-      rememberBookCategory(cleanBook.category);
+      rememberBookCategory(cleanBook.category, true);
       await addOrUpdateBook(cleanBook);
       await loadContent();
       onClose();
@@ -1427,25 +1452,26 @@ export function AdminForms({
                         onChange={e => setCourse({ ...course, category: e.target.value })}
                         onBlur={e => {
                           if (e.target.value.trim()) {
-                            const normalized = normalizeCategory(e.target.value.trim());
-                            setCourse(prev => ({ ...prev, category: normalized }));
-                            rememberCourseCategory(normalized);
+                            rememberCourseCategory(e.target.value.trim(), false);
                           }
                         }}
                         className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
-                        placeholder="e.g. Programming, AI & Automation..." 
+                        placeholder="e.g. Programming, AI & Machine Learning..." 
                       />
-                      {/* Auto-Updated Quick Category Chips (Saves & highlights active / last used category) */}
+                      {/* Recommended Category Chips (Stable order, never adds duplicate/different tags on click) */}
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {dynamicCourseCategories.map(cat => {
-                          const isSelected = (course.category || '').trim().toLowerCase() === cat.toLowerCase();
+                          const currentRaw = (course.category || '').trim();
+                          const isSelected =
+                            currentRaw.toLowerCase() === cat.toLowerCase() ||
+                            (Boolean(currentRaw) && normalizeCategory(currentRaw).toLowerCase() === cat.toLowerCase());
                           return (
                             <button
                               key={cat}
                               type="button"
                               onClick={() => {
-                                setCourse({ ...course, category: cat });
-                                rememberCourseCategory(cat);
+                                setCourse(prev => ({ ...prev, category: cat }));
+                                rememberCourseCategory(cat, false);
                               }}
                               className={cn(
                                 "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1",
@@ -4277,7 +4303,7 @@ export function AdminForms({
                         onChange={e => setBook({ ...book, category: e.target.value })}
                         onBlur={e => {
                           if (e.target.value.trim()) {
-                            rememberBookCategory(e.target.value.trim());
+                            rememberBookCategory(e.target.value.trim(), false);
                           }
                         }}
                         placeholder="e.g. Software Engineering"
@@ -4291,8 +4317,8 @@ export function AdminForms({
                               key={cat}
                               type="button"
                               onClick={() => {
-                                setBook({ ...book, category: cat });
-                                rememberBookCategory(cat);
+                                setBook(prev => ({ ...prev, category: cat }));
+                                rememberBookCategory(cat, false);
                               }}
                               className={cn(
                                 "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1",

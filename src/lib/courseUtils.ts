@@ -106,10 +106,36 @@ export function normalizeCategory(category?: string): string {
     return 'Data Science';
   }
 
-  // Capitalize each word properly for any other custom category
+  // Capitalize each word properly for any other custom category while preserving common uppercase acronyms
+  const upperAcronyms = new Set([
+    'AI', 'UI', 'UX', 'UI/UX', '3D', '2D', 'CAD', 'SEO', 'SEM', 'IOT', 'API',
+    'AWS', 'GCP', 'SQL', 'NOSQL', 'CSS', 'HTML', 'JS', 'TS', 'PHP', 'C#', 'C++',
+    'ERP', 'CRM', 'SAAS', 'B2B', 'B2C', 'AR', 'VR', 'XR', 'QA', 'IT', 'HR', 'PR', 'BIM'
+  ]);
   return trimmed
     .split(/\s+/)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .map(w => {
+      const upper = w.toUpperCase();
+      if (upperAcronyms.has(upper)) return upper;
+      if (upper === 'DEVOPS') return 'DevOps';
+      if (upper === 'IOS') return 'iOS';
+      if (upper === 'AUTOCAD') return 'AutoCAD';
+      if (upper === 'SOLIDWORKS') return 'SolidWorks';
+      if (upper === 'WORDPRESS') return 'WordPress';
+      if (upper === 'JAVASCRIPT') return 'JavaScript';
+      if (upper === 'TYPESCRIPT') return 'TypeScript';
+      // Preserve words that already contain intentional mixed case or slashes (e.g. UI/UX, CI/CD)
+      if (w.includes('/')) {
+        return w
+          .split('/')
+          .map(part => {
+            const pUp = part.toUpperCase();
+            return upperAcronyms.has(pUp) ? pUp : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+          })
+          .join('/');
+      }
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
     .join(' ');
 }
 
