@@ -248,6 +248,96 @@ export interface CategorySummary {
   name: string;
   count: number;
   subCategories: string[];
+  subCategoryCounts?: Record<string, number>;
+}
+
+/**
+ * Normalizes a sub-category string into a clean, consistent label
+ * while preserving technical acronyms and frameworks (e.g. AutoCAD, UI/UX, 3D, React.js).
+ */
+export function normalizeSubCategory(subCategory?: string): string {
+  if (!subCategory) return '';
+  const trimmed = subCategory.trim();
+  if (!trimmed) return '';
+
+  const upperAcronyms = new Set([
+    'AI', 'UI', 'UX', 'UI/UX', '3D', '2D', 'CAD', 'SEO', 'SEM', 'IOT', 'API',
+    'AWS', 'GCP', 'SQL', 'NOSQL', 'CSS', 'HTML', 'JS', 'TS', 'PHP', 'C#', 'C++',
+    'ERP', 'CRM', 'SAAS', 'B2B', 'B2C', 'AR', 'VR', 'XR', 'QA', 'IT', 'HR', 'PR', 'BIM',
+    'LLM', 'LLMS', 'NLP', 'SOC', 'CCNA', 'CEH', 'OSCP'
+  ]);
+
+  const specialMap: Record<string, string> = {
+    'autocad': 'AutoCAD',
+    'solidworks': 'SolidWorks',
+    'sketchup': 'SketchUp',
+    '3ds max': '3ds Max',
+    '3d max': '3ds Max',
+    'v-ray': 'V-Ray',
+    'vray': 'V-Ray',
+    'revit': 'Revit',
+    'blender': 'Blender',
+    'figma': 'Figma',
+    'photoshop': 'Photoshop',
+    'illustrator': 'Illustrator',
+    'after effects': 'After Effects',
+    'premiere pro': 'Premiere Pro',
+    'devops': 'DevOps',
+    'ios': 'iOS',
+    'wordpress': 'WordPress',
+    'javascript': 'JavaScript',
+    'typescript': 'TypeScript',
+    'react': 'React',
+    'react.js': 'React.js',
+    'reactjs': 'React.js',
+    'next.js': 'Next.js',
+    'nextjs': 'Next.js',
+    'vue.js': 'Vue.js',
+    'vuejs': 'Vue.js',
+    'node.js': 'Node.js',
+    'nodejs': 'Node.js',
+    ' github': 'GitHub',
+    'github': 'GitHub',
+    'gitlab': 'GitLab',
+    'docker': 'Docker',
+    'kubernetes': 'Kubernetes',
+    'fastapi': 'FastAPI',
+    'graphql': 'GraphQL',
+    'mongodb': 'MongoDB',
+    'postgresql': 'PostgreSQL',
+    'mysql': 'MySQL',
+    'power bi': 'Power BI',
+    'powerbi': 'Power BI',
+    'chatgpt': 'ChatGPT',
+    'openai': 'OpenAI',
+  };
+
+  const lowerFull = trimmed.toLowerCase();
+  if (specialMap[lowerFull]) {
+    return specialMap[lowerFull];
+  }
+
+  return trimmed
+    .split(/\s+/)
+    .map(w => {
+      const lowerW = w.toLowerCase();
+      if (specialMap[lowerW]) return specialMap[lowerW];
+      const upper = w.toUpperCase();
+      if (upperAcronyms.has(upper)) return upper;
+      if (w.includes('/')) {
+        return w
+          .split('/')
+          .map(part => {
+            const pLow = part.toLowerCase();
+            if (specialMap[pLow]) return specialMap[pLow];
+            const pUp = part.toUpperCase();
+            return upperAcronyms.has(pUp) ? pUp : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+          })
+          .join('/');
+      }
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(' ');
 }
 
 /**
@@ -450,31 +540,64 @@ export function resolveCourseEducator(course?: Partial<Course> | null): CourseEd
  * Guarantees NO duplicate category names.
  */
 export function buildDeduplicatedCategories(courses: Course[]): CategorySummary[] {
-  const map = new Map<string, { count: number; subCategories: Set<string> }>();
+  const map = new Map<string, { count: number; subCategories: Map<string, number> }>();
 
   courses.forEach(c => {
     const norm = normalizeCategory(c.category);
     if (!map.has(norm)) {
-      map.set(norm, { count: 0, subCategories: new Set() });
+      map.set(norm, { count: 0, subCategories: new Map() });
     }
     const entry = map.get(norm)!;
     entry.count += 1;
     if (c.subCategory && c.subCategory.trim()) {
-      entry.subCategories.add(c.subCategory.trim());
+      const normSub = normalizeSubCategory(c.subCategory);
+      if (normSub) {
+        entry.subCategories.set(normSub, (entry.subCategories.get(normSub) || 0) + 1);
+      }
     }
   });
 
   // Sort categories by highest course count first for a rich user experience
   const sortedCategories: CategorySummary[] = Array.from(map.entries())
-    .map(([name, data]) => ({
-      name,
-      count: data.count,
-      subCategories: Array.from(data.subCategories).sort()
-    }))
+    .map(([name, data]) => {
+      const subCategoryCounts: Record<string, number> = {};
+      data.subCategories.forEach((cnt, subName) => {
+        subCategoryCounts[subName] = cnt;
+      });
+      const sortedSubs = Array.from(data.subCategories.keys()).sort((a, b) => {
+        const diff = (subCategoryCounts[b] || 0) - (subCategoryCounts[a] || 0);
+        return diff !== 0 ? diff : a.localeCompare(b);
+      });
+      return {
+        name,
+        count: data.count,
+        subCategories: sortedSubs,
+        subCategoryCounts
+      };
+    })
     .sort((a, b) => b.count - a.count);
 
+  // Also aggregate all subCategories across all courses for 'All'
+  const allSubMap = new Map<string, number>();
+  courses.forEach(c => {
+    if (c.subCategory && c.subCategory.trim()) {
+      const normSub = normalizeSubCategory(c.subCategory);
+      if (normSub) {
+        allSubMap.set(normSub, (allSubMap.get(normSub) || 0) + 1);
+      }
+    }
+  });
+  const allSubCounts: Record<string, number> = {};
+  allSubMap.forEach((cnt, subName) => {
+    allSubCounts[subName] = cnt;
+  });
+  const allSortedSubs = Array.from(allSubMap.keys()).sort((a, b) => {
+    const diff = (allSubCounts[b] || 0) - (allSubCounts[a] || 0);
+    return diff !== 0 ? diff : a.localeCompare(b);
+  });
+
   return [
-    { name: 'All', count: courses.length, subCategories: [] },
+    { name: 'All', count: courses.length, subCategories: allSortedSubs, subCategoryCounts: allSubCounts },
     ...sortedCategories
   ];
 }

@@ -187,35 +187,116 @@ export async function migrateFromSheetsToFirestore() {
   return true;
 }
 
-export async function runAutoBackup() {
+function getUtf8ByteSize(obj: unknown): number {
   try {
-    const coursesSnapshot = await getDocs(collection(db, 'courses'));
-    let coursesData: Course[] = [];
-    coursesSnapshot.forEach((d) => coursesData.push(d.data() as Course));
-
-    const pathsSnapshot = await getDocs(collection(db, 'learningPaths'));
-    let pathsData: LearningPath[] = [];
-    pathsSnapshot.forEach((d) => pathsData.push(d.data() as LearningPath));
-
-    const backup = {
-      _metadata: { timestamp: new Date().toISOString(), type: "NEXA_FULL_BACKUP", trigger: "auto" },
-      courses: coursesData,
-      learningPaths: pathsData
-    };
-    
-    await setDoc(doc(db, 'system_backups', 'latest_auto_backup'), backup);
-  } catch(e) {
-    console.error("Auto-backup failed silently:", e);
+    return new TextEncoder().encode(JSON.stringify(obj)).length;
+  } catch {
+    return 0;
   }
 }
 
-export async function addOrUpdateCourse(course: Course) {
+// Compact a course object for backup storage if needed to keep payload lean
+function compactCourseForBackup(course: Course): Course {
+  return {
+    ...course,
+    description: course.description ? course.description.slice(0, 2000) : '',
+    videos: Array.isArray(course.videos)
+      ? course.videos.map((v) => ({
+          id: v.id,
+          title: v.title,
+          duration: v.duration,
+          youtubeId: v.youtubeId,
+          ...(v.viewCount !== undefined ? { viewCount: v.viewCount } : {}),
+          ...(v.likeCount !== undefined ? { likeCount: v.likeCount } : {}),
+          ...(v.commentCount !== undefined ? { commentCount: v.commentCount } : {}),
+        }))
+      : [],
+  };
+}
+
+let autoBackupTimeout: ReturnType<typeof setTimeout> | null = null;
+
+export async function runAutoBackup() {
+  if (autoBackupTimeout) {
+    clearTimeout(autoBackupTimeout);
+  }
+
+  autoBackupTimeout = setTimeout(async () => {
+    try {
+      const coursesSnapshot = await getDocs(collection(db, 'courses'));
+      const coursesData: Course[] = [];
+      coursesSnapshot.forEach((d) => coursesData.push(compactCourseForBackup(d.data() as Course)));
+
+      const pathsSnapshot = await getDocs(collection(db, 'learningPaths'));
+      const pathsData: LearningPath[] = [];
+      pathsSnapshot.forEach((d) => pathsData.push(d.data() as LearningPath));
+
+      // Keep each Firestore document strictly below 500 KB (Firestore limit is 1,048,576 bytes)
+      const MAX_CHUNK_BYTES = 500_000;
+      const courseChunks: Course[][] = [];
+      let currentChunk: Course[] = [];
+      let currentChunkBytes = 0;
+
+      for (const course of coursesData) {
+        const courseBytes = getUtf8ByteSize(course);
+        if (currentChunk.length > 0 && currentChunkBytes + courseBytes > MAX_CHUNK_BYTES) {
+          courseChunks.push(currentChunk);
+          currentChunk = [course];
+          currentChunkBytes = courseBytes;
+        } else {
+          currentChunk.push(course);
+          currentChunkBytes += courseBytes;
+        }
+      }
+      if (currentChunk.length > 0) {
+        courseChunks.push(currentChunk);
+      }
+
+      const timestamp = new Date().toISOString();
+      const primaryCourses = courseChunks[0] || [];
+      const additionalChunks = courseChunks.slice(1);
+
+      const primaryBackup = {
+        _metadata: {
+          timestamp,
+          type: 'NEXA_FULL_BACKUP',
+          trigger: 'auto',
+          totalCourses: coursesData.length,
+          totalPaths: pathsData.length,
+          totalChunks: Math.max(1, courseChunks.length),
+        },
+        courses: primaryCourses,
+        learningPaths: getUtf8ByteSize(pathsData) <= 250_000 ? pathsData : pathsData.slice(0, 50),
+      };
+
+      await setDoc(doc(db, 'system_backups', 'latest_auto_backup'), primaryBackup);
+
+      for (let i = 0; i < additionalChunks.length; i++) {
+        await setDoc(doc(db, 'system_backups', `latest_auto_backup_part_${i + 1}`), {
+          _metadata: {
+            timestamp,
+            type: 'NEXA_FULL_BACKUP_PART',
+            partIndex: i + 1,
+            totalChunks: courseChunks.length,
+          },
+          courses: additionalChunks[i],
+        });
+      }
+    } catch (e) {
+      console.warn('Auto-backup skipped:', e);
+    }
+  }, 1500);
+}
+
+export async function addOrUpdateCourse(course: Course, skipBackup = false) {
   const safeId = (course.id && typeof course.id === 'string' && course.id.trim())
     ? course.id.trim()
     : 'course_' + Math.random().toString(36).substring(2, 9);
   const safeCourse: Course = { ...course, id: safeId };
   await setDoc(doc(db, 'courses', safeId), safeCourse);
-  await runAutoBackup();
+  if (!skipBackup) {
+    await runAutoBackup();
+  }
 }
 
 export async function deleteCourseInFirestore(courseId: string) {

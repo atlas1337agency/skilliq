@@ -118,7 +118,7 @@ export function Admin() {
             courses: latestAll.filter(c => c.isApproved !== false)
           });
           Object.values(updatedMap).forEach((updatedCourse) => {
-            addOrUpdateCourse(updatedCourse).catch(() => {});
+            addOrUpdateCourse(updatedCourse, true).catch(() => {});
           });
         },
         true
@@ -611,7 +611,9 @@ export function Admin() {
         const itemsPerPage = 9;
         const filteredCourses = allCourses.filter(c => 
           c.title.toLowerCase().includes(courseSearch.toLowerCase()) || 
-          (c.instructor && c.instructor.toLowerCase().includes(courseSearch.toLowerCase()))
+          (c.instructor && c.instructor.toLowerCase().includes(courseSearch.toLowerCase())) ||
+          (c.category && c.category.toLowerCase().includes(courseSearch.toLowerCase())) ||
+          (c.subCategory && c.subCategory.toLowerCase().includes(courseSearch.toLowerCase()))
         );
         const totalCoursePages = Math.max(1, Math.ceil(filteredCourses.length / itemsPerPage));
         const paginatedCourses = filteredCourses.slice((coursePage - 1) * itemsPerPage, coursePage * itemsPerPage);
@@ -715,9 +717,21 @@ export function Admin() {
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground font-mono mt-1">
-                        {courseItem.isSingleVideo ? 'Masterclass' : 'Playlist'} • {courseItem.videos?.length || 0} videos
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {courseItem.isSingleVideo ? 'Masterclass' : 'Playlist'} • {courseItem.videos?.length || 0} videos
+                        </span>
+                        {courseItem.category && (
+                          <span className="px-1.5 py-0.2 rounded-md text-[9.5px] font-bold bg-muted text-foreground border border-border/70">
+                            {courseItem.category}
+                          </span>
+                        )}
+                        {courseItem.subCategory && (
+                          <span className="px-1.5 py-0.2 rounded-md text-[9.5px] font-bold bg-primary/10 text-primary border border-primary/25">
+                            {courseItem.subCategory}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

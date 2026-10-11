@@ -41,7 +41,8 @@ import {
   isCourseNew,
   isProjectCourse,
   isMasterclassCourse,
-  isProjectCertificateEligible
+  isProjectCertificateEligible,
+  normalizeSubCategory
 } from '../lib/courseUtils';
 
 type FormatFilter = 'all' | 'playlist' | 'masterclass';
@@ -140,7 +141,7 @@ export function Projects() {
       const matchCat = matchCourseCategory(c.category, selectedCategory);
       const matchSub =
         selectedSubCategory === 'All' ||
-        (c.subCategory && c.subCategory.trim().toLowerCase() === selectedSubCategory.trim().toLowerCase());
+        (c.subCategory && normalizeSubCategory(c.subCategory).toLowerCase() === normalizeSubCategory(selectedSubCategory).toLowerCase());
 
       const matchQuery =
         !searchQuery.trim() ||
@@ -445,6 +446,61 @@ export function Projects() {
             );
           })}
         </div>
+
+        {/* SUB-CATEGORY ORGANIZATION CHIPS BAR */}
+        {currentCategoryObj && currentCategoryObj.subCategories.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pt-1 pb-1 scrollbar-none">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1 pe-1 shrink-0">
+              <Sparkles className="w-3 h-3 text-emerald-500" />
+              <span>{isRtl ? 'التصنيف الفرعي:' : 'Sub-Categories:'}</span>
+            </span>
+            <button
+              onClick={() => {
+                setSelectedSubCategory('All');
+                setCurrentPage(1);
+              }}
+              className={cn(
+                'px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer border shrink-0',
+                selectedSubCategory === 'All'
+                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs font-bold'
+                  : 'bg-card/80 text-muted-foreground hover:text-foreground border-border/60 hover:bg-muted/50'
+              )}
+            >
+              {isRtl ? 'الكل' : 'All Topics'}
+            </button>
+            {currentCategoryObj.subCategories.map(sub => {
+              const isSubSelected = normalizeSubCategory(selectedSubCategory).toLowerCase() === normalizeSubCategory(sub).toLowerCase();
+              const subCount = currentCategoryObj.subCategoryCounts?.[sub] || 0;
+              return (
+                <button
+                  key={sub}
+                  onClick={() => {
+                    setSelectedSubCategory(isSubSelected ? 'All' : sub);
+                    setCurrentPage(1);
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 shrink-0',
+                    isSubSelected
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs font-bold'
+                      : 'bg-card/80 text-muted-foreground hover:text-foreground border-border/60 hover:bg-muted/50'
+                  )}
+                >
+                  <span>{sub}</span>
+                  {subCount > 0 && (
+                    <span
+                      className={cn(
+                        'text-[10px] px-1.5 py-0.2 rounded',
+                        isSubSelected ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
+                      )}
+                    >
+                      {subCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* MAIN TWO-COLUMN CONTENT */}
@@ -542,11 +598,11 @@ export function Projects() {
             </div>
 
             {/* Subcategories */}
-            {currentCategoryObj && currentCategoryObj.subCategories.length > 0 && selectedCategory !== 'All' && (
+            {currentCategoryObj && currentCategoryObj.subCategories.length > 0 && (
               <div className="pt-2 border-t border-border/50">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>{t('topics', 'Topics')}</span>
+                  <span>{isRtl ? 'التصنيفات الفرعية' : t('topics', 'Sub-Categories')}</span>
                 </h3>
                 <div className="flex flex-wrap gap-1.5">
                   <button
@@ -561,25 +617,39 @@ export function Projects() {
                         : 'bg-muted/40 border-border/50 text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    All
+                    {isRtl ? 'الكل' : 'All'}
                   </button>
-                  {currentCategoryObj.subCategories.map(sub => (
-                    <button
-                      key={sub}
-                      onClick={() => {
-                        setSelectedSubCategory(sub);
-                        setCurrentPage(1);
-                      }}
-                      className={cn(
-                        'px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border cursor-pointer',
-                        selectedSubCategory === sub
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'bg-muted/40 border-border/50 text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      {sub}
-                    </button>
-                  ))}
+                  {currentCategoryObj.subCategories.map(sub => {
+                    const isSubSelected = normalizeSubCategory(selectedSubCategory).toLowerCase() === normalizeSubCategory(sub).toLowerCase();
+                    const subCount = currentCategoryObj.subCategoryCounts?.[sub] || 0;
+                    return (
+                      <button
+                        key={sub}
+                        onClick={() => {
+                          setSelectedSubCategory(isSubSelected ? 'All' : sub);
+                          setCurrentPage(1);
+                        }}
+                        className={cn(
+                          'px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border cursor-pointer flex items-center gap-1',
+                          isSubSelected
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-muted/40 border-border/50 text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <span>{sub}</span>
+                        {subCount > 0 && (
+                          <span
+                            className={cn(
+                              'text-[10px] px-1 rounded',
+                              isSubSelected ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
+                            )}
+                          >
+                            {subCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -58,7 +58,7 @@ import {
 } from '../lib/youtube';
 import { useTranslation } from 'react-i18next';
 import { cn, filterByLanguage } from '../lib/utils';
-import { normalizeCategory, isMasterclassCourse } from '../lib/courseUtils';
+import { normalizeCategory, normalizeSubCategory, isMasterclassCourse } from '../lib/courseUtils';
 import { BookCoverVisual, AmazonIcon, RichFormattedText, FormattedInlineText } from './BookVideoModal';
 import { PathGraphicRoadmap } from './PathGraphicRoadmap';
 
@@ -84,6 +84,21 @@ const POPULAR_CATEGORIES = [
   'Digital Marketing',
   'Data Science'
 ];
+
+const POPULAR_SUBCATEGORIES_BY_CATEGORY: Record<string, string[]> = {
+  'Programming': ['Python', 'JavaScript', 'TypeScript', 'C++', 'C#', 'Java', 'Go', 'Rust', 'Algorithms & DSA'],
+  'Web Development': ['Frontend', 'Backend', 'Full-Stack', 'React.js', 'Next.js', 'Node.js', 'HTML & CSS', 'Vue.js', 'WordPress'],
+  'Cybersecurity': ['Ethical Hacking', 'Network Security', 'Penetration Testing', 'SOC & Blue Team', 'Web App Security', 'Linux & OSINT', 'CCNA'],
+  'AI & Machine Learning': ['LLMs & GenAI', 'Deep Learning', 'NLP', 'Computer Vision', 'AI Agents', 'Prompt Engineering', 'PyTorch & TensorFlow'],
+  'DevOps & Cloud': ['Docker', 'Kubernetes', 'AWS', 'CI/CD', 'Linux Administration', 'Terraform', 'Azure & GCP'],
+  'Mobile Apps': ['Flutter', 'React Native', 'iOS & Swift', 'Android & Kotlin', 'Mobile UI'],
+  'Design & UI/UX': ['UI/UX', 'Figma', 'Graphic Design', '3D & Motion', 'AutoCAD', 'SolidWorks', 'SketchUp', '3ds Max', 'Revit', 'Blender', 'Photoshop', 'Illustrator'],
+  'Digital Marketing': ['SEO', 'Social Media', 'Paid Ads & SEM', 'Content Marketing', 'Copywriting', 'Email & Funnels', 'Analytics'],
+  'Data Science': ['Data Analysis', 'SQL & Databases', 'Power BI', 'Python for Data', 'Big Data', 'Statistics', 'Tableau'],
+  'Business & Finance': ['Startup & SaaS', 'Product Management', 'Freelancing', 'Financial Modeling', 'E-Commerce', 'Leadership'],
+  'Hardware & IoT': ['Arduino', 'Raspberry Pi', 'Embedded Systems', 'Robotics', 'PCB Design', 'AutoCAD', 'SolidWorks'],
+  'Game Development': ['Unity', 'Unreal Engine', 'Godot', 'C# Scripting', '3D Modeling', 'Game Design']
+};
 
 const extractYoutubeId = (str: string) => {
   if (!str) return '';
@@ -155,6 +170,61 @@ export function AdminForms({
     }
   });
 
+  // Persist & load custom sub-categories per main category
+  const [savedCustomSubCategories, setSavedCustomSubCategories] = useState<Record<string, string[]>>(() => {
+    try {
+      const raw = localStorage.getItem('skilliq_custom_course_subcategories');
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (parsed && typeof parsed === 'object') {
+        const cleaned: Record<string, string[]> = {};
+        Object.entries(parsed).forEach(([catKey, list]) => {
+          if (Array.isArray(list)) {
+            cleaned[catKey] = list
+              .map(s => normalizeSubCategory(String(s || '').trim()))
+              .filter(s => s && s.length >= 2);
+          }
+        });
+        return cleaned;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  });
+
+  const rememberCourseSubCategory = (cat?: string, subCat?: string, saveNewCustomTag = false) => {
+    const rawSub = (subCat || '').trim();
+    if (!rawSub) return;
+    const cleanSub = normalizeSubCategory(rawSub);
+    const cleanCat = normalizeCategory((cat || 'Programming').trim());
+    try {
+      localStorage.setItem('skilliq_last_course_subcategory', cleanSub);
+      if (saveNewCustomTag && cleanSub) {
+        setSavedCustomSubCategories(prev => {
+          const catList = prev[cleanCat] || [];
+          const builtIn = POPULAR_SUBCATEGORIES_BY_CATEGORY[cleanCat] || [];
+          const alreadyInBuiltIn = builtIn.some(s => s.toLowerCase() === cleanSub.toLowerCase());
+          const alreadyInCourses = (allCourses || []).some(
+            c =>
+              c.subCategory &&
+              normalizeCategory(c.category).toLowerCase() === cleanCat.toLowerCase() &&
+              normalizeSubCategory(c.subCategory).toLowerCase() === cleanSub.toLowerCase()
+          );
+          const existsInCustom = catList.some(s => s.toLowerCase() === cleanSub.toLowerCase());
+          if (alreadyInBuiltIn || alreadyInCourses || existsInCustom) {
+            return prev;
+          }
+          const next = {
+            ...prev,
+            [cleanCat]: [...catList, cleanSub].slice(-25)
+          };
+          localStorage.setItem('skilliq_custom_course_subcategories', JSON.stringify(next));
+          return next;
+        });
+      }
+    } catch {}
+  };
+
   // Save last used category & add to custom categories only if it's a genuinely new category
   const rememberCourseCategory = (cat?: string, saveNewCustomTag = false) => {
     const rawClean = (cat || '').trim();
@@ -220,10 +290,15 @@ export function AdminForms({
 
   const [course, setCourse] = useState<Partial<Course>>(() => {
     let defaultCategory = 'Programming';
+    let defaultSubCategory = '';
     try {
       const lastUsed = localStorage.getItem('skilliq_last_course_category');
       if (lastUsed && lastUsed.trim()) {
         defaultCategory = lastUsed.trim();
+      }
+      const lastSubUsed = localStorage.getItem('skilliq_last_course_subcategory');
+      if (lastSubUsed && lastSubUsed.trim()) {
+        defaultSubCategory = lastSubUsed.trim();
       }
     } catch {}
     return {
@@ -231,6 +306,7 @@ export function AdminForms({
       title: '',
       description: '',
       category: defaultCategory,
+      subCategory: defaultSubCategory,
       thumbnail: '',
       instructor: '',
       instructorAvatar: '',
@@ -274,6 +350,49 @@ export function AdminForms({
 
     return result;
   }, [allCourses, savedCustomCategories]);
+
+  // Smart, deduplicated recommended sub-category tags tailored to the active Category
+  const dynamicCourseSubCategories = useMemo(() => {
+    const activeCat = normalizeCategory((course.category || 'Programming').trim());
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    const addSubTag = (raw?: string) => {
+      const trimmed = (raw || '').trim();
+      if (!trimmed) return;
+      const canonical = normalizeSubCategory(trimmed);
+      if (!canonical) return;
+      const key = canonical.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(canonical);
+      }
+    };
+
+    // 1. Sub-categories already used by courses in this category
+    (allCourses || []).forEach(c => {
+      if (c.subCategory && normalizeCategory(c.category).toLowerCase() === activeCat.toLowerCase()) {
+        addSubTag(c.subCategory);
+      }
+    });
+
+    // 2. Curated recommended sub-categories for this category
+    const curated = POPULAR_SUBCATEGORIES_BY_CATEGORY[activeCat] || [];
+    curated.forEach(addSubTag);
+
+    // 3. Previously saved custom sub-categories for this category
+    const customForCat = savedCustomSubCategories[activeCat] || [];
+    customForCat.forEach(addSubTag);
+
+    // 4. If custom category has no specific curated list yet, show other sub-categories from existing courses
+    if (result.length === 0) {
+      (allCourses || []).forEach(c => {
+        if (c.subCategory) addSubTag(c.subCategory);
+      });
+    }
+
+    return result;
+  }, [course.category, allCourses, savedCustomSubCategories]);
 
   const dynamicBookCategories = useMemo(() => {
     const seen = new Set<string>();
@@ -826,6 +945,14 @@ export function AdminForms({
       const rawCategory = (cleanCourse.category || 'Programming').trim();
       cleanCourse.category = normalizeCategory(rawCategory);
       rememberCourseCategory(cleanCourse.category, true);
+
+      const rawSubCategory = (cleanCourse.subCategory || '').trim();
+      if (rawSubCategory) {
+        cleanCourse.subCategory = normalizeSubCategory(rawSubCategory);
+        rememberCourseSubCategory(cleanCourse.category, cleanCourse.subCategory, true);
+      } else {
+        cleanCourse.subCategory = '';
+      }
 
       // If first video has no stats yet or instructor subscribers/likes/comments are missing, fetch real-time stats automatically before saving
       if (Array.isArray(cleanCourse.videos) && cleanCourse.videos.length > 0) {
@@ -1428,7 +1555,7 @@ export function AdminForms({
               {courseStep === 'basics' && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
+                    <div className="col-span-1 sm:col-span-2">
                       <label className="block text-xs font-bold text-foreground mb-1">Course Title *</label>
                       <input 
                         value={course.title || ''} 
@@ -1438,53 +1565,137 @@ export function AdminForms({
                       />
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="block text-xs font-bold text-foreground">Category *</label>
-                        {course.category?.trim() && (
-                          <span className="text-[10px] font-semibold text-primary">
-                            Saved as default next time
+                    {/* CATEGORY & SUB-CATEGORY ORGANIZATION SECTION */}
+                    <div className="col-span-1 sm:col-span-2 p-3.5 sm:p-4 rounded-2xl bg-muted/25 border border-border/80 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <Layers className="w-4 h-4 text-primary" />
+                          <span className="text-xs font-black text-foreground uppercase tracking-wider">
+                            {language === 'ar' ? 'قسم التصنيف والتصنيف الفرعي (تنظيم الكورسات داخل الصفحات)' : 'Category & Sub-Category Organization'}
                           </span>
-                        )}
+                        </div>
+                        <span className="text-[10px] font-semibold text-muted-foreground">
+                          {language === 'ar'
+                            ? 'ينظم كورساتك تلقائياً داخل صفحات الكورسات والماستركلاس والمشاريع'
+                            : 'Organizes courses inside Courses, Masterclasses & Projects pages'}
+                        </span>
                       </div>
-                      <input 
-                        value={course.category || ''} 
-                        onChange={e => setCourse({ ...course, category: e.target.value })}
-                        onBlur={e => {
-                          if (e.target.value.trim()) {
-                            rememberCourseCategory(e.target.value.trim(), false);
-                          }
-                        }}
-                        className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
-                        placeholder="e.g. Programming, AI & Machine Learning..." 
-                      />
-                      {/* Recommended Category Chips (Stable order, never adds duplicate/different tags on click) */}
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {dynamicCourseCategories.map(cat => {
-                          const currentRaw = (course.category || '').trim();
-                          const isSelected =
-                            currentRaw.toLowerCase() === cat.toLowerCase() ||
-                            (Boolean(currentRaw) && normalizeCategory(currentRaw).toLowerCase() === cat.toLowerCase());
-                          return (
-                            <button
-                              key={cat}
-                              type="button"
-                              onClick={() => {
-                                setCourse(prev => ({ ...prev, category: cat }));
-                                rememberCourseCategory(cat, false);
-                              }}
-                              className={cn(
-                                "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1",
-                                isSelected
-                                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                                  : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground border-border/60"
-                              )}
-                            >
-                              {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
-                              <span>{cat}</span>
-                            </button>
-                          );
-                        })}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Main Category */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-xs font-bold text-foreground">Category *</label>
+                            {course.category?.trim() && (
+                              <span className="text-[10px] font-semibold text-primary">
+                                Saved as default next time
+                              </span>
+                            )}
+                          </div>
+                          <input 
+                            value={course.category || ''} 
+                            onChange={e => setCourse({ ...course, category: e.target.value })}
+                            onBlur={e => {
+                              if (e.target.value.trim()) {
+                                rememberCourseCategory(e.target.value.trim(), false);
+                              }
+                            }}
+                            className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
+                            placeholder="e.g. Programming, Design & UI/UX..." 
+                          />
+                          {/* Recommended Category Chips */}
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {dynamicCourseCategories.map(cat => {
+                              const currentRaw = (course.category || '').trim();
+                              const isSelected =
+                                currentRaw.toLowerCase() === cat.toLowerCase() ||
+                                (Boolean(currentRaw) && normalizeCategory(currentRaw).toLowerCase() === cat.toLowerCase());
+                              return (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  onClick={() => {
+                                    setCourse(prev => ({ ...prev, category: cat }));
+                                    rememberCourseCategory(cat, false);
+                                  }}
+                                  className={cn(
+                                    "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1",
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                                      : "bg-card hover:bg-muted text-muted-foreground hover:text-foreground border-border/60"
+                                  )}
+                                >
+                                  {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                                  <span>{cat}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Sub-Category */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-xs font-bold text-foreground">
+                              {language === 'ar' ? 'التصنيف الفرعي (Sub-Category)' : 'Sub-Category (Topic / Tool)'}
+                            </label>
+                            {course.subCategory?.trim() ? (
+                              <button
+                                type="button"
+                                onClick={() => setCourse(prev => ({ ...prev, subCategory: '' }))}
+                                className="text-[10px] font-bold text-muted-foreground hover:text-red-500 transition-colors cursor-pointer"
+                              >
+                                {language === 'ar' ? 'مسح' : 'Clear'}
+                              </button>
+                            ) : (
+                              <span className="text-[10px] font-medium text-muted-foreground">
+                                {language === 'ar' ? 'لتنظيم الكورسات داخل الصفحة' : 'Organizes inside pages'}
+                              </span>
+                            )}
+                          </div>
+                          <input 
+                            value={course.subCategory || ''} 
+                            onChange={e => setCourse({ ...course, subCategory: e.target.value })}
+                            onBlur={e => {
+                              if (e.target.value.trim()) {
+                                rememberCourseSubCategory(course.category, e.target.value.trim(), false);
+                              }
+                            }}
+                            className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
+                            placeholder="e.g. React.js, UI/UX, AutoCAD, Python, Ethical Hacking..." 
+                          />
+                          {/* Recommended Sub-Category Chips for the active Category */}
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {dynamicCourseSubCategories.map(sub => {
+                              const currentSubRaw = (course.subCategory || '').trim();
+                              const isSelected =
+                                currentSubRaw.toLowerCase() === sub.toLowerCase() ||
+                                (Boolean(currentSubRaw) && normalizeSubCategory(currentSubRaw).toLowerCase() === sub.toLowerCase());
+                              return (
+                                <button
+                                  key={sub}
+                                  type="button"
+                                  onClick={() => {
+                                    const nextVal = isSelected ? '' : sub;
+                                    setCourse(prev => ({ ...prev, subCategory: nextVal }));
+                                    if (nextVal) {
+                                      rememberCourseSubCategory(course.category, nextVal, false);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1",
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                                      : "bg-card hover:bg-muted text-muted-foreground hover:text-foreground border-border/60"
+                                  )}
+                                >
+                                  {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                                  <span>{sub}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
                     </div>
 

@@ -138,7 +138,7 @@ export const useStore = create<StoreState>()(
               const activeUser = get().user;
               if (activeUser && (activeUser.role === 'admin' || activeUser.role === 'creator')) {
                 Object.values(updatedMap).forEach((updatedCourse) => {
-                  addOrUpdateCourse(updatedCourse).catch(() => {});
+                  addOrUpdateCourse(updatedCourse, true).catch(() => {});
                 });
               }
             });
