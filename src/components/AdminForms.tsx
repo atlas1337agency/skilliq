@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Course, LearningPath, LearningPathRoadmapStep, LearningPathRoadmapResource, AppNotification, AdBannerData, Book } from '../data/courses';
+import { Course, Video, LearningPath, LearningPathRoadmapStep, LearningPathRoadmapResource, AppNotification, AdBannerData, Book } from '../data/courses';
 import { addOrUpdateCourse, addOrUpdatePath, addOrUpdateNotification, addOrUpdateBanner, addOrUpdateBook } from '../lib/firestoreContent';
 import { 
   X, 

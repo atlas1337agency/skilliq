@@ -31,6 +31,7 @@ import { cn, filterByLanguage } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { ShareCourseButton } from '../components/ShareCourseButton';
 import { SEO } from '../components/SEO';
 import { formatCompactNumber } from '../lib/youtube';
 import {
@@ -42,7 +43,8 @@ import {
   isProjectCourse,
   isMasterclassCourse,
   isProjectCertificateEligible,
-  normalizeSubCategory
+  normalizeSubCategory,
+  getCoursePath
 } from '../lib/courseUtils';
 
 type FormatFilter = 'all' | 'playlist' | 'masterclass';
@@ -85,12 +87,14 @@ export function Projects() {
     } else {
       setSelectedCategory('All');
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }, [searchParams]);
 
-  // Base projects: only courses marked as Real Project Builds (playlists OR long-video masterclasses)
+  // Base projects: only courses marked as Real Project Builds added by Admin
   const baseProjects = useMemo(() => {
-    return filterByLanguage(courses, language).filter(c => isProjectCourse(c));
+    return filterByLanguage(courses, language).filter(
+      c => isProjectCourse(c) && !c.id.startsWith('project-')
+    );
   }, [courses, language]);
 
   const playlistProjectsCount = useMemo(
@@ -215,6 +219,27 @@ export function Projects() {
         breadcrumbs={[
           { name: 'Home', url: '/' },
           { name: 'Projects', url: '/projects' }
+        ]}
+        schema={[
+          {
+            '@context': 'https://schema.org',
+            '@type': 'CollectionPage',
+            name: 'Skilliq Real-World Project Builds',
+            description: 'Hands-on project playlists and full-length build sessions dedicated to building real production applications.',
+            numberOfItems: baseProjects.length
+          },
+          {
+            '@context': 'https://schema.org',
+            '@type': 'ItemList',
+            name: 'Skilliq Real-World Projects',
+            numberOfItems: baseProjects.length,
+            itemListElement: baseProjects.slice(0, 50).map((p, idx) => ({
+              '@type': 'ListItem',
+              position: idx + 1,
+              name: p.title,
+              url: `${typeof window !== 'undefined' ? window.location.origin : 'https://skilliq1337school.vercel.app'}${getCoursePath(p)}`
+            }))
+          }
         ]}
       />
 
@@ -684,33 +709,25 @@ export function Projects() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 sm:gap-6 mb-12">
-              {currentItems.map((project, index) => {
+              {currentItems.map((project) => {
                 const isSingle = isMasterclassCourse(project);
                 const firstDuration = project.videos?.[0]?.duration || '2h 30m';
 
                 return (
-                  <motion.div
+                  <div
                     key={project.id}
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2, delay: index * 0.03 }}
                     className="group flex flex-col bg-card rounded-3xl border border-border/80 hover:border-emerald-500/40 overflow-hidden hover:shadow-xl transition-all duration-200 hover:-translate-y-1 text-start"
                   >
                     {/* 16:9 Thumbnail Header */}
                     <div className="relative aspect-video overflow-hidden bg-muted">
-                      <div className="absolute bottom-3 end-3 z-20">
+                      <div className="absolute bottom-3 end-3 z-20 flex items-center gap-1.5">
+                        <ShareCourseButton course={project} size="sm" />
                         <FavoriteButton
                           itemId={project.id}
                           itemType={isSingle ? 'masterclass' : 'playlist'}
                           size="sm"
                         />
                       </div>
-
-                      {project.language && (
-                        <div className="absolute top-3 end-3 z-10 bg-black/75 backdrop-blur text-white px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shadow-sm">
-                          {project.language}
-                        </div>
-                      )}
 
                       {project.thumbnail?.trim() ? (
                         <img
@@ -725,43 +742,25 @@ export function Projects() {
                         </div>
                       )}
 
-                      <div className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                      <Link
+                        to={getCoursePath(project)}
+                        aria-label={project.title}
+                        className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 z-10"
+                      >
                         <div className="w-14 h-14 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-xl scale-90 group-hover:scale-100 transition-transform">
                           <PlayCircle className="w-8 h-8 ps-0.5 text-white" />
                         </div>
-                      </div>
+                      </Link>
 
-                      {/* Badges */}
-                      <div className="absolute top-3 start-3 flex flex-wrap gap-1.5 z-10 max-w-[82%]">
-                        <span className="bg-emerald-600/95 backdrop-blur text-white px-2.5 py-1 rounded-md text-[10.5px] font-black uppercase tracking-wider shadow-md flex items-center gap-1">
-                          <Rocket className="w-3 h-3 text-amber-300 shrink-0" />
-                          <span>{isRtl ? 'مشروع عملي' : 'Real Project'}</span>
-                        </span>
-
-                        <span
-                          className={cn(
-                            'px-2 py-1 rounded-md text-[10.5px] font-bold shadow-xs backdrop-blur',
-                            isSingle
-                              ? 'bg-purple-600/90 text-white'
-                              : 'bg-background/95 text-foreground'
-                          )}
-                        >
-                          {isSingle
-                            ? isRtl
-                              ? 'فيديو مطول شامل'
-                              : 'Full-Build Video'
-                            : isRtl
-                            ? 'قائمة تشغيل عملية'
-                            : 'Project Playlist'}
-                        </span>
-
-                        {isCourseNew(project, baseProjects) && (
-                          <span className="bg-amber-500 text-black px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider shadow-md flex items-center gap-1">
+                      {/* Smart NEW Badge (Only on last 3 newest courses) */}
+                      {isCourseNew(project, baseProjects) && (
+                        <div className="absolute top-3 start-3 z-10 pointer-events-none">
+                          <span className="bg-amber-500 text-black px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider shadow-md flex items-center gap-1">
                             <Sparkles className="w-3 h-3 text-black" />
                             <span>{isRtl ? 'جديد' : 'NEW'}</span>
                           </span>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Card Body */}
@@ -777,9 +776,11 @@ export function Projects() {
                         )}
                       </div>
 
-                      <h3 className="text-base sm:text-lg font-bold mb-2 line-clamp-2 leading-snug group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                        {project.title}
-                      </h3>
+                      <Link to={getCoursePath(project)} className="block">
+                        <h3 className="text-base sm:text-lg font-bold mb-2 line-clamp-2 leading-snug group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                          {project.title}
+                        </h3>
+                      </Link>
                       <p className="text-xs sm:text-sm text-muted-foreground mb-4 line-clamp-2 flex-1 leading-relaxed">
                         {project.description}
                       </p>
@@ -830,60 +831,16 @@ export function Projects() {
                         })()}
                       </div>
 
-                      {/* Reward Strip: Project Playlists earn the Exclusive Project Certificate upon completion; Single-Video Long Builds earn Trophy & XP */}
-                      {isProjectCertificateEligible(project) ? (
-                        <div className="mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-emerald-500/15 border border-emerald-500/30 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Award className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                            <span className="truncate">
-                              {isRtl
-                                ? 'أكمل القائمة للحصول على شهادة المشاريع الحصرية + XP'
-                                : 'Complete Playlist to Earn Exclusive Project Certificate + XP'}
-                            </span>
-                          </div>
-                          {progress?.[project.id]?.isCompleted && (
-                            <Link
-                              to={`/certificate/${project.id}`}
-                              className="shrink-0 px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-black uppercase hover:bg-emerald-500"
-                            >
-                              {isRtl ? 'عرض الشهادة' : 'View Cert'}
-                            </Link>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] font-bold text-amber-700 dark:text-amber-300">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                            <span className="truncate">
-                              {isRtl
-                                ? 'عند إكمال الفيديو المطول تحصل على كأس الإنجاز + نقاط XP'
-                                : 'Complete Full-Build Video to Earn Trophy & XP Points'}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
-                      {user ? (
-                        <Link
-                          to={`/course/${project.id}`}
-                          className="w-full py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                        >
-                          <Rocket className="w-4 h-4" />
-                          <span>{isRtl ? 'ابدأ بناء المشروع الآن' : 'Start Building Project'}</span>
-                          <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-                        </Link>
-                      ) : (
-                        <button
-                          onClick={() => setIsAuthModalOpen(true)}
-                          className="w-full py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                        >
-                          <Rocket className="w-4 h-4" />
-                          <span>{isRtl ? 'سجل الدخول لبناء المشروع' : 'Log in to Build Project'}</span>
-                          <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-                        </button>
-                      )}
+                      <Link
+                        to={getCoursePath(project)}
+                        className="w-full py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Rocket className="w-4 h-4" />
+                        <span>{isRtl ? 'ابدأ بناء المشروع الآن' : 'Start Building Project'}</span>
+                        <ArrowRight className="w-4 h-4 rtl:rotate-180" />
+                      </Link>
                     </div>
-                  </motion.div>
+                  </div>
                 );
               })}
 

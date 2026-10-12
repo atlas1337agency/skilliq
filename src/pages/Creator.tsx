@@ -33,8 +33,10 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { submitForm } from '../lib/submissions';
 import { cn } from '../lib/utils';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { ShareCourseButton } from '../components/ShareCourseButton';
 import { SEO } from '../components/SEO';
 import { fetchFullYoutubeVideoMetadata, formatCompactNumber } from '../lib/youtube';
+import { getCoursePath } from '../lib/courseUtils';
 
 export function Creator() {
   const { creatorId } = useParams<{ creatorId: string }>();
@@ -921,11 +923,12 @@ export function Creator() {
             {filteredCourses.map(course => (
               <Link 
                 key={course.id}
-                to={`/course/${course.id}`}
+                to={getCoursePath(course)}
                 className="group flex flex-col bg-card border border-border rounded-2xl overflow-hidden hover:border-primary/50 hover:shadow-lg transition-all text-start"
               >
                 <div className="aspect-video w-full relative overflow-hidden bg-muted">
-                  <div className="absolute top-2.5 end-2.5 z-20" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                  <div className="absolute top-2.5 end-2.5 z-20 flex items-center gap-1.5" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                    <ShareCourseButton course={course} size="sm" />
                     <FavoriteButton itemId={course.id} itemType={course.isSingleVideo ? 'masterclass' : 'playlist'} size="sm" />
                   </div>
                   <img 

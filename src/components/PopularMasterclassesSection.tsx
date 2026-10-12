@@ -17,8 +17,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { filterByLanguage, cn } from '../lib/utils';
 import { formatCompactNumber } from '../lib/youtube';
+import { getCoursePath } from '../lib/courseUtils';
 import { ScrollingText } from './ScrollingText';
 import { FavoriteButton } from './FavoriteButton';
+import { ShareCourseButton } from './ShareCourseButton';
 
 function parseDurationMinutes(duration?: string): number {
   if (!duration) return 90;
@@ -91,24 +93,16 @@ export function PopularMasterclassesSection() {
       </div>
 
       {/* MASTERCLASSES RESPONSIVE GRID */}
-      <motion.div 
-        layout
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
-      >
-        <AnimatePresence mode="popLayout">
-          {displayedMasterclasses.map((course, index) => (
-            <motion.div
-              layout
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {displayedMasterclasses.map((course) => (
+            <div
               key={course.id}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.25, delay: index * 0.04 }}
               className="group flex flex-col bg-card rounded-3xl border border-border/80 overflow-hidden hover:shadow-xl transition-all duration-200 hover:-translate-y-1.5 text-start"
             >
               {/* 16:9 Thumbnail Header */}
               <div className="relative aspect-video overflow-hidden bg-muted">
-                <div className="absolute bottom-3 end-3 z-20">
+                <div className="absolute bottom-3 end-3 z-20 flex items-center gap-1.5">
+                  <ShareCourseButton course={course} size="sm" />
                   <FavoriteButton itemId={course.id} itemType="masterclass" size="sm" />
                 </div>
 
@@ -132,14 +126,18 @@ export function PopularMasterclassesSection() {
                 )}
 
                 {/* Hover Play Button Overlay */}
-                <div className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                <Link
+                  to={getCoursePath(course)}
+                  aria-label={course.title}
+                  className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 z-10"
+                >
                   <div className="w-14 h-14 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-xl scale-90 group-hover:scale-100 transition-transform">
                     <PlayCircle className="w-8 h-8 ps-0.5 text-white" />
                   </div>
-                </div>
+                </Link>
 
                 {/* Masterclass & Category Badges */}
-                <div className="absolute top-3 start-3 flex flex-wrap gap-1.5 z-10">
+                <div className="absolute top-3 start-3 flex flex-wrap gap-1.5 z-10 pointer-events-none">
                   <span className="bg-primary/95 backdrop-blur text-white px-2.5 py-1 rounded-md text-[11px] font-bold shadow-xs">
                     {t('masterclass', 'Masterclass')}
                   </span>
@@ -151,9 +149,11 @@ export function PopularMasterclassesSection() {
 
               {/* Card Body */}
               <div className="p-5 sm:p-6 flex flex-col flex-1">
-                <h3 className="text-base sm:text-lg font-bold mb-2 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
-                  {course.title}
-                </h3>
+                <Link to={getCoursePath(course)} className="block">
+                  <h3 className="text-base sm:text-lg font-bold mb-2 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+                    {course.title}
+                  </h3>
+                </Link>
                 <p className="text-xs sm:text-sm text-muted-foreground mb-4 line-clamp-2 flex-1 leading-relaxed">
                   {course.description}
                 </p>
@@ -199,28 +199,17 @@ export function PopularMasterclassesSection() {
                 </div>
 
                 {/* Action CTA Button */}
-                {user ? (
-                  <Link 
-                    to={`/course/${course.id}`}
-                    className="w-full py-2.5 sm:py-3 bg-foreground text-background hover:bg-primary hover:text-primary-foreground rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <span>{t('start_learning', 'Start Masterclass')}</span>
-                    <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-                  </Link>
-                ) : (
-                  <button 
-                    onClick={() => setIsAuthModalOpen(true)}
-                    className="w-full py-2.5 sm:py-3 bg-foreground text-background hover:bg-primary hover:text-primary-foreground rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <span>{t('login_to_start', 'Log in to Start')}</span>
-                    <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-                  </button>
-                )}
+                <Link 
+                  to={getCoursePath(course)}
+                  className="w-full py-2.5 sm:py-3 bg-foreground text-background hover:bg-primary hover:text-primary-foreground rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>{t('start_learning', 'Start Masterclass')}</span>
+                  <ArrowRight className="w-4 h-4 rtl:rotate-180" />
+                </Link>
               </div>
-            </motion.div>
+            </div>
           ))}
-        </AnimatePresence>
-      </motion.div>
+      </div>
 
     </section>
   );

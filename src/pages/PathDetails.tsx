@@ -24,8 +24,9 @@ import { filterByLanguage } from '../lib/utils';
 import { formatCompactNumber } from '../lib/youtube';
 import { ScrollingText } from '../components/ScrollingText';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { ShareCourseButton } from '../components/ShareCourseButton';
 import { SEO } from '../components/SEO';
-import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
+import { isCertificateEligible, resolveCourseEducator, getCoursePath } from '../lib/courseUtils';
 import { PathGraphicRoadmap } from '../components/PathGraphicRoadmap';
 
 const iconMap: Record<string, any> = {
@@ -257,20 +258,18 @@ export function PathDetails() {
             const educator = resolveCourseEducator(course);
 
             return (
-              <motion.div
+              <div
                 key={course.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: index * 0.08 }}
                 className="group flex flex-col bg-card rounded-2xl border border-border overflow-hidden hover:shadow-lg transition-all hover:-translate-y-1 relative"
               >
                 {/* Step Number Badge */}
-                <div className="absolute top-3.5 start-3.5 bg-background/95 backdrop-blur-md text-foreground border border-border/60 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider z-20 shadow-md flex items-center justify-center">
+                <div className="absolute top-3.5 start-3.5 bg-background/95 backdrop-blur-md text-foreground border border-border/60 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider z-20 shadow-md flex items-center justify-center pointer-events-none">
                   {isRtl ? `الخطوة ${index + 1}` : `${t('step', 'Step')} ${index + 1}`}
                 </div>
 
                 <div className="relative aspect-video overflow-hidden bg-muted">
-                  <div className="absolute bottom-3 end-3 z-20">
+                  <div className="absolute bottom-3 end-3 z-20 flex items-center gap-1.5">
+                    <ShareCourseButton course={course} size="sm" />
                     <FavoriteButton itemId={course.id} itemType={course.isSingleVideo ? 'masterclass' : 'playlist'} size="sm" />
                   </div>
                   {course.thumbnail?.trim() ? (
@@ -285,10 +284,14 @@ export function PathDetails() {
                       <span className="text-muted-foreground font-medium text-center text-xs">{course.title}</span>
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  <Link
+                    to={getCoursePath(course)}
+                    aria-label={course.title}
+                    className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 z-10"
+                  >
                     <PlayCircle className="w-14 h-14 text-white" />
-                  </div>
-                  <div className="absolute top-3.5 end-3.5 flex gap-1.5">
+                  </Link>
+                  <div className="absolute top-3.5 end-3.5 flex gap-1.5 pointer-events-none z-10">
                     {isCompleted && (
                       <div className="bg-emerald-500 text-white px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1 shadow-xs">
                         <CheckCircle2 className="w-3.5 h-3.5" />
@@ -302,9 +305,11 @@ export function PathDetails() {
                 </div>
 
                 <div className="p-5 flex flex-col flex-1">
-                  <h3 className="text-base sm:text-lg font-bold text-foreground mb-1.5 line-clamp-2 leading-snug">
-                    {course.title}
-                  </h3>
+                  <Link to={getCoursePath(course)} className="block">
+                    <h3 className="text-base sm:text-lg font-bold text-foreground mb-1.5 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+                      {course.title}
+                    </h3>
+                  </Link>
                   <p className="text-muted-foreground text-xs sm:text-sm mb-4 line-clamp-2 flex-1 leading-relaxed">
                     {course.description}
                   </p>
@@ -353,41 +358,32 @@ export function PathDetails() {
                     })()}
                   </div>
 
-                  {user ? (
-                    isCompleted && canGetCert ? (
-                      <div className="mt-auto space-y-2">
-                        <Link
-                          to={`/certificate/${course.id}`}
-                          className="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-center hover:bg-emerald-700 transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-1.5 text-xs sm:text-sm"
-                        >
-                          <Award className="w-4 h-4" />
-                          <span>{isRtl ? 'عرض الشهادة الموثقة' : t('view_certificate', 'View Certificate')}</span>
-                        </Link>
-                        <Link
-                          to={`/course/${course.id}`}
-                          className="w-full py-2 bg-muted text-foreground rounded-xl font-semibold text-center hover:bg-muted/80 transition-all block text-xs"
-                        >
-                          {isRtl ? 'إعادة مشاهدة الدروس' : 'Re-watch Playlist'}
-                        </Link>
-                      </div>
-                    ) : (
+                  {user && isCompleted && canGetCert ? (
+                    <div className="mt-auto space-y-2">
                       <Link
-                        to={`/course/${course.id}`}
-                        className="w-full mt-auto py-2.5 bg-primary text-primary-foreground rounded-xl font-bold text-center hover:bg-primary/90 transition-all active:scale-[0.98] shadow-xs text-xs sm:text-sm"
+                        to={`/certificate/${course.id}`}
+                        className="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-center hover:bg-emerald-700 transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-1.5 text-xs sm:text-sm"
                       >
-                        {isRtl ? 'ابدأ التعلم الآن' : t('start_learning', 'Start Learning')}
+                        <Award className="w-4 h-4" />
+                        <span>{isRtl ? 'عرض الشهادة الموثقة' : t('view_certificate', 'View Certificate')}</span>
                       </Link>
-                    )
+                      <Link
+                        to={getCoursePath(course)}
+                        className="w-full py-2 bg-muted text-foreground rounded-xl font-semibold text-center hover:bg-muted/80 transition-all block text-xs"
+                      >
+                        {isRtl ? 'إعادة مشاهدة الدروس' : 'Re-watch Playlist'}
+                      </Link>
+                    </div>
                   ) : (
-                    <button
-                      onClick={() => setIsAuthModalOpen(true)}
-                      className="w-full mt-auto py-2.5 bg-primary text-primary-foreground rounded-xl font-bold text-center hover:bg-primary/90 transition-all active:scale-[0.98] shadow-xs text-xs sm:text-sm cursor-pointer"
+                    <Link
+                      to={getCoursePath(course)}
+                      className="w-full mt-auto py-2.5 bg-primary text-primary-foreground rounded-xl font-bold text-center hover:bg-primary/90 transition-all active:scale-[0.98] shadow-xs text-xs sm:text-sm"
                     >
-                      {isRtl ? 'سجل الدخول للبدء' : t('login_to_start', 'Login to Start')}
-                    </button>
+                      {isRtl ? 'ابدأ التعلم الآن' : t('start_learning', 'Start Learning')}
+                    </Link>
                   )}
                 </div>
-              </motion.div>
+              </div>
             );
           })}
         </div>

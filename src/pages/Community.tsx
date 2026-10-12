@@ -142,9 +142,9 @@ export function Community() {
     setCurrentPage(1);
   }, [selectedParentCategory, selectedSubCategory, searchQuery, sortBy, onlyMyLiked, language]);
 
-  // Scroll to top smoothly when switching between post detail view or pagination pages
+  // Scroll to top instantly when switching between post detail view or pagination pages
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }, [postId, currentPage]);
 
   // Strict Private Community Gate: If user is not logged in, redirect to home immediately

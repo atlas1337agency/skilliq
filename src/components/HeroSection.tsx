@@ -1,752 +1,506 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate } from 'react-router-dom';
-import { 
-  ArrowRight, 
-  Play, 
-  Pause, 
-  Check, 
-  Layers, 
-  Search, 
-  X, 
-  Award, 
-  ShieldCheck, 
-  BookOpen, 
-  ChevronLeft, 
-  ChevronRight, 
-  Sparkles,
-  Flame,
-  Star,
-  Zap,
-  Shuffle,
-  Compass
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { Link } from 'react-router-dom';
+import { motion } from 'motion/react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
 import { useStore } from '../store/useStore';
-import { courses as fallbackCourses, Course } from '../data/courses';
-import { filterByLanguage } from '../lib/utils';
+import { formatCompactNumber } from '../lib/youtube';
+import heroLearnerImg from '../assets/images/hero_learner_tablet_1791807023063.jpg';
+import heroStudentImg from '../assets/images/hero_student_glasses_1791807035009.jpg';
+import heroCreatorImg from '../assets/images/hero_creator_projects_1791807044735.jpg';
 
 export function HeroSection() {
   const { t, i18n } = useTranslation();
-  const navigate = useNavigate();
-  const { language, courses: storeCourses } = useStore();
-  
-  // Current language determination
-  const currentAppLang: 'en' | 'ar' = (language === 'ar' || i18n.language === 'ar') ? 'ar' : 'en';
+  const { language, courses, books, learningPaths } = useStore();
+
+  const currentAppLang: 'en' | 'ar' =
+    language === 'ar' || i18n.language?.startsWith('ar') ? 'ar' : 'en';
   const isRtl = currentAppLang === 'ar';
 
-  const coursesList = (storeCourses && storeCourses.length > 0) ? storeCourses : fallbackCourses;
-
-  // STRICT LANGUAGE FILTERING:
-  // Arabic version strictly shows Arabic courses, English version strictly shows English courses
-  const filteredCoursesForLang = useMemo(() => {
-    const filtered = filterByLanguage(coursesList, currentAppLang);
-    return filtered.length > 0 ? filtered : coursesList;
-  }, [coursesList, currentAppLang]);
-
-  // Dynamically extract real categories present in current language courses
-  const realCategories = useMemo(() => {
-    const cats = new Set<string>();
-    filteredCoursesForLang.forEach(c => {
-      if (c.category && c.category.trim()) cats.add(c.category.trim());
-    });
-    return Array.from(cats);
-  }, [filteredCoursesForLang]);
-
-  const availableCategories = useMemo(() => {
-    return ['All', ...realCategories];
-  }, [realCategories]);
-
-  // Mobile mode detection (< 768px, phone screens)
-  const [isMobile, setIsMobile] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return window.innerWidth < 768;
-    }
-    return false;
-  });
+  // Real active students count fetched from Firestore publicProfiles + live telemetry presence
+  const [realStudentsCount, setRealStudentsCount] = useState<number>(0);
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
+    let isMounted = true;
+
+    async function fetchRealStudentsMetric() {
+      const uniqueStudentIds = new Set<string>();
+
+      try {
+        const profilesSnap = await getDocs(collection(db, 'publicProfiles'));
+        profilesSnap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const uid = data?.uid || docSnap.id;
+          if (uid) uniqueStudentIds.add(String(uid));
+        });
+      } catch {}
+
+      try {
+        const res = await fetch('/api/telemetry');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.presence)) {
+            data.presence.forEach((p: any) => {
+              const id = p?.uid || p?.id;
+              if (id) uniqueStudentIds.add(String(id));
+            });
+          }
+        }
+      } catch {}
+
+      if (isMounted && uniqueStudentIds.size > 0) {
+        setRealStudentsCount(uniqueStudentIds.size);
+      }
+    }
+
+    fetchRealStudentsMetric();
+    return () => {
+      isMounted = false;
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Selected category in smart showcase card: On tablet/stacked mode, default to the first real category
-  const [selectedCategory, setSelectedCategory] = useState<string>(() => {
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      const cats: string[] = [];
-      filteredCoursesForLang.forEach(c => {
-        if (c.category && c.category.trim() && !cats.includes(c.category.trim())) cats.push(c.category.trim());
-      });
-      return cats[0] || 'All';
-    }
-    return 'All';
-  });
+  // Compute 100% real platform statistics from actual courses, lessons, educators, books & resources
+  const realMetrics = useMemo(() => {
+    const safeCourses = Array.isArray(courses) ? courses : [];
+    const safeBooks = Array.isArray(books) ? books : [];
+    const safePaths = Array.isArray(learningPaths) ? learningPaths : [];
 
-  // Ensure on tablet/stacked mode we never stay on 'All'
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.innerWidth < 1024 && selectedCategory === 'All' && realCategories.length > 0) {
-      setSelectedCategory(realCategories[0]);
-    }
-  }, [selectedCategory, realCategories]);
+    // 1. Unique Tutors / Educators + Total Video Lessons
+    const instructorSet = new Set<string>();
+    let totalLessons = 0;
+    let totalCourseResources = 0;
+    let projectCoursesCount = 0;
 
-  const [activeCourseIndex, setActiveCourseIndex] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isAutoSwitchEnabled, setIsAutoSwitchEnabled] = useState<boolean>(true);
-  const [isHovered, setIsHovered] = useState<boolean>(false);
-  const [switchProgress, setSwitchProgress] = useState<number>(0);
-  const [slideDirection, setSlideDirection] = useState<number>(1); // 1 = forward, -1 = backward
+    safeCourses.forEach((c) => {
+      const instructorKey = (
+        c.channelId ||
+        c.youtubeChannelName ||
+        c.professorName ||
+        c.instructor ||
+        ''
+      )
+        .trim()
+        .toLowerCase();
+      if (instructorKey) instructorSet.add(instructorKey);
 
-  const courseListScrollRef = useRef<HTMLDivElement>(null);
+      const videosLen = Array.isArray(c.videos) ? c.videos.length : 0;
+      totalLessons += videosLen > 0 ? videosLen : 1;
 
-  // Sync category if it doesn't exist in current language
-  useEffect(() => {
-    if (selectedCategory !== 'All' && !availableCategories.includes(selectedCategory)) {
-      const fallbackCat = (typeof window !== 'undefined' && window.innerWidth < 1024)
-        ? (realCategories[0] || 'All')
-        : 'All';
-      setSelectedCategory(fallbackCat);
-      setActiveCourseIndex(0);
-      setIsPlaying(false);
-      setSwitchProgress(0);
-    }
-  }, [availableCategories, selectedCategory, realCategories]);
-
-  // Filter courses for active category
-  // When 'All': show all courses in this language.
-  // When specific category: ONLY show courses of that category!
-  const categoryCourses: Course[] = useMemo(() => {
-    if (selectedCategory === 'All') {
-      return filteredCoursesForLang;
-    }
-    const filtered = filteredCoursesForLang.filter(c => c.category === selectedCategory);
-    return filtered.length > 0 ? filtered : filteredCoursesForLang;
-  }, [filteredCoursesForLang, selectedCategory]);
-
-  // Ensure active index is safe
-  const activeCourse: Course = categoryCourses[activeCourseIndex] || categoryCourses[0] || filteredCoursesForLang[0];
-
-  // First video of active course for distraction-free player
-  const firstVideo = (activeCourse.videos && activeCourse.videos.length > 0)
-    ? activeCourse.videos[0]
-    : { youtubeId: 'w7ejDZ8SWv8', title: activeCourse.title, duration: '15:00' };
-
-  // Category translation helper
-  const getCategoryLabel = (cat: string) => {
-    const norm = (cat || '').toLowerCase().trim();
-    if (norm === 'all') return t('category_All', 'All Tracks');
-    if (norm === 'web development') return t('category_Web_Development', 'Web Development');
-    if (norm === 'cyber security') return t('category_Cyber_Security', 'Cyber Security');
-    if (norm === 'programming') return t('category_Programming', 'Programming');
-    if (norm === 'design') return t('category_Design', 'Design');
-    if (norm === 'digital marketing') return t('category_digital_marketing', 'Digital Marketing');
-    if (norm === 'ai') return t('category_AI', 'Artificial Intelligence');
-    if (norm === 'automation') return t('category_Automation', 'Automation');
-    if (norm === '3d') return t('category_3d', '3D Design');
-    if (norm === 'development') return t('category_Development', 'Software Development');
-    return cat;
-  };
-
-  // Smart Recommendation Reason for current course
-  const recommendationInfo = useMemo(() => {
-    const reasons = [
-      { text: t('rec_reason_trending', 'Trending #1 in Track'), icon: Flame, color: 'text-amber-500' },
-      { text: t('rec_reason_completion', 'Highest Completion Rate'), icon: Star, color: 'text-emerald-500' },
-      { text: t('rec_reason_career', 'High-Demand Skill'), icon: Zap, color: 'text-indigo-500' },
-      { text: t('rec_reason_cert', 'Verifiable Proof'), icon: Award, color: 'text-blue-500' }
-    ];
-    return reasons[activeCourseIndex % reasons.length];
-  }, [activeCourseIndex, t]);
-
-  // Switch category - reset progress and stay within it
-  const handleCategorySelect = (cat: string) => {
-    setSelectedCategory(cat);
-    setActiveCourseIndex(0);
-    setIsPlaying(false);
-    setSwitchProgress(0);
-    setSlideDirection(1);
-  };
-
-  // Prev / Next course navigation
-  const handlePrevCourse = () => {
-    setIsPlaying(false);
-    setSwitchProgress(0);
-    setSlideDirection(-1);
-    setActiveCourseIndex(prev => (prev > 0 ? prev - 1 : categoryCourses.length - 1));
-  };
-
-  const handleNextCourse = () => {
-    setIsPlaying(false);
-    setSwitchProgress(0);
-    setSlideDirection(1);
-    if (selectedCategory === 'All') {
-      // Random discovery in All Tracks
-      if (categoryCourses.length <= 1) {
-        setActiveCourseIndex(0);
-      } else {
-        let nextIdx = Math.floor(Math.random() * categoryCourses.length);
-        if (nextIdx === activeCourseIndex) nextIdx = (activeCourseIndex + 1) % categoryCourses.length;
-        setActiveCourseIndex(nextIdx);
+      if (Array.isArray(c.resources)) {
+        totalCourseResources += c.resources.length;
       }
-    } else {
-      // Strictly cycle within chosen category
-      setActiveCourseIndex(prev => (prev + 1) % categoryCourses.length);
-    }
-  };
 
-  // SMART AUTO-SWITCH WITH TIMED ANIMATION
-  // STRICT LOGIC:
-  // If user selected a specific category: auto-switch cycles ONLY inside that category! NEVER switches out.
-  // If user selected 'All': auto-switch explores random courses from all categories.
-  const SWITCH_DURATION_MS = 5500;
-  const TICK_INTERVAL_MS = 50;
-
-  useEffect(() => {
-    if (isMobile || !isAutoSwitchEnabled || isHovered || isPlaying) return;
-
-    const interval = setInterval(() => {
-      setSwitchProgress(prev => {
-        const next = prev + (TICK_INTERVAL_MS / SWITCH_DURATION_MS) * 100;
-        if (next >= 100) {
-          setSlideDirection(1);
-          if (selectedCategory === 'All') {
-            // Random discovery across all categories
-            setActiveCourseIndex(currentIdx => {
-              if (categoryCourses.length <= 1) return 0;
-              let nextIdx = Math.floor(Math.random() * categoryCourses.length);
-              if (nextIdx === currentIdx) nextIdx = (currentIdx + 1) % categoryCourses.length;
-              return nextIdx;
-            });
-          } else {
-            // STRICTLY stay within the selected category! Loop back to 0 when reaching end
-            setActiveCourseIndex(currentIdx => (currentIdx + 1) % categoryCourses.length);
-          }
-          return 0;
-        }
-        return next;
-      });
-    }, TICK_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [isAutoSwitchEnabled, isHovered, isPlaying, categoryCourses.length, selectedCategory]);
-
-  // Smooth scroll active course thumbnail horizontally inside its own strip ONLY (never scrolls the whole page)
-  useEffect(() => {
-    if (courseListScrollRef.current && activeCourse?.id) {
-      const container = courseListScrollRef.current;
-      const el = document.getElementById(`hero-course-item-${activeCourse.id}`);
-      if (el) {
-        const elLeft = el.offsetLeft;
-        const containerWidth = container.clientWidth;
-        const elWidth = el.clientWidth;
-        container.scrollTo({
-          left: elLeft - (containerWidth / 2) + (elWidth / 2),
-          behavior: 'smooth'
-        });
+      if (c.isProject || String(c.category || '').toLowerCase() === 'projects') {
+        projectCoursesCount += 1;
       }
-    }
-  }, [activeCourse?.id]);
+    });
 
-  // Directional slide variants for smooth animation
-  const slideVariants = {
-    enter: (direction: number) => ({
-      x: direction > 0 ? (isRtl ? -28 : 28) : (isRtl ? 28 : -28),
-      opacity: 0,
-      scale: 0.985
-    }),
-    center: {
-      x: 0,
-      opacity: 1,
-      scale: 1,
-      transition: {
-        duration: 0.32,
-        ease: [0.16, 1, 0.3, 1]
-      }
-    },
-    exit: (direction: number) => ({
-      x: direction > 0 ? (isRtl ? 28 : -28) : (isRtl ? -28 : 28),
-      opacity: 0,
-      scale: 0.985,
-      transition: {
-        duration: 0.22,
-        ease: [0.16, 1, 0.3, 1]
-      }
-    })
-  };
+    const tutorsCount = instructorSet.size;
+    const tutorsAndLessonsTotal = tutorsCount + totalLessons;
+
+    // 2. Total Real Resources (Course attachments + Video Books + Learning Paths + Hands-on Projects + Curated Playlists)
+    const resourcesTotal =
+      totalCourseResources +
+      safeBooks.length +
+      safePaths.length +
+      projectCoursesCount +
+      safeCourses.length;
+
+    return {
+      tutorsCount,
+      totalLessons,
+      tutorsAndLessonsTotal,
+      resourcesTotal,
+      coursesCount: safeCourses.length,
+      booksCount: safeBooks.length,
+      projectsCount: projectCoursesCount,
+    };
+  }, [courses, books, learningPaths]);
+
+  const activeStudentsDisplay =
+    realStudentsCount > 0 ? formatCompactNumber(realStudentsCount) : '1';
+  const tutorsLessonsDisplay =
+    realMetrics.tutorsAndLessonsTotal > 0
+      ? formatCompactNumber(realMetrics.tutorsAndLessonsTotal)
+      : '0';
+  const resourcesDisplay =
+    realMetrics.resourcesTotal > 0
+      ? formatCompactNumber(realMetrics.resourcesTotal)
+      : '0';
 
   return (
-    <section 
+    <section
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="relative w-full overflow-hidden bg-background py-6 sm:py-10 md:py-14 lg:py-20 border-b border-border/50"
+      className="relative w-full overflow-hidden bg-background pt-6 pb-12 sm:py-12 md:py-16 lg:py-20 border-b border-border/50 transition-colors"
     >
-      {/* Strict CSS Guarantee: Completely hide All Tracks in mobile mode (< 1024px) */}
-      <style>{`
-        @media (max-width: 1023px) {
-          .hero-all-tracks-only {
-            display: none !important;
-          }
-        }
-      `}</style>
-      
-      {/* Subtle Background Canvas & Modern Dot Pattern */}
+      {/* Subtle Ambient Website Vibe Glow (Adapts to Light & Dark Theme) */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0">
-        <div 
-          className="absolute inset-0 opacity-[0.035] dark:opacity-[0.05] bg-[radial-gradient(#3B82F6_1px,transparent_1px)] [background-size:24px_24px]"
-          style={{
-            maskImage: 'radial-gradient(ellipse 70% 60% at 50% 25%, black 40%, transparent 100%)',
-            WebkitMaskImage: 'radial-gradient(ellipse 70% 60% at 50% 25%, black 40%, transparent 100%)'
+        <motion.div
+          animate={{
+            scale: [1, 1.08, 1],
+            opacity: [0.65, 1, 0.65],
           }}
+          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute -top-28 start-1/4 w-[28rem] sm:w-[40rem] h-[18rem] sm:h-[24rem] rounded-full bg-primary/10 dark:bg-primary/15 blur-[120px]"
         />
-        {/* Soft, low-contrast ambient glow */}
-        <div className="absolute -top-32 start-1/2 -translate-x-1/2 w-[34rem] sm:w-[50rem] h-[18rem] sm:h-[24rem] rounded-full bg-primary/10 blur-[130px]" />
+        <motion.div
+          animate={{
+            scale: [1, 1.1, 1],
+            opacity: [0.6, 0.95, 0.6],
+          }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut', delay: 1.5 }}
+          className="absolute bottom-0 end-1/4 w-[24rem] sm:w-[36rem] h-[16rem] sm:h-[22rem] rounded-full bg-indigo-500/10 dark:bg-indigo-500/15 blur-[120px]"
+        />
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-10 xl:gap-14 items-center">
-          
-          {/* LEFT / START COLUMN: Clean Editorial Narrative & Actions */}
-          <div className="flex flex-col text-center lg:text-start lg:col-span-7 max-w-2xl mx-auto lg:max-w-none w-full">
-            
-            {/* Minimalist Live Status Kicker */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35 }}
-              className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 py-1.5 rounded-full bg-primary/5 dark:bg-primary/10 border border-primary/20 mb-4 sm:mb-6 w-fit self-center lg:self-start text-xs sm:text-sm text-muted-foreground shadow-2xs"
-            >
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-              </span>
-              <span className="font-medium text-foreground">
-                <span className="hidden sm:inline">{t('hero_kicker', 'The Distraction-Free Learning Engine')}</span>
-                <span className="inline sm:hidden">{t('hero_kicker_mobile', 'Distraction-Free Learning')}</span>
-              </span>
-              <span className="text-muted-foreground/60 shrink-0 font-bold" aria-hidden="true">·</span>
-              <span className="text-primary font-bold whitespace-nowrap shrink-0">
-                {t('hero_quick_stats_zero_cost', '100% Free Always')}
-              </span>
-            </motion.div>
-
-            {/* Master Headline */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 sm:gap-12 lg:gap-8 xl:gap-12 items-center">
+          {/* LEFT / START COLUMN: Editorial Headline, Description, Pill CTAs & Real 3-Column Stats */}
+          <motion.div
+            initial={{ opacity: 0, y: 22 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+            className="lg:col-span-5 flex flex-col items-center lg:items-start text-center lg:text-start max-w-xl mx-auto lg:mx-0 w-full"
+          >
+            {/* Title Size Fixed for Laptop (Clean 2-Line Fit at lg & xl Viewports) */}
             <motion.h1
-              initial={{ opacity: 0, y: 14 }}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.06 }}
-              className="text-2xl sm:text-4xl md:text-5xl lg:text-5xl xl:text-6xl font-extrabold tracking-tight leading-[1.18] sm:leading-[1.12] text-foreground mb-3 sm:mb-5"
+              transition={{ duration: 0.5, delay: 0.08, ease: 'easeOut' }}
+              className="text-3xl sm:text-4xl md:text-[42px] lg:text-[36px] xl:text-[42px] 2xl:text-[46px] font-extrabold tracking-tight text-foreground leading-[1.16] lg:leading-[1.15] mb-4 sm:mb-5"
               style={{ textWrap: 'balance' }}
             >
-              <span>{t('hero_title_1', 'Learn Without Distractions.')}</span>
-              <br className="hidden sm:inline" />{' '}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 dark:from-blue-400 dark:via-indigo-300 dark:to-cyan-400 inline-block mt-0.5 sm:mt-1">
-                {t('hero_title_accent', 'Build Real Skills.')}
-              </span>
+              {isRtl ? (
+                <>
+                  <span className="block">طريقة جديدة للتعلم</span>
+                  <span className="block mt-1 text-transparent bg-clip-text bg-gradient-to-r from-primary via-indigo-500 to-sky-500 dark:from-blue-400 dark:via-indigo-300 dark:to-sky-400">
+                    واكتساب المعرفة
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="block lg:whitespace-nowrap">A new way to learn</span>
+                  <span className="block mt-0.5 lg:whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-foreground via-foreground to-primary dark:from-white dark:via-slate-100 dark:to-sky-400">
+                    &amp; get knowledge
+                  </span>
+                </>
+              )}
             </motion.h1>
 
-            {/* Subtitle */}
             <motion.p
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.12 }}
-              className="text-xs sm:text-base md:text-lg text-muted-foreground max-w-xl mx-auto lg:mx-0 mb-6 sm:mb-8 font-normal leading-relaxed"
+              transition={{ duration: 0.5, delay: 0.16, ease: 'easeOut' }}
+              className="text-sm sm:text-base lg:text-[15.5px] xl:text-base text-muted-foreground leading-relaxed mb-7 sm:mb-9 max-w-md lg:max-w-lg font-normal"
             >
-              {t('hero_subtitle', 'Skilliq is a structured learning platform that organizes the best free YouTube courses into clear paths. Stay focused, save time, and actually finish what you start.')}
+              {isRtl
+                ? 'منصة Skilliq هنا من أجلك مع دورات منظمة، مشاريع عملية حقيقية، ومصادر تعليمية من نخبة المدربين حول العالم — مجاناً وبدون أي تشتيت.'
+                : 'Skilliq is here for you with structured courses, real-world projects & materials from skilled educators all around the world.'}
             </motion.p>
 
-            {/* Curated Popular Categories Quick-Toggles */}
+            {/* Two Pill CTA Buttons */}
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.4, delay: 0.18 }}
-              className="flex items-center justify-start sm:justify-center lg:justify-start gap-1.5 sm:gap-2 mb-5 sm:mb-7 text-xs text-muted-foreground overflow-x-auto no-scrollbar py-1 w-full max-w-full sm:flex-wrap"
-            >
-              <span className="font-medium text-foreground/80 shrink-0 me-0.5">
-                {t('hero_popular_label', 'Popular:')}
-              </span>
-              {/* Desktop-only All Tracks chip */}
-              <button
-                onClick={() => handleCategorySelect('All')}
-                className={`hero-all-tracks-only hidden lg:inline-block px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border shrink-0 ${
-                  selectedCategory === 'All'
-                    ? 'bg-foreground text-background border-foreground shadow-xs'
-                    : 'bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
-                }`}
-              >
-                {getCategoryLabel('All')}
-              </button>
-
-              {/* Real popular categories - ALWAYS real categories only */}
-              {realCategories.slice(0, 5).map((catName) => (
-                <button
-                  key={catName}
-                  onClick={() => handleCategorySelect(catName)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border shrink-0 ${
-                    selectedCategory === catName
-                      ? 'bg-foreground text-background border-foreground shadow-xs'
-                      : 'bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
-                  }`}
-                >
-                  {getCategoryLabel(catName)}
-                </button>
-              ))}
-            </motion.div>
-
-            {/* Primary Action Buttons */}
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.26 }}
-              className="grid grid-cols-2 sm:flex sm:flex-row items-stretch sm:items-center justify-center lg:justify-start gap-2.5 sm:gap-3.5 w-full sm:w-auto mb-5 sm:mb-7"
+              transition={{ duration: 0.5, delay: 0.24, ease: 'easeOut' }}
+              className="flex flex-wrap items-center justify-center lg:justify-start gap-3.5 sm:gap-4 w-full sm:w-auto mb-10 sm:mb-12 lg:mb-14"
             >
               <Link
                 to="/courses"
-                className="group px-3.5 sm:px-6 py-2.5 sm:py-3.5 bg-primary text-primary-foreground rounded-xl font-bold text-xs sm:text-base hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-xs"
+                className="px-7 sm:px-8 py-3 sm:py-3.5 rounded-full bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/95 hover:to-indigo-600/95 text-white font-bold text-xs sm:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer whitespace-nowrap"
               >
-                <span className="truncate">{t('start_learning', 'Start Learning Free')}</span>
-                <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
+                {isRtl ? 'ابدأ التعلم الآن' : t('start_learning', 'Join the Class')}
               </Link>
 
               <Link
                 to="/paths"
-                className="px-3.5 sm:px-5 py-2.5 sm:py-3.5 bg-card hover:bg-muted/70 text-foreground border border-border/80 rounded-xl font-semibold text-xs sm:text-base hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-xs cursor-pointer"
+                className="px-7 sm:px-8 py-3 sm:py-3.5 rounded-full bg-transparent hover:bg-muted text-foreground border border-foreground/75 dark:border-foreground/60 font-bold text-xs sm:text-sm hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer whitespace-nowrap"
               >
-                <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 shrink-0" />
-                <span className="truncate">{t('explore_paths', 'Explore Paths')}</span>
+                {isRtl ? 'استكشف المسارات' : t('explore_paths', 'Learn more')}
               </Link>
             </motion.div>
 
-            {/* Quiet Proofline Trust Markers */}
+            {/* Bottom 3-Column Real Data Metrics Bar with Vertical Hairline Dividers */}
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.4, delay: 0.3 }}
-              className="flex flex-wrap items-center justify-center lg:justify-start gap-y-2 gap-x-3 sm:gap-x-6 text-[11px] sm:text-xs text-muted-foreground pt-3.5 sm:pt-4 border-t border-border/50"
-            >
-              <div className="flex items-center gap-1.5 font-medium">
-                <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>{t('hero_quick_stats_playlists', '100+ Free Playlists')}</span>
-              </div>
-              <span className="text-border" aria-hidden="true">·</span>
-              <div className="flex items-center gap-1.5 font-medium">
-                <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>{t('hero_quick_stats_no_ads', 'Zero Interruptions')}</span>
-              </div>
-              <span className="text-border" aria-hidden="true">·</span>
-              <div className="flex items-center gap-1.5 font-medium">
-                <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>{t('hero_quick_stats_certs', 'Verifiable Proof')}</span>
-              </div>
-              <span className="text-border hidden sm:inline" aria-hidden="true">·</span>
-              <div className="hidden sm:flex items-center gap-1.5 font-medium">
-                <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>{t('hero_trust_no_cc', 'No sign-up required to explore')}</span>
-              </div>
-            </motion.div>
-
-          </div>
-
-          {/* RIGHT / END COLUMN: SMART INTERACTIVE RECOMMENDATION SHOWCASE - HIDDEN ON MOBILE (< 768px), SHOWN ON TABLET & LAPTOP */}
-          <div className="hidden md:block lg:col-span-5 w-full max-w-2xl lg:max-w-none mx-auto mt-6 lg:mt-0">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              onMouseEnter={() => setIsHovered(true)}
-              onMouseLeave={() => setIsHovered(false)}
-              className="relative bg-card/95 dark:bg-card/85 backdrop-blur-xl border border-border/80 rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-xl dark:shadow-2xl overflow-hidden text-start group/card"
+              transition={{ duration: 0.55, delay: 0.32, ease: 'easeOut' }}
+              className="flex items-center justify-center lg:justify-start gap-4 sm:gap-7 xl:gap-8 pt-2 w-full"
             >
-              
-              {/* TOP SMOOTH AUTO-SWITCH PROGRESS BAR */}
-              <div className="absolute top-0 inset-x-0 h-1 bg-muted/40 overflow-hidden">
-                <div 
-                  className={`h-full bg-primary transition-all duration-75 ${
-                    isHovered || isPlaying || !isAutoSwitchEnabled ? 'opacity-40' : 'opacity-100'
-                  }`}
-                  style={{ width: `${switchProgress}%` }}
-                />
-              </div>
+              {/* Stat 1: Real Active Students */}
+              <Link
+                to="/leaderboard"
+                className="group flex flex-col items-center lg:items-start cursor-pointer"
+                title={
+                  isRtl
+                    ? `${realStudentsCount || 1} طالب مسجل ونشط على المنصة`
+                    : `${realStudentsCount || 1} Real Active Learners on Skilliq`
+                }
+              >
+                <span className="text-xl sm:text-2xl lg:text-[24px] xl:text-[26px] font-extrabold text-foreground group-hover:text-primary transition-colors tracking-tight tabular-nums leading-none">
+                  {activeStudentsDisplay}
+                </span>
+                <span className="text-[11px] sm:text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors mt-1.5 whitespace-nowrap">
+                  {isRtl ? 'طالب نشط' : 'Active students'}
+                </span>
+              </Link>
 
-              {/* TOP HEADER: Category Bar & Course Navigation */}
-              <div className="flex items-center justify-between gap-2 pb-3 mb-3 border-b border-border/60">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                  </span>
-                  <span className="text-xs font-bold text-foreground truncate">
-                    {selectedCategory === 'All'
-                      ? (isMobile ? (activeCourse?.category || (realCategories[0] || 'Courses')) : getCategoryLabel(selectedCategory))
-                      : getCategoryLabel(selectedCategory)}
-                  </span>
-                  <span className="text-xs text-muted-foreground font-mono">
-                    ({categoryCourses.length})
-                  </span>
-                </div>
+              <div className="h-9 sm:h-10 w-px bg-border shrink-0" aria-hidden="true" />
 
-                {/* Prev / Next Course Navigation Arrows */}
-                <div className="flex items-center border border-border/60 rounded-lg overflow-hidden bg-muted/40 shrink-0">
-                  <button
-                    onClick={handlePrevCourse}
-                    title={t('prev_course', 'Previous course')}
-                    className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+              {/* Stat 2: Real Tutors & Video Lessons */}
+              <Link
+                to="/courses"
+                className="group flex flex-col items-center lg:items-start cursor-pointer"
+                title={
+                  isRtl
+                    ? `${realMetrics.tutorsCount} مدرب و ${realMetrics.totalLessons} درس فيديو في ${realMetrics.coursesCount} دورة`
+                    : `${realMetrics.tutorsCount} Educators & ${realMetrics.totalLessons} Video Lessons across ${realMetrics.coursesCount} Courses`
+                }
+              >
+                <span className="text-xl sm:text-2xl lg:text-[24px] xl:text-[26px] font-extrabold text-foreground group-hover:text-primary transition-colors tracking-tight tabular-nums leading-none">
+                  {tutorsLessonsDisplay}
+                </span>
+                <span className="text-[11px] sm:text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors mt-1.5 whitespace-nowrap">
+                  {isRtl
+                    ? `مدرب ودرس (${realMetrics.coursesCount} دورة)`
+                    : 'Tutors & Lessons'}
+                </span>
+              </Link>
+
+              <div className="h-9 sm:h-10 w-px bg-border shrink-0" aria-hidden="true" />
+
+              {/* Stat 3: Real Resources (Courses, Books, Projects & Materials) */}
+              <Link
+                to="/books"
+                className="group flex flex-col items-center lg:items-start cursor-pointer"
+                title={
+                  isRtl
+                    ? `${realMetrics.resourcesTotal} مصدر تعليمي (${realMetrics.coursesCount} دورة، ${realMetrics.booksCount} كتاب، و ${realMetrics.projectsCount} مشروع)`
+                    : `${realMetrics.resourcesTotal} Learning Resources (${realMetrics.coursesCount} Courses, ${realMetrics.booksCount} Books & ${realMetrics.projectsCount} Projects)`
+                }
+              >
+                <div className="h-[24px] xl:h-[26px] flex items-center gap-1.5 text-foreground group-hover:text-primary transition-colors">
+                  <span className="text-xl sm:text-2xl lg:text-[24px] xl:text-[26px] font-extrabold tracking-tight tabular-nums leading-none">
+                    {resourcesDisplay}
+                  </span>
+                  <svg
+                    className="w-7 h-5 sm:w-8 sm:h-5 group-hover:rotate-6 transition-transform duration-300"
+                    viewBox="0 0 44 26"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
                   >
-                    <ChevronLeft className="w-3.5 h-3.5 rtl:rotate-180" />
-                  </button>
-                  <span className="text-[10px] font-mono px-2 text-muted-foreground">
-                    {activeCourseIndex + 1}/{categoryCourses.length}
-                  </span>
-                  <button
-                    onClick={handleNextCourse}
-                    title={t('next_course', 'Next course')}
-                    className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />
-                  </button>
+                    <circle
+                      cx="15"
+                      cy="13"
+                      r="9.5"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                    />
+                    <circle
+                      cx="29"
+                      cy="13"
+                      r="9.5"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                    />
+                  </svg>
                 </div>
-              </div>
+                <span className="text-[11px] sm:text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors mt-1.5 whitespace-nowrap">
+                  {isRtl ? 'مصادر ومشاريع' : 'Resources'}
+                </span>
+              </Link>
+            </motion.div>
+          </motion.div>
 
-              {/* REAL CATEGORIES SELECTOR TABS */}
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-3 mb-3 border-b border-border/40">
-                {/* Desktop-only All Tracks tab */}
-                <button
-                  onClick={() => handleCategorySelect('All')}
-                  className={`hero-all-tracks-only hidden lg:inline-block px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all shrink-0 cursor-pointer border ${
-                    selectedCategory === 'All'
-                      ? 'bg-foreground text-background border-foreground shadow-xs'
-                      : 'bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
-                  }`}
-                >
-                  {getCategoryLabel('All')}
-                </button>
+          {/* RIGHT / END COLUMN: Bespoke 3-Card Collage with Modern Animations & Cutout Badges */}
+          <div className="lg:col-span-7 w-full max-w-[540px] sm:max-w-[600px] lg:max-w-none mx-auto">
+            <div className="relative w-full pt-4 pb-2 px-2 sm:px-6">
+              {/* Floating 4-Point Emerald Sparkle Star (Middle Start) */}
+              <motion.div
+                animate={{
+                  y: [0, -7, 0],
+                  rotate: [0, 12, 0],
+                  scale: [1, 1.12, 1],
+                }}
+                transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut' }}
+                className="absolute top-[42%] -start-1 sm:start-0 z-20 text-emerald-600/80 dark:text-emerald-400/80 pointer-events-none"
+                aria-hidden="true"
+              >
+                <svg className="w-6 h-6 sm:w-8 sm:h-8" viewBox="0 0 32 32" fill="currentColor">
+                  <path d="M16 0C16 10.5 21.5 16 32 16C21.5 16 16 21.5 16 32C16 21.5 10.5 16 0 16C10.5 16 16 10.5 16 0Z" />
+                </svg>
+              </motion.div>
 
-                {/* Real categories tabs - ALWAYS real categories only */}
-                {realCategories.map((cat) => {
-                  const isCatSelected = selectedCategory === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => handleCategorySelect(cat)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all shrink-0 cursor-pointer border ${
-                        isCatSelected
-                          ? 'bg-foreground text-background border-foreground shadow-xs'
-                          : 'bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border/50'
-                      }`}
+              {/* Floating Small Indigo Circle (Top End) */}
+              <motion.div
+                animate={{
+                  y: [0, 8, 0],
+                  scale: [1, 1.18, 1],
+                }}
+                transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut', delay: 0.6 }}
+                className="absolute top-3 sm:top-5 end-6 sm:end-10 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-indigo-400/90 dark:bg-indigo-400 z-20 pointer-events-none"
+                aria-hidden="true"
+              />
+
+              {/* Collage Main 2-Column Staggered Grid */}
+              <div className="grid grid-cols-12 gap-3.5 sm:gap-5 items-start">
+                {/* LEFT / START STACK (Top Sky-Blue Portrait + Bottom Wide Emerald Portrait) */}
+                <div className="col-span-7 flex flex-col gap-3.5 sm:gap-5">
+                  {/* Top-Start Card: Learner with Tablet & Cutout Arrow Badge */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 24, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.55, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+                    whileHover={{ y: -4 }}
+                    className="relative w-[88%] ms-auto"
+                  >
+                    <Link
+                      to="/courses"
+                      className="block aspect-square w-full rounded-[26px] sm:rounded-[36px] overflow-hidden bg-[#9ED4F3] dark:bg-sky-500/30 border border-border/40 shadow-sm hover:shadow-xl transition-shadow duration-300 group"
                     >
-                      {getCategoryLabel(cat)}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* ANIMATED COURSE CONTENT CONTAINER WITH DIRECTIONAL MOTION */}
-              <AnimatePresence mode="wait" custom={slideDirection}>
-                <motion.div
-                  key={`${activeCourse.id}-${selectedCategory}-${currentAppLang}`}
-                  custom={slideDirection}
-                  variants={slideVariants}
-                  initial="enter"
-                  animate="center"
-                  exit="exit"
-                >
-                  {/* SMART RECOMMENDATION HEADER */}
-                  <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>{t('recommended_for_you', 'Recommended for You')}</span>
-                      <span className="text-[10px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded-md border border-primary/20">
-                        {t('match_score', '98% Match')}
-                      </span>
-                    </div>
-
-                    <div className={`flex items-center gap-1 text-[11px] font-medium ${recommendationInfo.color}`}>
-                      <recommendationInfo.icon className="w-3.5 h-3.5" />
-                      <span>{recommendationInfo.text}</span>
-                    </div>
-                  </div>
-
-                  {/* ACTIVE COURSE HEADER: Title, Instructor & Focus Badge */}
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[11px] font-semibold text-primary">
-                          {getCategoryLabel(activeCourse.category || selectedCategory)}
-                        </span>
-                        <span className="text-border" aria-hidden="true">·</span>
-                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>{t('hero_badge_focus', 'Focus Mode: Active')}</span>
-                        </span>
-                      </div>
-                      <h3 className="font-bold text-sm sm:text-base text-foreground leading-snug line-clamp-1">
-                        {activeCourse.title}
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                        {t('by', 'By')} {activeCourse.instructor}
-                      </p>
-                    </div>
-
-                    {activeCourse.instructorAvatar && (
-                      <img 
-                        src={activeCourse.instructorAvatar} 
-                        alt={activeCourse.instructor}
-                        className="w-9 h-9 rounded-xl object-cover border border-border shadow-xs shrink-0"
+                      <img
+                        src={heroLearnerImg}
+                        alt={isRtl ? 'طالبة تتعلم عبر المنصة' : 'Student learning with tablet'}
                         referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
+                        className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500 ease-out"
                       />
-                    )}
-                  </div>
+                    </Link>
 
-                  {/* VIDEO PLAYER STAGE */}
-                  <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-zinc-950 border border-border/70 group/player mb-3">
-                    {isPlaying ? (
-                      <div className="w-full h-full relative">
-                        <iframe 
-                          src={`https://www.youtube.com/embed/${firstVideo.youtubeId}?autoplay=1&modestbranding=1&rel=0&iv_load_policy=3`}
-                          title={activeCourse.title}
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                          allowFullScreen
-                          className="w-full h-full border-0"
-                        />
-                        <button
-                          onClick={() => setIsPlaying(false)}
-                          className="absolute top-2 end-2 bg-black/80 hover:bg-black text-white px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 shadow-lg backdrop-blur-sm z-20 cursor-pointer"
+                    {/* Cutout Corner Circle Badge with Diagonal Arrow */}
+                    <motion.div
+                      animate={{ y: [0, -4, 0] }}
+                      transition={{ duration: 3.8, repeat: Infinity, ease: 'easeInOut' }}
+                      className="absolute -top-4 -end-4 sm:-top-6 sm:-end-6 z-20"
+                    >
+                      <Link
+                        to="/courses"
+                        aria-label={isRtl ? 'استكشف الدورات' : 'Explore Courses'}
+                        title={isRtl ? 'استكشف الدورات' : 'Explore Courses'}
+                        className="w-12 h-12 sm:w-16 sm:h-16 md:w-[72px] md:h-[72px] rounded-full bg-[#9ED4F3] hover:bg-[#82C6EC] dark:bg-sky-500 dark:hover:bg-sky-400 text-white ring-[8px] sm:ring-[12px] ring-background flex items-center justify-center transition-transform duration-200 hover:scale-105 cursor-pointer shadow-sm"
+                      >
+                        <svg
+                          className="w-5 h-5 sm:w-7 sm:h-7 rtl:-scale-x-100"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
                         >
-                          <X className="w-3.5 h-3.5" />
-                          <span>{t('hero_close_preview', 'Close Player')}</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="w-full h-full relative cursor-pointer" onClick={() => setIsPlaying(true)}>
-                        <img 
-                          src={activeCourse.thumbnail} 
-                          alt={activeCourse.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover/player:scale-105"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/30 flex items-center justify-center">
-                          <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg group-hover/player:scale-110 transition-all">
-                            <Play className="w-5 h-5 fill-current ms-0.5" />
-                          </div>
-                        </div>
+                          <path d="M7 7l10 10" />
+                          <path d="M17 8v9H8" />
+                        </svg>
+                      </Link>
+                    </motion.div>
+                  </motion.div>
 
-                        <div className="absolute bottom-2 start-2 end-2 flex items-center justify-between text-white text-[11px] font-medium bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-md">
-                          <span className="truncate max-w-[220px]">{firstVideo.title}</span>
-                          <span className="shrink-0 font-mono text-zinc-300">{firstVideo.duration}</span>
-                        </div>
-                      </div>
-                    )}
+                  {/* Bottom-Start Wide Card: Creator with Megaphone & Cutout 4-Rings Pill Badge */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 28, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.6, delay: 0.26, ease: [0.22, 1, 0.36, 1] }}
+                    whileHover={{ y: -4 }}
+                    className="relative w-full mt-1"
+                  >
+                    <Link
+                      to="/projects"
+                      className="block aspect-[16/11] w-full rounded-[26px] sm:rounded-[36px] overflow-hidden bg-[#8AB872] dark:bg-emerald-500/30 border border-border/40 shadow-sm hover:shadow-xl transition-shadow duration-300 group"
+                    >
+                      <img
+                        src={heroCreatorImg}
+                        alt={isRtl ? 'مشاريع عملية وتطبيقية' : 'Hands-on student projects'}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500 ease-out"
+                      />
+                    </Link>
+
+                    {/* Cutout Top-End Pill Badge with 4 Interlocking White Rings */}
+                    <motion.div
+                      animate={{ y: [0, -4, 0] }}
+                      transition={{ duration: 4.2, repeat: Infinity, ease: 'easeInOut', delay: 0.9 }}
+                      className="absolute -top-4 -end-8 sm:-top-6 sm:-end-12 z-20"
+                    >
+                      <Link
+                        to="/projects"
+                        aria-label={isRtl ? 'المشاريع العملية' : 'Real-World Projects'}
+                        title={isRtl ? 'المشاريع العملية' : 'Real-World Projects'}
+                        className="px-4 sm:px-6 py-2.5 sm:py-3.5 rounded-full bg-[#B8A4F8] hover:bg-[#a68ef5] dark:bg-indigo-500 dark:hover:bg-indigo-400 text-white ring-[8px] sm:ring-[12px] ring-background flex items-center justify-center transition-transform duration-200 hover:scale-105 cursor-pointer shadow-sm"
+                      >
+                        <svg
+                          className="w-12 h-5 sm:w-16 sm:h-6"
+                          viewBox="0 0 76 26"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                          aria-hidden="true"
+                        >
+                          <circle cx="14" cy="13" r="9.5" stroke="currentColor" strokeWidth="1.8" />
+                          <circle cx="30" cy="13" r="9.5" stroke="currentColor" strokeWidth="1.8" />
+                          <circle cx="46" cy="13" r="9.5" stroke="currentColor" strokeWidth="1.8" />
+                          <circle cx="62" cy="13" r="9.5" stroke="currentColor" strokeWidth="1.8" />
+                        </svg>
+                      </Link>
+                    </motion.div>
+                  </motion.div>
+                </div>
+
+                {/* RIGHT / END STACK (Staggered Lavender-Indigo Student Card + Bottom Geometric Accents) */}
+                <motion.div
+                  initial={{ opacity: 0, y: 30, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.6, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  className="col-span-5 flex flex-col justify-between h-full pt-10 sm:pt-16"
+                >
+                  <motion.div whileHover={{ y: -4 }}>
+                    <Link
+                      to="/paths"
+                      className="block aspect-[1/1.05] w-full rounded-[26px] sm:rounded-[36px] overflow-hidden bg-[#B8A4F8] dark:bg-indigo-500/35 border border-border/40 shadow-sm hover:shadow-xl transition-shadow duration-300 group"
+                    >
+                      <img
+                        src={heroStudentImg}
+                        alt={isRtl ? 'مسارات التعلم المنظمة' : 'Structured learning paths'}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500 ease-out"
+                      />
+                    </Link>
+                  </motion.div>
+
+                  {/* Bottom-End Sparkle Star & Sky Circle Accents */}
+                  <div
+                    className="relative h-24 sm:h-32 w-full pointer-events-none select-none"
+                    aria-hidden="true"
+                  >
+                    {/* 4-Point Emerald Sparkle Star */}
+                    <motion.div
+                      animate={{
+                        rotate: [0, -15, 0],
+                        scale: [1, 1.15, 1],
+                      }}
+                      transition={{ duration: 4.8, repeat: Infinity, ease: 'easeInOut', delay: 1.2 }}
+                      className="absolute top-5 sm:top-7 start-6 sm:start-10 text-emerald-600/80 dark:text-emerald-400/80"
+                    >
+                      <svg className="w-6 h-6 sm:w-8 sm:h-8" viewBox="0 0 32 32" fill="currentColor">
+                        <path d="M16 0C16 10.5 21.5 16 32 16C21.5 16 16 21.5 16 32C16 21.5 10.5 16 0 16C10.5 16 16 10.5 16 0Z" />
+                      </svg>
+                    </motion.div>
+
+                    {/* Soft Sky-Blue Circle */}
+                    <motion.div
+                      animate={{
+                        y: [0, -8, 0],
+                        scale: [1, 1.08, 1],
+                      }}
+                      transition={{ duration: 5.2, repeat: Infinity, ease: 'easeInOut', delay: 0.4 }}
+                      className="absolute bottom-2 sm:bottom-3 end-4 sm:end-8 w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-[#9ED4F3] dark:bg-sky-400/80"
+                    />
                   </div>
                 </motion.div>
-              </AnimatePresence>
-
-              {/* ALL COURSES IN THIS CATEGORY / TRACK SELECTOR STRIP */}
-              <div className="mb-3">
-                <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1.5">
-                  <div className="flex items-center gap-1.5 font-semibold text-foreground">
-                    <span>
-                      {selectedCategory === 'All'
-                        ? (isMobile ? `${activeCourse?.category || 'Curated'} Courses` : t('all_tracks_courses', 'All Curated Courses'))
-                        : t('courses_in_category', { count: categoryCourses.length })}
-                    </span>
-                    <span className="text-[10px] font-mono text-muted-foreground">({categoryCourses.length})</span>
-                  </div>
-                  <Link 
-                    to={selectedCategory === 'All' ? '/courses' : `/courses?category=${encodeURIComponent(selectedCategory)}`}
-                    className="text-primary hover:underline text-[11px] font-medium flex items-center gap-0.5"
-                  >
-                    <span>
-                      {selectedCategory === 'All'
-                        ? t('view_all_courses', 'Explore all courses')
-                        : t('view_all_in_category', { category: getCategoryLabel(selectedCategory) })}
-                    </span>
-                    <ArrowRight className="w-3 h-3 rtl:rotate-180" />
-                  </Link>
-                </div>
-
-                {/* SCROLLABLE FULL COURSE STRIP - SHOWS ALL COURSES IN CATEGORY */}
-                <div 
-                  ref={courseListScrollRef}
-                  className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 scroll-smooth"
-                >
-                  {categoryCourses.map((cItem, idx) => {
-                    const isCurrent = idx === activeCourseIndex;
-                    return (
-                      <button
-                        key={cItem.id || idx}
-                        id={`hero-course-item-${cItem.id}`}
-                        onClick={() => {
-                          setSlideDirection(idx > activeCourseIndex ? 1 : -1);
-                          setActiveCourseIndex(idx);
-                          setIsPlaying(false);
-                          setSwitchProgress(0);
-                        }}
-                        className={`flex items-center gap-2.5 p-2 rounded-xl border text-start transition-all shrink-0 cursor-pointer min-w-[180px] sm:min-w-[200px] max-w-[220px] ${
-                          isCurrent
-                            ? 'bg-primary/10 border-primary text-primary shadow-xs ring-2 ring-primary/25'
-                            : 'bg-muted/30 border-border/50 text-foreground/80 hover:bg-muted/70 hover:border-border'
-                        }`}
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-muted overflow-hidden shrink-0 relative">
-                          <img 
-                            src={cItem.thumbnail} 
-                            alt="" 
-                            className="w-full h-full object-cover" 
-                            referrerPolicy="no-referrer"
-                          />
-                          {isCurrent && (
-                            <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                              <Play className="w-3 h-3 text-primary fill-current" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[11px] font-semibold truncate leading-tight">
-                            {cItem.title}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground truncate mt-0.5">
-                            {cItem.instructor} · {cItem.videos?.length || 1} {t('videos', 'videos')}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
               </div>
-
-              {/* 1-CLICK LAUNCH BUTTON */}
-              <Link
-                to={`/course/${activeCourse.id}`}
-                className="w-full py-2.5 px-4 bg-primary text-primary-foreground hover:bg-primary/95 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
-              >
-                <span>{t('hero_start_course', 'Start This Course')}</span>
-                <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-              </Link>
-
-              {/* Subtle Live Active Proof Bar */}
-              <div className="mt-3 pt-2.5 border-t border-border/50 flex items-center justify-between text-[11px] text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                  </span>
-                  <span className="font-semibold text-foreground">3,400+ {t('track_live_learners', 'active learners')}</span>
-                </div>
-                <div className="flex items-center gap-1 text-primary font-medium">
-                  <Award className="w-3.5 h-3.5 text-amber-500" />
-                  <span>{t('track_verified_badge', 'Verified Credential')}</span>
-                </div>
-              </div>
-
-            </motion.div>
+            </div>
           </div>
-
         </div>
       </div>
-
     </section>
   );
 }

@@ -5,7 +5,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function filterByLanguage<T extends { language?: string; title?: string; instructor?: string; description?: string }>(items: T[], currentAppLanguage: 'en' | 'ar'): T[] {
+export function filterByLanguage<T extends Record<string, any>>(items: T[], currentAppLanguage: 'en' | 'ar'): T[] {
   const isArabicTarget = currentAppLanguage === 'ar';
   return items.filter(item => {
     const rawLang = (item.language || '').toLowerCase().trim();

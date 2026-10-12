@@ -2936,65 +2936,46 @@ Level: "${currentLevel}"`;
     return `${proto}://${host}`;
   };
 
-  app.get('/robots.txt', (req, res) => {
-    const origin = getBaseOrigin(req);
-    const robotsTxt = [
-      'User-agent: *',
-      'Allow: /',
-      'Allow: /courses',
-      'Allow: /masterclasses',
-      'Allow: /paths',
-      'Allow: /books',
-      'Allow: /creator',
-      'Allow: /course/',
-      'Allow: /path/',
-      'Disallow: /admin',
-      'Disallow: /api/',
-      '',
-      `Sitemap: ${origin}/sitemap.xml`,
-      ''
-    ].join('\n');
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.send(robotsTxt);
-  });
+  const createServerCourseSlug = (title?: string): string => {
+    if (!title) return '';
+    return String(title)
+      .toLowerCase()
+      .trim()
+      .replace(/[^\p{L}\p{N}\s-]/gu, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 75);
+  };
 
-  app.get('/sitemap.xml', (req, res) => {
-    const origin = getBaseOrigin(req);
-    const today = new Date().toISOString().split('T')[0];
+  const getServerCoursePath = (course: { id: string; title?: string }): string => {
+    const cleanId = String(course.id || '').trim();
+    const slug = createServerCourseSlug(course.title);
+    if (!slug || slug === cleanId.toLowerCase()) {
+      return `/course/${encodeURIComponent(cleanId)}`;
+    }
+    return `/course/${encodeURIComponent(`${slug}--${cleanId}`)}`;
+  };
 
-    const staticRoutes = [
-      { path: '/', priority: '1.0', changefreq: 'daily' },
-      { path: '/courses', priority: '0.9', changefreq: 'daily' },
-      { path: '/masterclasses', priority: '0.9', changefreq: 'daily' },
-      { path: '/paths', priority: '0.9', changefreq: 'weekly' },
-      { path: '/books', priority: '0.8', changefreq: 'weekly' },
-      { path: '/creator', priority: '0.8', changefreq: 'weekly' },
-      { path: '/leaderboard', priority: '0.7', changefreq: 'daily' },
-      { path: '/verify', priority: '0.7', changefreq: 'monthly' },
-      { path: '/about', priority: '0.7', changefreq: 'monthly' },
-      { path: '/contact', priority: '0.6', changefreq: 'monthly' },
-      { path: '/copyright', priority: '0.5', changefreq: 'yearly' }
-    ];
-
+  const loadSeoCatalog = () => {
     const courseMap = new Map<string, any>();
     const defaultCoursesList = [
-      { id: 'html-crash-course', title: 'HTML Crash Course For Absolute Beginners', description: 'Learn HTML5 from scratch in this comprehensive crash course.', youtubeId: 'UB1O30fR-EE' },
-      { id: 'react-basics', title: 'React JS Crash Course', description: 'Get started with React in this crash course.', youtubeId: 'w7ejDZ8SWv8' },
-      { id: 'css-grid', title: 'CSS Grid Layout Crash Course', description: 'Learn CSS Grid layout in this comprehensive crash course.', youtubeId: 'jV8B24rSN5o' },
-      { id: 'javascript-basics', title: 'JavaScript Crash Course For Beginners', description: 'Learn JavaScript from scratch in this crash course.', youtubeId: 'hdI2bqOjy3c' },
-      { id: 'network-basics', title: 'Networking Fundamentals', description: 'Learn the basics of computer networking, IP addresses, and OSI model.', youtubeId: 'qiQR5rTSshw' },
-      { id: 'comptia-a-plus', title: 'CompTIA A+ Certification Prep', description: 'Comprehensive guide to passing the CompTIA A+ certification.', youtubeId: 'qiQR5rTSshw' },
-      { id: 'python-for-security', title: 'Python for Cyber Security', description: 'Learn how to use Python to automate security tasks and build tools.', youtubeId: 'qiQR5rTSshw' },
-      { id: 'ceh-prep', title: 'Certified Ethical Hacker (CEH) Prep', description: 'Prepare for the CEH certification with this comprehensive playlist.', youtubeId: 'qiQR5rTSshw' },
-      { id: 'full-react-course-2024', title: "React Course - Beginner's Tutorial for React", description: 'A full 12+ hour React course covering modern web applications.', youtubeId: 'bMknfKXIFA8' },
-      { id: 'cyber-security-full-course', title: 'Cyber Security Full Course for Beginners', description: 'Learn Cyber Security in 12 Hours.', youtubeId: 'U_P23SqJaDc' },
-      { id: 'ipkxu', title: 'Mastering WordPress', description: 'كورس احتراف ووردبريس الشامل باللغة العربية.', youtubeId: 'ctEAYHFcbHk' },
-      { id: 'l02pbl', title: 'Flutter & Dart Full Course', description: 'دورة كاملة وشاملة في فلاتر ودارت لبناء تطبيقات الموبايل.', youtubeId: '6bSP4vazmyw' },
-      { id: '312ar', title: 'Media Buyer & Digital Ads', description: 'كورس احتراف الميديا باينج والإعلانات الممولة.', youtubeId: 'ZeLtBaN86G8' },
-      { id: '4ptzav', title: 'N8N & AI Automation', description: 'دورة بناء أنظمة الذكاء الاصطناعي والأتمتة الذكية بدون كود.', youtubeId: 'EwfCLtjscTE' },
-      { id: 'm1pdcj', title: 'Claude Design & UI System', description: 'دورة تصميم واجهات المستخدم والأنظمة المرئية بالذكاء الاصطناعي.', youtubeId: '8tT-1i_EixQ' },
-      { id: 'glpr5t', title: 'SketchUp Pro 3D Design', description: 'دورة النمذجة ثلاثية الأبعاد والتصميم المعماري الاحترافي ببرنامج سكتش آب.', youtubeId: 'oaye0GKPJIg' }
+      { id: 'html-crash-course', title: 'HTML Crash Course For Absolute Beginners', description: 'Learn HTML5 from scratch in this comprehensive crash course.', instructor: 'Traversy Media', youtubeId: 'UB1O30fR-EE' },
+      { id: 'react-basics', title: 'React JS Crash Course', description: 'Get started with React in this crash course.', instructor: 'Traversy Media', youtubeId: 'w7ejDZ8SWv8' },
+      { id: 'css-grid', title: 'CSS Grid Layout Crash Course', description: 'Learn CSS Grid layout in this comprehensive crash course.', instructor: 'Traversy Media', youtubeId: 'jV8B24rSN5o' },
+      { id: 'javascript-basics', title: 'JavaScript Crash Course For Beginners', description: 'Learn JavaScript from scratch in this crash course.', instructor: 'Traversy Media', youtubeId: 'hdI2bqOjy3c' },
+      { id: 'network-basics', title: 'Networking Fundamentals', description: 'Learn the basics of computer networking, IP addresses, and OSI model.', instructor: 'NetworkChuck', youtubeId: 'qiQR5rTSshw' },
+      { id: 'comptia-a-plus', title: 'CompTIA A+ Certification Prep', description: 'Comprehensive guide to passing the CompTIA A+ certification.', instructor: 'Professor Messer', youtubeId: 'qiQR5rTSshw' },
+      { id: 'python-for-security', title: 'Python for Cyber Security', description: 'Learn how to use Python to automate security tasks and build tools.', instructor: 'The Cyber Mentor', youtubeId: 'qiQR5rTSshw' },
+      { id: 'ceh-prep', title: 'Certified Ethical Hacker (CEH) Prep', description: 'Prepare for the CEH certification with this comprehensive playlist.', instructor: 'Edureka', youtubeId: 'qiQR5rTSshw' },
+      { id: 'full-react-course-2024', title: "React Course - Beginner's Tutorial for React", description: 'A full 12+ hour React course covering modern web applications.', instructor: 'freeCodeCamp', youtubeId: 'bMknfKXIFA8' },
+      { id: 'cyber-security-full-course', title: 'Cyber Security Full Course for Beginners', description: 'Learn Cyber Security in 12 Hours.', instructor: 'Simplilearn', youtubeId: 'U_P23SqJaDc' },
+      { id: 'ipkxu', title: 'Mastering WordPress', description: 'كورس احتراف ووردبريس الشامل باللغة العربية.', instructor: 'Elzero Web School', youtubeId: 'ctEAYHFcbHk' },
+      { id: 'l02pbl', title: 'Flutter & Dart Full Course', description: 'دورة كاملة وشاملة في فلاتر ودارت لبناء تطبيقات الموبايل.', instructor: 'Wael Abo Hamza', youtubeId: '6bSP4vazmyw' },
+      { id: '312ar', title: 'Media Buyer & Digital Ads', description: 'كورس احتراف الميديا باينج والإعلانات الممولة.', instructor: 'Bassem Magdy', youtubeId: 'ZeLtBaN86G8' },
+      { id: '4ptzav', title: 'N8N & AI Automation', description: 'دورة بناء أنظمة الذكاء الاصطناعي والأتمتة الذكية بدون كود.', instructor: 'AI Automation', youtubeId: 'EwfCLtjscTE' },
+      { id: 'm1pdcj', title: 'Claude Design & UI System', description: 'دورة تصميم واجهات المستخدم والأنظمة المرئية بالذكاء الاصطناعي.', instructor: 'Design Mastery', youtubeId: '8tT-1i_EixQ' },
+      { id: 'glpr5t', title: 'SketchUp Pro 3D Design', description: 'دورة النمذجة ثلاثية الأبعاد والتصميم المعماري الاحترافي ببرنامج سكتش آب.', instructor: '3D Architecture', youtubeId: 'oaye0GKPJIg' }
     ];
 
     for (const dc of defaultCoursesList) {
@@ -3024,6 +3005,7 @@ Level: "${currentLevel}"`;
                 id: String(c.id),
                 title: c.title || 'Skilliq Course',
                 description: c.description || c.title || 'Free structured course on Skilliq',
+                instructor: c.instructor || 'Skilliq Educator',
                 thumbnail: c.thumbnail || (firstVid?.youtubeId ? `https://img.youtube.com/vi/${firstVid.youtubeId}/maxresdefault.jpg` : ''),
                 youtubeId: firstVid?.youtubeId || ''
               });
@@ -3042,6 +3024,54 @@ Level: "${currentLevel}"`;
     } catch (e) {
       console.warn('Sitemap backup read warning:', e);
     }
+
+    return { courseMap, pathIds, creators };
+  };
+
+  app.get('/robots.txt', (req, res) => {
+    const origin = getBaseOrigin(req);
+    const robotsTxt = [
+      'User-agent: *',
+      'Allow: /',
+      'Allow: /courses',
+      'Allow: /projects',
+      'Allow: /masterclasses',
+      'Allow: /paths',
+      'Allow: /books',
+      'Allow: /creator',
+      'Allow: /course/',
+      'Allow: /path/',
+      'Disallow: /admin',
+      'Disallow: /api/',
+      '',
+      `Sitemap: ${origin}/sitemap.xml`,
+      ''
+    ].join('\n');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(robotsTxt);
+  });
+
+  app.get('/sitemap.xml', (req, res) => {
+    const origin = getBaseOrigin(req);
+    const today = new Date().toISOString().split('T')[0];
+
+    const staticRoutes = [
+      { path: '/', priority: '1.0', changefreq: 'daily' },
+      { path: '/courses', priority: '0.9', changefreq: 'daily' },
+      { path: '/projects', priority: '0.9', changefreq: 'daily' },
+      { path: '/masterclasses', priority: '0.9', changefreq: 'daily' },
+      { path: '/paths', priority: '0.9', changefreq: 'weekly' },
+      { path: '/books', priority: '0.8', changefreq: 'weekly' },
+      { path: '/creator', priority: '0.8', changefreq: 'weekly' },
+      { path: '/leaderboard', priority: '0.7', changefreq: 'daily' },
+      { path: '/verify', priority: '0.7', changefreq: 'monthly' },
+      { path: '/about', priority: '0.7', changefreq: 'monthly' },
+      { path: '/contact', priority: '0.6', changefreq: 'monthly' },
+      { path: '/copyright', priority: '0.5', changefreq: 'yearly' }
+    ];
+
+    const { courseMap, pathIds, creators } = loadSeoCatalog();
 
     const escapeXml = (str: string) =>
       String(str || '')
@@ -3071,7 +3101,7 @@ Level: "${currentLevel}"`;
   </url>`);
     }
 
-    for (const [cid, cInfo] of courseMap.entries()) {
+    for (const [, cInfo] of courseMap.entries()) {
       const cleanYtId = String(cInfo.youtubeId || '').trim();
       const thumbUrl = cInfo.thumbnail || (cleanYtId ? `https://img.youtube.com/vi/${cleanYtId}/maxresdefault.jpg` : `${origin}/images/logo_dark.png`);
       const videoBlock = cleanYtId && cleanYtId.length === 11
@@ -3083,11 +3113,13 @@ Level: "${currentLevel}"`;
     </video:video>`
         : '';
 
+      const canonicalCoursePath = getServerCoursePath(cInfo);
+
       urlsXml.push(`  <url>
-    <loc>${escapeXml(`${origin}/course/${encodeURIComponent(cid)}`)}</loc>
+    <loc>${escapeXml(`${origin}${canonicalCoursePath}`)}</loc>
     <lastmod>${today}</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.80</priority>${videoBlock}
+    <priority>0.85</priority>${videoBlock}
   </url>`);
     }
 

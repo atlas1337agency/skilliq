@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { courses as defaultCourses, learningPaths as defaultPaths, categories as defaultCategories, defaultBanners, defaultBooks, Course, LearningPath, Category, AppNotification, AdBannerData, Book } from '../data/courses';
-import { fetchFirestoreContent, addOrUpdateCourse } from '../lib/firestoreContent';
+import { fetchFirestoreContent, addOrUpdateCourse, LEGACY_SEED_PROJECT_IDS } from '../lib/firestoreContent';
 import { syncAllCoursesLiveBackground, applyCachedStatsToCourses } from '../lib/youtube';
 import { PublicProfile, awardXPAndBadges, initializeOrUpdateProfile } from '../lib/gamification';
 import { recordPlatformMovement } from '../lib/telemetry';
@@ -15,6 +15,7 @@ interface Progress {
   isCompleted: boolean;
   completionDate?: string;
   videoTimestamps?: Record<string, number>;
+  updatedAt?: string;
 }
 
 export type FavoriteItemType = 'playlist' | 'masterclass' | 'path' | 'book';
@@ -114,7 +115,17 @@ export const useStore = create<StoreState>()(
           const approvedBooks = finalBooks.filter(b => b.isApproved !== false);
 
           if (courses.length > 0 || learningPaths.length > 0) {
-            const hydratedCourses = applyCachedStatsToCourses(courses);
+            let deletedCourseIds: string[] = [];
+            try {
+              const rawDeletedCourses = localStorage.getItem('deleted_course_ids');
+              if (rawDeletedCourses) deletedCourseIds = JSON.parse(rawDeletedCourses);
+            } catch (e) {}
+
+            const cleanedCourses = courses.filter(
+              c => !deletedCourseIds.includes(c.id) && !LEGACY_SEED_PROJECT_IDS.has(c.id)
+            );
+
+            const hydratedCourses = applyCachedStatsToCourses(cleanedCourses);
             const approvedCourses = hydratedCourses.filter(c => c.isApproved !== false);
             set({ 
               allCourses: hydratedCourses, 
@@ -294,6 +305,7 @@ export const useStore = create<StoreState>()(
           ...courseProgress,
           completedVideoIds: newCompleted,
           currentVideoId: nextVideoId || courseProgress.currentVideoId,
+          updatedAt: new Date().toISOString(),
         };
 
         set({
@@ -302,6 +314,20 @@ export const useStore = create<StoreState>()(
             [courseId]: newProgress,
           },
         });
+
+        // Log daily completed lesson
+        try {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const key = `skilliq_lessons_done_${todayStr}`;
+          const existing = JSON.parse(localStorage.getItem(key) || '[]');
+          if (!existing.includes(videoId)) {
+            existing.push(videoId);
+            localStorage.setItem(key, JSON.stringify(existing));
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('skilliq-progress-updated'));
+          }
+        } catch {}
 
         if (isNewCompletion) {
           const matchedCourse = state.allCourses.find((c) => c.id === courseId);
@@ -346,6 +372,7 @@ export const useStore = create<StoreState>()(
         const newProgress = {
           ...courseProgress,
           currentVideoId: videoId,
+          updatedAt: new Date().toISOString(),
         };
 
         set({
@@ -354,6 +381,10 @@ export const useStore = create<StoreState>()(
             [courseId]: newProgress,
           },
         });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('skilliq-progress-updated'));
+        }
 
         if (state.user) {
           try {
@@ -376,6 +407,8 @@ export const useStore = create<StoreState>()(
 
         const newProgress = {
           ...courseProgress,
+          currentVideoId: videoId,
+          updatedAt: new Date().toISOString(),
           videoTimestamps: {
             ...(courseProgress.videoTimestamps || {}),
             [videoId]: Math.floor(timestamp),
@@ -388,6 +421,10 @@ export const useStore = create<StoreState>()(
             [courseId]: newProgress,
           },
         });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('skilliq-progress-updated'));
+        }
 
         if (state.user) {
           try {
@@ -407,6 +444,7 @@ export const useStore = create<StoreState>()(
           ...courseProgress,
           isCompleted: true,
           completionDate: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         };
 
         set({
@@ -476,6 +514,12 @@ export const useStore = create<StoreState>()(
         }
         if (Array.isArray(merged.allBooks)) {
           merged.allBooks = merged.allBooks.filter((b: any) => b && !legacySeedBookIds.has(b.id));
+        }
+        if (Array.isArray(merged.courses)) {
+          merged.courses = merged.courses.filter((c: any) => c && !LEGACY_SEED_PROJECT_IDS.has(c.id));
+        }
+        if (Array.isArray(merged.allCourses)) {
+          merged.allCourses = merged.allCourses.filter((c: any) => c && !LEGACY_SEED_PROJECT_IDS.has(c.id));
         }
         return merged;
       },

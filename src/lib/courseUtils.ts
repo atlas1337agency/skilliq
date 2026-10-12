@@ -219,22 +219,15 @@ export function getCourseTimestamp(c: Course): number {
 }
 
 /**
- * Checks if a course is recently added (within the last 30 days) or among the top newest additions.
+ * Checks if a course is among the top 3 newest courses in the provided list.
  */
 export function isCourseNew(c: Course, allCourses?: Course[]): boolean {
-  const ts = getCourseTimestamp(c);
-  const now = Date.now();
-  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-
-  // Real timestamp created in last 30 days
-  if (ts && (now - ts) < thirtyDaysMs && ts > 1735000000000) {
-    return true;
-  }
-
-  // If allCourses provided, check if it's in the top 3 newest courses
   if (allCourses && allCourses.length > 0) {
     const topNewestIds = [...allCourses]
-      .sort((a, b) => getCourseTimestamp(b) - getCourseTimestamp(a))
+      .sort((a, b) => {
+        const diff = getCourseTimestamp(b) - getCourseTimestamp(a);
+        return diff !== 0 ? diff : b.id.localeCompare(a.id);
+      })
       .slice(0, 3)
       .map(item => item.id);
 
@@ -601,3 +594,75 @@ export function buildDeduplicatedCategories(courses: Course[]): CategorySummary[
     ...sortedCategories
   ];
 }
+
+/**
+ * Generates an SEO-friendly URL slug from a course title (supports English & Arabic characters).
+ */
+export function createCourseSlug(title?: string): string {
+  if (!title) return '';
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 75);
+}
+
+/**
+ * Builds the canonical, unique path for any course/project/masterclass.
+ * Combines a human-readable SEO slug with the unique ID so links are descriptive and collision-free.
+ */
+export function getCoursePath(course: { id: string; title?: string }): string {
+  if (!course?.id) return '/courses';
+  const cleanId = String(course.id).trim();
+  const slug = createCourseSlug(course.title);
+  if (!slug || slug === cleanId.toLowerCase()) {
+    return `/course/${encodeURIComponent(cleanId)}`;
+  }
+  return `/course/${encodeURIComponent(`${slug}--${cleanId}`)}`;
+}
+
+/**
+ * Returns the full shareable URL for a course.
+ */
+export function getCourseShareUrl(course: { id: string; title?: string }): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://skilliq1337school.vercel.app';
+  return `${origin}${getCoursePath(course)}`;
+}
+
+/**
+ * Resolves a course from a URL route parameter (:courseId), supporting:
+ * 1. Exact course.id match (backward-compatible)
+ * 2. SEO slug--id format (e.g., "react-crash-course--react-basics")
+ * 3. Pure title slug match
+ */
+export function resolveCourseFromParam(courses: Course[], param?: string): Course | undefined {
+  if (!param || !Array.isArray(courses)) return undefined;
+  const decoded = decodeURIComponent(param).trim();
+
+  // 1. Direct ID match
+  const direct = courses.find(c => c.id === decoded);
+  if (direct) return direct;
+
+  // 2. Slug--ID match
+  if (decoded.includes('--')) {
+    const parts = decoded.split('--');
+    const extractedId = parts[parts.length - 1]?.trim();
+    if (extractedId) {
+      const byExtractedId = courses.find(c => c.id === extractedId);
+      if (byExtractedId) return byExtractedId;
+    }
+  }
+
+  // 3. Slug match by title
+  const normalizedTarget = decoded.toLowerCase();
+  return courses.find(
+    c =>
+      c.id.toLowerCase() === normalizedTarget ||
+      createCourseSlug(c.title) === normalizedTarget ||
+      `${createCourseSlug(c.title)}--${c.id.toLowerCase()}` === normalizedTarget
+  );
+}
+

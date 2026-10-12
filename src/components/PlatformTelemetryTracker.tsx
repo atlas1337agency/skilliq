@@ -131,70 +131,74 @@ export function PlatformTelemetryTracker() {
     }
   }, []);
 
-  // 2. Track every real route navigation & page movement + fire GA4 page_view
+  // 2. Track every real route navigation & page movement + fire GA4 page_view (deferred off critical render path)
   useEffect(() => {
     const pathname = location.pathname;
     if (lastLoggedPathRef.current === pathname) return;
     lastLoggedPathRef.current = pathname;
 
-    const pageLabel = resolvePageLabel(pathname, allCourses, allBooks, learningPaths);
-    const stats = getLocalTelemetryStats();
-    stats.pagesVisitedCount = (stats.pagesVisitedCount || 0) + 1;
+    const timer = setTimeout(() => {
+      const pageLabel = resolvePageLabel(pathname, allCourses, allBooks, learningPaths);
+      const stats = getLocalTelemetryStats();
+      stats.pagesVisitedCount = (stats.pagesVisitedCount || 0) + 1;
 
-    const newTrailItem = {
-      path: pathname,
-      label: pageLabel,
-      timestamp: Date.now(),
-    };
+      const newTrailItem = {
+        path: pathname,
+        label: pageLabel,
+        timestamp: Date.now(),
+      };
 
-    const existingTrail = Array.isArray(stats.recentTrail) ? stats.recentTrail : [];
-    if (existingTrail.length === 0 || existingTrail[0].path !== pathname) {
-      stats.recentTrail = [newTrailItem, ...existingTrail].slice(0, 15);
-    }
+      const existingTrail = Array.isArray(stats.recentTrail) ? stats.recentTrail : [];
+      if (existingTrail.length === 0 || existingTrail[0].path !== pathname) {
+        stats.recentTrail = [newTrailItem, ...existingTrail].slice(0, 15);
+      }
 
-    saveLocalTelemetryStats(stats);
-    buildAndSyncPresence(pathname);
+      saveLocalTelemetryStats(stats);
+      buildAndSyncPresence(pathname);
 
-    // Send real page_view to Google Analytics 4 if gtag is active
-    if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
-      window.gtag('event', 'page_view', {
-        page_path: pathname,
-        page_title: pageLabel,
-        page_location: window.location.href,
+      // Send real page_view to Google Analytics 4 if gtag is active
+      if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
+        window.gtag('event', 'page_view', {
+          page_path: pathname,
+          page_title: pageLabel,
+          page_location: window.location.href,
+        });
+      }
+
+      const isCourse = pathname.startsWith('/course/');
+      recordPlatformMovement({
+        uid: user?.uid || null,
+        userName: user?.displayName || (user?.email ? user.email.split('@')[0] : 'Guest Visitor'),
+        userEmail: user?.email || '',
+        userAvatar: user?.photoURL || '',
+        actionType: isCourse ? 'course_view' : 'page_view',
+        path: pathname,
+        pageTitle: pageLabel,
+        detail: isCourse
+          ? `Opened course player: ${pageLabel.replace('Watching Course: ', '')}`
+          : `Navigated to ${pageLabel} (${pathname})`,
       });
-    }
+    }, 300);
 
-    const isCourse = pathname.startsWith('/course/');
-    recordPlatformMovement({
-      uid: user?.uid || null,
-      userName: user?.displayName || (user?.email ? user.email.split('@')[0] : 'Guest Visitor'),
-      userEmail: user?.email || '',
-      userAvatar: user?.photoURL || '',
-      actionType: isCourse ? 'course_view' : 'page_view',
-      path: pathname,
-      pageTitle: pageLabel,
-      detail: isCourse
-        ? `Opened course player: ${pageLabel.replace('Watching Course: ', '')}`
-        : `Navigated to ${pageLabel} (${pathname})`,
-    });
+    return () => clearTimeout(timer);
   }, [location.pathname, user?.uid, allCourses.length]);
 
-  // 3. Active 1-second timer (only counts time when browser tab is visible) + 15s live heartbeat
+  // 3. Active 5-second timer (only counts time when browser tab is visible) + 15s live heartbeat
   useEffect(() => {
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
       }
 
-      sessionSecondsRef.current += 1;
+      sessionSecondsRef.current += 5;
       const stats = getLocalTelemetryStats();
-      stats.totalSecondsSpent = (stats.totalSecondsSpent || 0) + 1;
+      stats.totalSecondsSpent = (stats.totalSecondsSpent || 0) + 5;
       saveLocalTelemetryStats(stats);
 
       if (Date.now() - lastSyncTimeRef.current >= 15000) {
         buildAndSyncPresence();
       }
-    }, 1000);
+    }, 5000);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {

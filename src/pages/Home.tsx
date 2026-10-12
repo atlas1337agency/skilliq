@@ -15,6 +15,7 @@ import { FinalCTASection } from '../components/FinalCTASection';
 import { PopularCoursesSection } from '../components/PopularCoursesSection';
 import { OurNetworkSection } from '../components/OurNetworkSection';
 import { PopularMasterclassesSection } from '../components/PopularMasterclassesSection';
+import { PopularProjectsSection } from '../components/PopularProjectsSection';
 
 const iconMap: Record<string, any> = {
   Code,
@@ -525,12 +526,8 @@ export function Home() {
                   .filter((c): c is any => Boolean(c));
 
                 return (
-                  <motion.div
+                  <div
                     key={path.id}
-                    initial={{ opacity: 0, y: 15 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.3, delay: index * 0.1 }}
                     className={`group relative bg-card border border-border/80 rounded-3xl p-6 sm:p-7 flex flex-col justify-between hover:shadow-xl transition-all duration-200 hover:-translate-y-1 ${style.border} overflow-hidden text-start`}
                   >
                     {/* Top ambient card glow */}
@@ -606,7 +603,7 @@ export function Home() {
                         <ArrowRight className="w-4 h-4 rtl:rotate-180 group-hover/btn:translate-x-1 rtl:group-hover/btn:-translate-x-1 transition-transform" />
                       </Link>
                     </div>
-                  </motion.div>
+                  </div>
                 );
               })}
             </div>
@@ -624,6 +621,7 @@ export function Home() {
       </div>
       {/* SECTIONS BEFORE FOOTER */}
       <ExploreCategoriesSection />
+      <PopularProjectsSection />
       <WhySkilliqSection />
       <BooksSection />
       <HowItWorksSection />

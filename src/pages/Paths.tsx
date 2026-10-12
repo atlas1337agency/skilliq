@@ -323,11 +323,8 @@ export function Paths() {
             .filter((c): c is any => Boolean(c));
 
           return (
-            <motion.div
+            <div
               key={path.id}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25, delay: index * 0.05 }}
               className={`group relative bg-card border border-border/80 rounded-3xl p-6 sm:p-7 flex flex-col justify-between hover:shadow-xl transition-all duration-200 hover:-translate-y-1 ${style.border} overflow-hidden text-start`}
             >
               {/* Top ambient card glow */}
@@ -416,7 +413,7 @@ export function Paths() {
                 </Link>
               </div>
 
-            </motion.div>
+            </div>
           );
         })}
 

@@ -51,7 +51,7 @@ import { cn } from '../lib/utils';
 interface PathGraphicRoadmapProps {
   path: LearningPath;
   courses: Course[];
-  progress?: Record<string, Record<string, boolean>>;
+  progress?: Record<string, any>;
   language?: 'en' | 'ar';
   isPreview?: boolean;
 }

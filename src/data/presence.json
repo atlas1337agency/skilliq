@@ -1,0 +1,192 @@
+[
+  {
+    "id": "EWT3icjqSnVtHufyajJDbXcY8wc2",
+    "uid": "EWT3icjqSnVtHufyajJDbXcY8wc2",
+    "isGuest": false,
+    "displayName": "ATLAS 1337 Agency",
+    "email": "atlas1337agency@gmail.com",
+    "photoURL": "https://lh3.googleusercontent.com/a/ACg8ocJEnliYIwNEMS0-Jx9me2vsT8JXKUkHAKOKC9NaDNrEpvSiZsY=s96-c",
+    "currentPath": "/admin",
+    "currentPageLabel": "Admin Command Center",
+    "deviceType": "Tablet",
+    "browser": "Chrome",
+    "totalSecondsSpent": 8217,
+    "sessionSecondsSpent": 512,
+    "visitCount": 3,
+    "pagesVisitedCount": 46,
+    "firstVisitAt": 1791403815947,
+    "lastSeenAt": 1791725493018,
+    "recentTrail": [
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791725034258
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791724922101
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791724364046
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791724315090
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791723489166
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791667108692
+      },
+      {
+        "path": "/courses",
+        "label": "Browsing Courses Catalog",
+        "timestamp": 1791498328128
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791497804931
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791495735768
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791410939446
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791410919864
+      },
+      {
+        "path": "/leaderboard",
+        "label": "Student Leaderboard",
+        "timestamp": 1791410910876
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791410892926
+      },
+      {
+        "path": "/leaderboard",
+        "label": "Student Leaderboard",
+        "timestamp": 1791410887479
+      },
+      {
+        "path": "/dashboard",
+        "label": "Student Profile & Dashboard",
+        "timestamp": 1791410883124
+      }
+    ]
+  },
+  {
+    "id": "guest_1791403815947_bmq9y5",
+    "uid": null,
+    "isGuest": true,
+    "displayName": "Guest Visitor",
+    "email": "",
+    "photoURL": "",
+    "currentPath": "/",
+    "currentPageLabel": "Home Page",
+    "deviceType": "Tablet",
+    "browser": "Chrome",
+    "totalSecondsSpent": 7704,
+    "sessionSecondsSpent": 0,
+    "visitCount": 3,
+    "pagesVisitedCount": 45,
+    "firstVisitAt": 1791403815947,
+    "lastSeenAt": 1791724922101,
+    "recentTrail": [
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791724922101
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791724364046
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791724315090
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791723489166
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791667108692
+      },
+      {
+        "path": "/courses",
+        "label": "Browsing Courses Catalog",
+        "timestamp": 1791498328128
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791497804931
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791495735768
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791410939446
+      },
+      {
+        "path": "/admin",
+        "label": "Admin Command Center",
+        "timestamp": 1791410919864
+      },
+      {
+        "path": "/leaderboard",
+        "label": "Student Leaderboard",
+        "timestamp": 1791410910876
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791410892926
+      },
+      {
+        "path": "/leaderboard",
+        "label": "Student Leaderboard",
+        "timestamp": 1791410887479
+      },
+      {
+        "path": "/dashboard",
+        "label": "Student Profile & Dashboard",
+        "timestamp": 1791410883124
+      },
+      {
+        "path": "/",
+        "label": "Home Page",
+        "timestamp": 1791410865002
+      }
+    ]
+  }
+]

@@ -27,6 +27,7 @@ import { cn, filterByLanguage } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ScrollingText } from '../components/ScrollingText';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { ShareCourseButton } from '../components/ShareCourseButton';
 import { SEO } from '../components/SEO';
 import { formatCompactNumber } from '../lib/youtube';
 import { 
@@ -36,7 +37,8 @@ import {
   getCourseTimestamp, 
   isCourseNew,
   isProjectCourse,
-  normalizeSubCategory
+  normalizeSubCategory,
+  getCoursePath
 } from '../lib/courseUtils';
 
 type LengthFilter = 'all' | 'short' | 'medium' | 'long';
@@ -95,8 +97,7 @@ export function Courses() {
     } else {
       setSelectedCategory("All");
     }
-    // Scroll smoothly to top on searchParams change
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }, [searchParams]);
 
   // Base playlists (exclude single-video masterclasses and real-world project builds; hide playlists inside a Path for non-admin users)
@@ -239,13 +240,27 @@ export function Courses() {
           { name: 'Home', url: '/' },
           { name: 'Courses', url: '/courses' }
         ]}
-        schema={{
-          '@context': 'https://schema.org',
-          '@type': 'CollectionPage',
-          name: 'Skilliq Free Online Courses Catalog',
-          description: 'Curated sequential playlists organized from beginner to advanced in software engineering, cybersecurity, AI, and design.',
-          numberOfItems: basePlaylists.length
-        }}
+        schema={[
+          {
+            '@context': 'https://schema.org',
+            '@type': 'CollectionPage',
+            name: 'Skilliq Free Online Courses Catalog',
+            description: 'Curated sequential playlists organized from beginner to advanced in software engineering, cybersecurity, AI, and design.',
+            numberOfItems: basePlaylists.length
+          },
+          {
+            '@context': 'https://schema.org',
+            '@type': 'ItemList',
+            name: 'Skilliq Courses Catalog',
+            numberOfItems: basePlaylists.length,
+            itemListElement: basePlaylists.slice(0, 50).map((c, idx) => ({
+              '@type': 'ListItem',
+              position: idx + 1,
+              name: c.title,
+              url: `${typeof window !== 'undefined' ? window.location.origin : 'https://skilliq1337school.vercel.app'}${getCoursePath(c)}`
+            }))
+          }
+        ]}
       />
       {/* HERO BANNER */}
       <div className="relative mb-8 sm:mb-12 overflow-hidden rounded-3xl p-6 sm:p-10 md:p-12 bg-gradient-to-br from-card via-card/90 to-primary/5 border border-border shadow-sm">
@@ -751,17 +766,15 @@ export function Courses() {
           ) : (
             /* Cards Grid */
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 sm:gap-6 mb-12">
-              {currentItems.map((course, index) => (
-                <motion.div
+              {currentItems.map((course) => (
+                <div
                   key={course.id}
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, delay: index * 0.03 }}
                   className="group flex flex-col bg-card rounded-3xl border border-border/80 overflow-hidden hover:shadow-xl transition-all duration-200 hover:-translate-y-1 text-start"
                 >
                 {/* 16:9 Thumbnail Header */}
                 <div className="relative aspect-video overflow-hidden bg-muted">
-                  <div className="absolute bottom-3 end-3 z-20">
+                  <div className="absolute bottom-3 end-3 z-20 flex items-center gap-1.5">
+                    <ShareCourseButton course={course} size="sm" />
                     <FavoriteButton itemId={course.id} itemType="playlist" size="sm" />
                   </div>
 
@@ -784,14 +797,18 @@ export function Courses() {
                     </div>
                   )}
 
-                  <div className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  <Link
+                    to={getCoursePath(course)}
+                    aria-label={course.title}
+                    className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 z-10"
+                  >
                     <div className="w-14 h-14 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-xl scale-90 group-hover:scale-100 transition-transform">
                       <PlayCircle className="w-8 h-8 ps-0.5 text-white" />
                     </div>
-                  </div>
+                  </Link>
 
                   {/* Category & Status Badges */}
-                  <div className="absolute top-3 start-3 flex flex-wrap gap-1.5 z-10 max-w-[82%]">
+                  <div className="absolute top-3 start-3 flex flex-wrap gap-1.5 z-10 max-w-[82%] pointer-events-none">
                     {isAdmin && (() => {
                       const assignedPaths = coursePathsMap.get(course.id);
                       if (!assignedPaths || assignedPaths.length === 0) return null;
@@ -804,7 +821,7 @@ export function Courses() {
                               ? `مخفي عن الطلاب في صفحة الدورات لمنع التكرار — موجود داخل المسار: ${assignedPaths.map(p => p.title).join('، ')}`
                               : `Hidden from students on Courses page to avoid duplicates — Assigned to Path: ${assignedPaths.map(p => p.title).join(', ')}`
                           }
-                          className="bg-violet-600/95 hover:bg-violet-500 text-white px-2.5 py-1 rounded-md text-[10.5px] font-black uppercase tracking-wider shadow-md flex items-center gap-1 border border-violet-300/30 transition-colors"
+                          className="pointer-events-auto bg-violet-600/95 hover:bg-violet-500 text-white px-2.5 py-1 rounded-md text-[10.5px] font-black uppercase tracking-wider shadow-md flex items-center gap-1 border border-violet-300/30 transition-colors"
                         >
                           <Sparkles className="w-3 h-3 text-amber-300 shrink-0" />
                           <span className="truncate max-w-[190px]">
@@ -855,9 +872,11 @@ export function Courses() {
                       </div>
                     );
                   })()}
-                  <h3 className="text-base sm:text-lg font-bold mb-2 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
-                    {course.title}
-                  </h3>
+                  <Link to={getCoursePath(course)} className="block">
+                    <h3 className="text-base sm:text-lg font-bold mb-2 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+                      {course.title}
+                    </h3>
+                  </Link>
                   <p className="text-xs sm:text-sm text-muted-foreground mb-4 line-clamp-2 flex-1 leading-relaxed">
                     {course.description}
                   </p>
@@ -902,26 +921,16 @@ export function Courses() {
                     })()}
                   </div>
 
-                  {/* Action Button */}
-                  {user ? (
-                    <Link 
-                      to={`/course/${course.id}`}
-                      className="w-full py-2.5 sm:py-3 bg-foreground text-background hover:bg-primary hover:text-primary-foreground rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <span>{t('start_learning', 'Start Learning')}</span>
-                      <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-                    </Link>
-                  ) : (
-                    <button 
-                      onClick={() => setIsAuthModalOpen(true)}
-                      className="w-full py-2.5 sm:py-3 bg-foreground text-background hover:bg-primary hover:text-primary-foreground rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <span>{t('login_to_start', 'Log in to Start')}</span>
-                      <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-                    </button>
-                  )}
+                  {/* Action Button — Always a real crawlable & shareable <Link> */}
+                  <Link 
+                    to={getCoursePath(course)}
+                    className="w-full py-2.5 sm:py-3 bg-foreground text-background hover:bg-primary hover:text-primary-foreground rounded-xl font-bold text-xs sm:text-sm text-center transition-all active:scale-[0.98] shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>{t('start_learning', 'Start Learning')}</span>
+                    <ArrowRight className="w-4 h-4 rtl:rotate-180" />
+                  </Link>
                 </div>
-              </motion.div>
+              </div>
             ))}
 
             {/* Empty State */}

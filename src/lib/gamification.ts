@@ -29,12 +29,14 @@ export const XP_REWARDS = {
 
 export const AVAILABLE_BADGES = {
   FIRST_STEP: { id: 'first_step', name: 'First Step', description: 'Watched your first video', icon: '🎯' },
-  NIGHT_OWL: { id: 'night_owl', name: 'Night Owl', description: 'Studied past midnight', icon: '🦉' },
-  SPEED_DEMON: { id: 'speed_demon', name: 'Speed Demon', description: 'Completed a course in under 24 hours', icon: '⚡' },
-  STREAK_7: { id: 'streak_7', name: '7-Day Streak', description: 'Logged in for 7 days straight', icon: '🔥' },
+  FOCUS_WARRIOR: { id: 'focus_warrior', name: 'Focus Master', description: 'Logged 60+ minutes of deep focus', icon: '⏱️' },
   DAILY_SCHOLAR: { id: 'daily_scholar', name: 'Daily Scholar', description: 'Completed a Daily Tech Quest', icon: '🧠' },
-  STREAK_MASTER: { id: 'streak_master', name: 'Streak Champion', description: 'Completed a 7-day reward cycle', icon: '👑' },
   COURSE_CONQUEROR: { id: 'course_conqueror', name: 'Course Conqueror', description: 'Completed your first course', icon: '🏆' },
+  SPEED_DEMON: { id: 'speed_demon', name: 'Speed Demon', description: 'Completed a course in under 24 hours', icon: '⚡' },
+  NIGHT_OWL: { id: 'night_owl', name: 'Night Owl', description: 'Studied past midnight', icon: '🦉' },
+  STREAK_7: { id: 'streak_7', name: '7-Day Streak', description: 'Logged in for 7 days straight', icon: '🔥' },
+  STREAK_MASTER: { id: 'streak_master', name: 'Streak Champion', description: 'Maintained 30+ days streak', icon: '👑' },
+  CERTIFICATE_PRO: { id: 'certificate_pro', name: 'Certified Specialist', description: 'Earned a certified credential', icon: '📜' },
 };
 
 export async function getPublicProfile(uid: string): Promise<PublicProfile | null> {
@@ -153,8 +155,12 @@ export async function awardXPAndBadges(uid: string, eventType: 'VIDEO_WATCHED' |
     newBadges.push({ ...AVAILABLE_BADGES.NIGHT_OWL, unlockedAt: now.toISOString() });
   }
 
-  if (overrides?.speedDemon && !newBadges.find(b => b.id === 'speed_demon')) {
-    newBadges.push({ ...AVAILABLE_BADGES.SPEED_DEMON, unlockedAt: now.toISOString() });
+  if (eventType === 'COURSE_COMPLETED' && !newBadges.find(b => b.id === 'course_conqueror')) {
+    newBadges.push({ ...AVAILABLE_BADGES.COURSE_CONQUEROR, unlockedAt: now.toISOString() });
+  }
+
+  if (eventType === 'COURSE_COMPLETED' && !newBadges.find(b => b.id === 'certificate_pro')) {
+    newBadges.push({ ...AVAILABLE_BADGES.CERTIFICATE_PRO, unlockedAt: now.toISOString() });
   }
 
   await updateDoc(doc(db, 'publicProfiles', uid), {

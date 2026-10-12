@@ -1,7 +1,15 @@
 User-agent: *
 Allow: /
+Allow: /courses
+Allow: /projects
+Allow: /masterclasses
+Allow: /paths
+Allow: /books
+Allow: /creator
+Allow: /course/
+Allow: /path/
 Disallow: /admin
-Disallow: /dashboard
 Disallow: /api/
 
-Sitemap: https://skilliq1337.online/sitemap.xml
+Sitemap: https://skilliq1337school.vercel.app/sitemap.xml
+

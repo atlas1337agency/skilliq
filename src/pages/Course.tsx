@@ -3,14 +3,17 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import YouTube, { YouTubeEvent } from 'react-youtube';
 import { useStore } from '../store/useStore';
-import { CheckCircle, Lock, PlayCircle, PauseCircle, ArrowLeft, Maximize, Minimize, Youtube, BookOpen, PenTool, Trash2, BadgeCheck, ChevronRight, AlertTriangle, Check, X, Send, LogIn, Loader2, Award, Eye, ThumbsUp, MessageSquare, Users, RefreshCw, Sparkles, Edit3, Search, Download, Copy, Bold, Italic, Highlighter, List, Code, Tag, Clock, Subtitles, Settings, Gauge, PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { CheckCircle, Lock, PlayCircle, PauseCircle, ArrowLeft, Maximize, Minimize, Youtube, BookOpen, PenTool, Trash2, BadgeCheck, ChevronRight, AlertTriangle, Check, X, Send, LogIn, Loader2, Award, Eye, ThumbsUp, MessageSquare, Users, RefreshCw, Sparkles, Edit3, Search, Download, Copy, Bold, Italic, Highlighter, List, Code, Tag, Clock, Subtitles, Settings, Gauge, PanelRightOpen, PanelRightClose, Timer, Coffee, Pause, Play } from 'lucide-react';
 import { ScrollingText } from '../components/ScrollingText';
 import { SEO } from '../components/SEO';
 import { cn, filterByLanguage } from '../lib/utils';
-import { isCertificateEligible, resolveCourseEducator } from '../lib/courseUtils';
+import { isCertificateEligible, resolveCourseEducator, getCoursePath, resolveCourseFromParam } from '../lib/courseUtils';
 import { syncCourseRealtimeWithYouTube, formatCompactNumber, formatFullNumber } from '../lib/youtube';
 import { addOrUpdateCourse } from '../lib/firestoreContent';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { ShareCourseButton } from '../components/ShareCourseButton';
+import { AuthModal } from '../components/AuthModal';
+import { useFocusTimer } from '../store/useFocusTimer';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, setDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
@@ -21,8 +24,25 @@ export function Course() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
-  const { progress, markVideoCompleted, setCurrentVideo, completeCourse, user, courses, saveVideoTimestamp, language, notifications } = useStore();
+  const { progress, markVideoCompleted, setCurrentVideo, completeCourse, user, courses, saveVideoTimestamp, language, notifications, hasLoadedFromDb, isContentLoading } = useStore();
   
+  const {
+    timeLeft: focusTimeLeft,
+    isRunning: isFocusRunning,
+    mode: focusMode,
+    startFocus,
+    startBreak,
+    pauseFocus,
+    resumeFocus,
+    resetFocus,
+    setShowFloatingPopup: setFocusFloatingPopup,
+  } = useFocusTimer();
+
+  const [isFocusTimerMenuOpen, setIsFocusTimerMenuOpen] = useState(false);
+  const [videoCustomMins, setVideoCustomMins] = useState(25);
+  const [videoTimerMode, setVideoTimerMode] = useState<'work' | 'break'>('work');
+  
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isFocusNotesOpen, setIsFocusNotesOpen] = useState(true);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(false);
@@ -81,9 +101,10 @@ export function Course() {
   const loadedVideoIdRef = useRef<string>('');
   const progressBarRef = useRef<HTMLDivElement>(null);
 
-  const course = courses.find((c) => c.id === courseId);
+  const course = useMemo(() => resolveCourseFromParam(courses, courseId), [courses, courseId]);
+  const resolvedCourseId = course?.id || courseId || '';
   const courseVideos = course ? filterByLanguage(course.videos, language) : [];
-  const courseProgress = progress[courseId || ''] || { completedVideoIds: [], currentVideoId: courseVideos[0]?.id, isCompleted: false, videoTimestamps: {} };
+  const courseProgress = progress[resolvedCourseId] || { completedVideoIds: [], currentVideoId: courseVideos[0]?.id, isCompleted: false, videoTimestamps: {} };
 
   const currentVideoIndex = courseVideos.findIndex(v => v.id === courseProgress.currentVideoId) !== -1 
     ? courseVideos.findIndex(v => v.id === courseProgress.currentVideoId)
@@ -508,10 +529,10 @@ export function Course() {
   };
 
   useEffect(() => {
-    if (!course) {
-      navigate('/');
+    if (!course && hasLoadedFromDb && !isContentLoading) {
+      navigate('/courses');
     }
-  }, [course, navigate]);
+  }, [course, hasLoadedFromDb, isContentLoading, navigate]);
   
   useEffect(() => {
     // Reset player state when changing videos
@@ -751,21 +772,32 @@ export function Course() {
     }
   }, [currentVideo, course]);
 
-  if (!course) return null;
+  if (!course) {
+    return (
+      <div className="w-full min-h-[70vh] flex flex-col items-center justify-center bg-background px-4">
+        <Loader2 className="w-8 h-8 text-primary animate-spin mb-3" />
+        <p className="text-xs sm:text-sm font-semibold text-muted-foreground">
+          {language === 'ar' ? 'جاري تحميل صفحة الدورة...' : 'Loading course page...'}
+        </p>
+      </div>
+    );
+  }
 
   const isMasterclass = Boolean(course.isSingleVideo);
   const canEarnCertificate = isCertificateEligible(course);
   const educatorInfo = resolveCourseEducator(course);
+  const canonicalCoursePath = getCoursePath(course);
 
   const courseSeoNode = (
     <SEO
-      title={`${course.title} by ${course.instructor} – Free ${course.isSingleVideo ? 'Masterclass' : 'Course'} | Skilliq`}
+      title={`${course.title} by ${course.instructor} – Free ${course.isProject ? 'Project Build' : course.isSingleVideo ? 'Masterclass' : 'Course'} | Skilliq`}
       description={
         course.description ||
         `Watch ${course.title} by ${course.instructor} distraction-free on Skilliq with structured lessons, interactive notes, and a verifiable certificate.`
       }
       image={course.thumbnail}
-      canonicalPath={`/course/${course.id}`}
+      canonicalPath={canonicalCoursePath}
+      type="course"
       lang={language === 'ar' ? 'ar' : 'en'}
       keywords={[
         course.title,
@@ -778,23 +810,24 @@ export function Course() {
       breadcrumbs={[
         { name: 'Home', url: '/' },
         {
-          name: course.isSingleVideo ? 'Masterclasses' : 'Courses',
-          url: course.isSingleVideo ? '/masterclasses' : '/courses'
+          name: course.isProject ? 'Projects' : course.isSingleVideo ? 'Masterclasses' : 'Courses',
+          url: course.isProject ? '/projects' : course.isSingleVideo ? '/masterclasses' : '/courses'
         },
-        { name: course.title, url: `/course/${course.id}` }
+        { name: course.title, url: canonicalCoursePath }
       ]}
       schema={[
         {
           '@context': 'https://schema.org',
           '@type': 'Course',
           name: course.title,
+          url: typeof window !== 'undefined' ? `${window.location.origin}${canonicalCoursePath}` : `https://skilliq1337school.vercel.app${canonicalCoursePath}`,
           description:
             course.description ||
             `Learn ${course.title} with ${course.instructor} on Skilliq.`,
           provider: {
             '@type': 'EducationalOrganization',
             name: 'Skilliq',
-            sameAs: typeof window !== 'undefined' ? window.location.origin : 'https://skilliq.vercel.app'
+            sameAs: typeof window !== 'undefined' ? window.location.origin : 'https://skilliq1337school.vercel.app'
           },
           instructor: {
             '@type': 'Person',
@@ -845,32 +878,89 @@ export function Course() {
 
   if (!user) {
     return (
-      <div className="w-full min-h-screen flex flex-col items-center justify-center bg-background px-4 py-12">
+      <div className="w-full min-h-screen flex flex-col items-center justify-center bg-background px-4 py-10">
         {courseSeoNode}
-        <div className="max-w-3xl w-full bg-card rounded-3xl border border-border shadow-sm overflow-hidden">
-          <div className="p-6 sm:p-8 border-b border-border/60">
-            <div className="text-xs font-bold uppercase tracking-wider text-primary mb-2">
-              {course.category} {course.subCategory ? `· ${course.subCategory}` : ''}
+        <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
+        <div className="max-w-4xl w-full bg-card rounded-3xl border border-border shadow-md overflow-hidden">
+          {/* Course Hero Preview with Thumbnail & Share */}
+          <div className="grid grid-cols-1 md:grid-cols-12 border-b border-border/60">
+            <div className="md:col-span-5 relative aspect-video md:aspect-auto bg-muted overflow-hidden">
+              {course.thumbnail?.trim() ? (
+                <img
+                  src={course.thumbnail}
+                  alt={course.title}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center p-6 text-center text-muted-foreground font-bold text-sm">
+                  {course.title}
+                </div>
+              )}
+              <div className="absolute inset-0 bg-black/35 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="w-16 h-16 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-2xl hover:scale-105 transition-transform cursor-pointer"
+                  aria-label="Play course"
+                >
+                  <PlayCircle className="w-9 h-9 text-white ps-0.5" />
+                </button>
+              </div>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground mb-2">
-              {course.title}
-            </h1>
-            <p className="text-xs sm:text-sm font-semibold text-muted-foreground mb-4">
-              Instructor: <span className="text-foreground">{course.instructor}</span> · {courseVideos.length} Lessons · 100% Free
-            </p>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {course.description}
-            </p>
+
+            <div className="md:col-span-7 p-6 sm:p-8 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="text-xs font-bold uppercase tracking-wider text-primary">
+                    {course.category} {course.subCategory ? `· ${course.subCategory}` : ''}
+                  </div>
+                  <ShareCourseButton course={course} variant="button" size="sm" />
+                </div>
+
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-foreground mb-2 leading-tight">
+                  {course.title}
+                </h1>
+                <p className="text-xs sm:text-sm font-semibold text-muted-foreground mb-4">
+                  {language === 'ar' ? 'المدرب:' : 'Instructor:'}{' '}
+                  <Link
+                    to={`/creator/${encodeURIComponent(course.instructor || '')}`}
+                    className="text-foreground hover:text-primary underline-offset-2 hover:underline font-bold"
+                  >
+                    {course.instructor}
+                  </Link>{' '}
+                  · {courseVideos.length} {language === 'ar' ? 'درس' : 'Lessons'} · 100% Free
+                </p>
+                <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed line-clamp-4">
+                  {course.description}
+                </p>
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-border/60 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="flex-1 min-w-[200px] py-3 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>
+                    {language === 'ar' ? 'سجل الدخول مجاناً لبدء التعلم' : 'Sign In Free to Start Watching'}
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
 
           {courseVideos.length > 0 && (
-            <div className="p-6 sm:p-8 bg-muted/20 border-b border-border/60 max-h-60 overflow-y-auto">
+            <div className="p-6 sm:p-8 bg-muted/20 border-b border-border/60 max-h-72 overflow-y-auto">
               <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                Course Syllabus & Video Lessons ({courseVideos.length})
+                {language === 'ar'
+                  ? `منهج الدورة والدروس (${courseVideos.length})`
+                  : `Course Syllabus & Video Lessons (${courseVideos.length})`}
               </h2>
               <ol className="space-y-2 text-xs sm:text-sm text-foreground/90 list-decimal list-inside">
                 {courseVideos.map((v) => (
-                  <li key={v.id} className="truncate">
+                  <li key={v.id} className="truncate py-1 border-b border-border/40 last:border-none">
                     <span className="font-medium">{v.title}</span>
                     {v.duration ? <span className="text-muted-foreground ms-2">({v.duration})</span> : null}
                   </li>
@@ -879,26 +969,24 @@ export function Course() {
             </div>
           )}
 
-          <div className="p-6 sm:p-8 text-center">
-            <h2 className="text-xl font-bold mb-2">Login Required to Start Learning</h2>
-            <p className="text-sm text-muted-foreground mb-6">
+          <div className="p-5 sm:p-6 bg-card flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs sm:text-sm text-muted-foreground">
               {canEarnCertificate
-                ? 'Sign in for free to watch in Cinema Focus Mode, save your timestamps, take notes, and earn your verifiable certificate.'
-                : 'Sign in for free to watch this masterclass in Cinema Focus Mode, save your timestamps, and take interactive notes.'}
+                ? (language === 'ar'
+                    ? 'أكمل هذه الدورة للحصول على شهادة إتمام رسمية وموثقة مجاناً.'
+                    : 'Complete this course in Cinema Focus Mode to earn your free verifiable certificate.')
+                : (language === 'ar'
+                    ? 'شاهد هذه الجلسة في وضع التركيز السينمائي بدون إعلانات أو تشتيت.'
+                    : 'Watch this session in distraction-free Cinema Focus Mode with smart notes.')}
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
+            <div className="flex items-center gap-2.5">
               <Link
-                to="/courses"
-                className="px-5 py-2.5 rounded-xl border border-border text-sm font-semibold hover:bg-muted transition-colors"
+                to={course.isProject ? '/projects' : course.isSingleVideo ? '/masterclasses' : '/courses'}
+                className="px-4 py-2 rounded-xl border border-border text-xs sm:text-sm font-semibold hover:bg-muted transition-colors"
               >
-                Browse Catalog
+                {language === 'ar' ? 'تصفح المزيد' : 'Browse Catalog'}
               </Link>
-              <Link
-                to="/"
-                className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors"
-              >
-                Return to Home & Sign In
-              </Link>
+              <ShareCourseButton course={course} variant="button" size="md" />
             </div>
           </div>
         </div>
@@ -1065,14 +1153,194 @@ export function Course() {
               <span className="font-bold text-sm">{t('back', language === 'ar' ? 'رجوع' : 'Back')}</span>
             </button>
             <h2 className="font-semibold hidden md:block truncate max-w-md px-3">{course.title}</h2>
-            <button 
-              type="button"
-              onClick={toggleFocusMode}
-              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-bold text-xs sm:text-sm cursor-pointer"
-            >
-              <Maximize className="w-4 h-4" />
-              <span>{t('focus_mode')}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <ShareCourseButton course={course} variant="button" size="sm" />
+              {/* Focus & Coffee Break Timer with In-Video Custom Time Popover */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsFocusTimerMenuOpen(prev => !prev)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs sm:text-sm cursor-pointer transition-all active:scale-95 shadow-xs",
+                    isFocusRunning 
+                      ? focusMode === 'break'
+                        ? "bg-amber-500 text-slate-950 shadow-xs font-black ring-1 ring-amber-400"
+                        : "bg-primary text-primary-foreground shadow-xs animate-pulse ring-1 ring-primary/50"
+                      : "bg-primary/10 text-primary hover:bg-primary/20"
+                  )}
+                  title={language === 'ar' ? 'مؤقت التركيز والاستراحة المخصص' : 'Custom Focus & Coffee Break Timer'}
+                >
+                  {focusMode === 'break' ? <Coffee className="w-4 h-4 text-amber-500" /> : <Timer className="w-4 h-4" />}
+                  <span className="font-mono tabular-nums">
+                    {isFocusRunning
+                      ? `${Math.floor(focusTimeLeft / 60)}:${(focusTimeLeft % 60).toString().padStart(2, '0')}`
+                      : (language === 'ar' ? 'مؤقت التركيز' : 'Focus Timer')}
+                  </span>
+                </button>
+
+                {/* Popover Dropdown for setting custom time inside video */}
+                {isFocusTimerMenuOpen && (
+                  <div 
+                    className={cn(
+                      "absolute top-full mt-2 z-50 w-72 sm:w-80 p-4 rounded-2xl bg-card/95 backdrop-blur-md border border-border shadow-2xl space-y-3",
+                      language === 'ar' ? "left-0" : "right-0"
+                    )}
+                  >
+                    {/* Popover Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-border/70">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {videoTimerMode === 'break' ? (
+                          <div className="p-1 rounded-lg bg-amber-500/20 text-amber-500 shrink-0">
+                            <Coffee className="w-4 h-4 text-amber-500" />
+                          </div>
+                        ) : (
+                          <div className="p-1 rounded-lg bg-primary/10 text-primary shrink-0">
+                            <Timer className="w-4 h-4" />
+                          </div>
+                        )}
+                        <span className={cn(
+                          "text-xs sm:text-sm font-bold truncate",
+                          videoTimerMode === 'break' ? "text-amber-600 dark:text-amber-400 font-black" : "text-foreground"
+                        )}>
+                          {videoTimerMode === 'break' 
+                            ? (language === 'ar' ? 'استراحة قهوة مخصصة' : 'Custom Coffee Break') 
+                            : (language === 'ar' ? 'جلسة تركيز مخصصة' : 'Custom Focus Session')}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsFocusTimerMenuOpen(false)}
+                        className="p-1 text-muted-foreground hover:text-foreground cursor-pointer rounded-md hover:bg-muted"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Mode Switcher */}
+                    <div className="grid grid-cols-2 gap-1.5 p-0.5 bg-muted/60 rounded-xl border border-border/60 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoTimerMode('work');
+                          setVideoCustomMins(25);
+                        }}
+                        className={cn(
+                          "py-1.5 px-2 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer",
+                          videoTimerMode === 'work' ? "bg-card text-foreground shadow-2xs font-extrabold" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <Timer className="w-3.5 h-3.5" />
+                        <span>{language === 'ar' ? 'تركيز' : 'Focus'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoTimerMode('break');
+                          setVideoCustomMins(5);
+                        }}
+                        className={cn(
+                          "py-1.5 px-2 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer",
+                          videoTimerMode === 'break' ? "bg-amber-500 text-slate-950 font-black shadow-2xs" : "text-muted-foreground hover:text-amber-500"
+                        )}
+                      >
+                        <Coffee className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span className="whitespace-nowrap">{language === 'ar' ? 'استراحة قهوة' : 'Coffee Break'}</span>
+                      </button>
+                    </div>
+
+                    {/* Presets */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground">
+                        <span>{language === 'ar' ? 'حدد المدة المطلوبة:' : 'Choose Duration:'}</span>
+                        <span className="font-mono text-foreground font-extrabold">{videoCustomMins} mins</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {(videoTimerMode === 'break' ? [3, 5, 10, 15] : [15, 25, 45, 60]).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setVideoCustomMins(m)}
+                            className={cn(
+                              "py-1.5 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer text-center",
+                              videoCustomMins === m
+                                ? videoTimerMode === 'break' ? "bg-amber-500 text-slate-950 font-black" : "bg-primary text-primary-foreground font-extrabold"
+                                : "bg-muted text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            {m}m
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Custom Exact Number Input */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <label className="text-[11px] text-muted-foreground whitespace-nowrap">
+                        {language === 'ar' ? 'أو وقت مخصص (دقيقة):' : 'Or exact mins:'}
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="180"
+                        value={videoCustomMins}
+                        onChange={(e) => setVideoCustomMins(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
+                        className="w-20 bg-background border border-border/80 rounded-lg px-2 py-1 text-xs font-mono font-bold text-center text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-2 pt-1 border-t border-border/70">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (videoTimerMode === 'break') {
+                            startBreak(videoCustomMins);
+                          } else {
+                            startFocus(videoCustomMins, 'work');
+                          }
+                          setFocusFloatingPopup(true);
+                          setIsFocusTimerMenuOpen(false);
+                        }}
+                        className={cn(
+                          "flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95",
+                          videoTimerMode === 'break'
+                            ? "bg-amber-500 hover:bg-amber-600 text-slate-950 font-black"
+                            : "bg-primary hover:bg-primary/90 text-primary-foreground"
+                        )}
+                      >
+                        {videoTimerMode === 'break' ? <Coffee className="w-3.5 h-3.5 text-slate-950 shrink-0" /> : <Play className="w-3.5 h-3.5 fill-current shrink-0" />}
+                        <span className="truncate">
+                          {language === 'ar' 
+                            ? (videoTimerMode === 'break' ? `بدء استراحة (${videoCustomMins}د)` : `بدء التركيز (${videoCustomMins}د)`)
+                            : (videoTimerMode === 'break' ? `Start Break (${videoCustomMins}m)` : `Start Focus (${videoCustomMins}m)`)}
+                        </span>
+                      </button>
+
+                      {isFocusRunning && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pauseFocus();
+                          }}
+                          className="p-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          title={language === 'ar' ? 'إيقاف مؤقت' : 'Pause'}
+                        >
+                          <Pause className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button 
+                type="button"
+                onClick={toggleFocusMode}
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-bold text-xs sm:text-sm cursor-pointer"
+              >
+                <Maximize className="w-4 h-4" />
+                <span>{t('focus_mode')}</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -1592,6 +1860,15 @@ export function Course() {
                     />
                   </div>
 
+                  <div className="col-span-1 flex">
+                    <ShareCourseButton
+                      course={course}
+                      variant="button"
+                      size="md"
+                      className="w-full sm:w-auto rounded-full px-4 py-2"
+                    />
+                  </div>
+
                   <Link 
                     to={`/creator/${encodeURIComponent(course.instructor || '')}`}
                     className="col-span-1 px-4 py-2 bg-primary/10 text-primary border border-primary/20 rounded-full font-bold text-xs sm:text-sm hover:bg-primary hover:text-primary-foreground transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
@@ -1750,6 +2027,72 @@ export function Course() {
                   <span>{language === 'ar' ? 'جلسة ماستركلاس (الشهادات مخصصة لقوائم التشغيل والمسارات)' : 'Masterclass session (Certificates are for Playlists & Paths)'}</span>
                 </div>
               )}
+
+              {/* Focus Study Session Activator inside Course Video */}
+              <div className="p-3 rounded-2xl bg-card border border-border/80 space-y-2 mt-1">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-foreground">
+                    {focusMode === 'break' ? <Coffee className="w-3.5 h-3.5 text-amber-500" /> : <Timer className="w-3.5 h-3.5 text-primary" />}
+                    <span>{language === 'ar' ? 'جلسة التركيز أثناء المشاهدة' : 'Focus Study Session'}</span>
+                  </div>
+                  {isFocusRunning && (
+                    <span className="font-mono font-bold text-xs text-primary tabular-nums">
+                      {Math.floor(focusTimeLeft / 60)}:{(focusTimeLeft % 60).toString().padStart(2, '0')}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-1">
+                  {[15, 25, 45].map(m => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        startFocus(m);
+                        setFocusFloatingPopup(true);
+                      }}
+                      className={cn(
+                        "py-1 px-1.5 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer text-center",
+                        isFocusRunning && Math.round(focusTimeLeft / 60) === m
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {m}m
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isFocusRunning) {
+                      pauseFocus();
+                    } else {
+                      startFocus(25);
+                      setFocusFloatingPopup(true);
+                    }
+                  }}
+                  className={cn(
+                    "w-full py-1.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer",
+                    isFocusRunning
+                      ? "bg-amber-500 hover:bg-amber-600 text-slate-950 font-black"
+                      : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs"
+                  )}
+                >
+                  {isFocusRunning ? (
+                    <>
+                      <Pause className="w-3 h-3" />
+                      <span>{language === 'ar' ? 'إيقاف مؤقت' : 'Pause Focus'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>{language === 'ar' ? 'بدء التركيز' : 'Start Focus'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
             {courseVideos.map((video, index) => {
               const isCompleted = courseProgress.completedVideoIds.includes(video.id);

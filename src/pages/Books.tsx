@@ -493,21 +493,12 @@ export function Books() {
 
             {filteredBooks.length > 0 ? (
               <>
-              <motion.div
-                layout
-                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6"
-              >
-                <AnimatePresence mode="popLayout">
-                  {paginatedBooks.map((book, idx) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+                  {paginatedBooks.map((book) => {
                     const localized = getLocalizedBookData(book, isRtl ? 'ar' : 'en');
                     return (
-                      <motion.div
-                        layout
+                      <div
                         key={book.id}
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.2, delay: Math.min(idx * 0.03, 0.25) }}
                         onClick={() => setSelectedBook(book)}
                         className="group bg-card border border-border/80 hover:border-primary/40 rounded-3xl p-4 sm:p-5 flex flex-col justify-between hover:shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer text-start relative"
                       >
@@ -614,11 +605,10 @@ export function Books() {
                             )}
                           </div>
                         </div>
-                      </motion.div>
+                      </div>
                     );
                   })}
-                </AnimatePresence>
-              </motion.div>
+              </div>
 
               {/* PAGINATION CONTROLS (NEXT / PREVIOUS / PAGE NUMBERS) */}
               {totalPages > 1 && (

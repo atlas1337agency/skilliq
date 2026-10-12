@@ -3,61 +3,23 @@ import { db } from '../firebase';
 import { Course, LearningPath, Category, AppNotification, AdBannerData, Book, defaultBooks } from '../data/courses';
 import { fetchGoogleSheetsContent } from './sheets';
 
+export const LEGACY_SEED_PROJECT_IDS = new Set([
+  "project-fullstack-saas-ai",
+  "project-mern-ecommerce-playlist",
+  "project-ar-fullstack-web-app",
+  "project-ar-flutter-real-app",
+  "project-nextjs-dashboard-build",
+  "project-python-cyber-scanner",
+  "project-react-native-delivery-app",
+  "project-ai-agent-automation-en",
+  "project-ar-js-portfolio-apps",
+  "project-ar-ai-automation-system",
+  "project-ar-3d-architectural-villa",
+  "project-ar-uiux-design-system"
+]);
+
 export async function fetchFirestoreContent() {
   try {
-    const coursesSnapshot = await getDocs(collection(db, 'courses'));
-    let coursesData: Course[] = [];
-    coursesSnapshot.forEach((d) => {
-      const data = d.data() as Course;
-      if (data) {
-        coursesData.push({
-          ...data,
-          id: (data.id && typeof data.id === 'string' && data.id.trim()) ? data.id.trim() : d.id,
-          title: data.title || 'Untitled Course',
-          category: data.category || 'Programming',
-          videos: Array.isArray(data.videos) ? data.videos : [],
-        });
-      }
-    });
-
-    const pathsSnapshot = await getDocs(collection(db, 'learningPaths'));
-    let pathsData: LearningPath[] = [];
-    pathsSnapshot.forEach((doc) => {
-      pathsData.push(doc.data() as LearningPath);
-    });
-
-    let notificationsData: AppNotification[] = [];
-    try {
-      const notificationsSnapshot = await getDocs(collection(db, 'notifications'));
-      notificationsSnapshot.forEach((doc) => {
-        notificationsData.push(doc.data() as AppNotification);
-      });
-    } catch (e) {
-      console.warn("Firestore notifications read error:", e);
-    }
-
-    try {
-      const apiRes = await fetch('/api/notifications');
-      if (apiRes.ok) {
-        const apiJson = await apiRes.json();
-        if (Array.isArray(apiJson.notifications)) {
-          const map = new Map<string, AppNotification>();
-          apiJson.notifications.forEach((n: AppNotification) => map.set(n.id, n));
-          notificationsData.forEach((n: AppNotification) => map.set(n.id, { ...map.get(n.id), ...n }));
-          notificationsData = Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        }
-      }
-    } catch (e) {
-      console.warn("API notifications fetch error:", e);
-    }
-
-    const bannersSnapshot = await getDocs(collection(db, 'banners'));
-    let bannersData: AdBannerData[] = [];
-    bannersSnapshot.forEach((doc) => {
-      bannersData.push(doc.data() as AdBannerData);
-    });
-
-    // Legacy hardcoded seed book IDs to ignore and auto-clean so only manually added books appear
     const LEGACY_SEED_BOOK_IDS = new Set([
       "book-clean-code",
       "book-deep-work",
@@ -79,38 +41,101 @@ export async function fetchFirestoreContent() {
       "book-Zero-To-One-Ar-En"
     ]);
 
-    // Fetch Books from Firestore + API (Only manually added books)
+    // Fetch all collections and endpoints in parallel instead of sequentially
+    const [
+      coursesSnapshot,
+      pathsSnapshot,
+      notificationsSnapshot,
+      apiNotificationsRes,
+      bannersSnapshot,
+      booksSnapshot,
+      apiBooksRes,
+      courseUtilsModule
+    ] = await Promise.all([
+      getDocs(collection(db, 'courses')),
+      getDocs(collection(db, 'learningPaths')),
+      getDocs(collection(db, 'notifications')).catch(() => null),
+      fetch('/api/notifications').catch(() => null),
+      getDocs(collection(db, 'banners')).catch(() => null),
+      getDocs(collection(db, 'books')).catch(() => null),
+      fetch('/api/books').catch(() => null),
+      import('../lib/courseUtils')
+    ]);
+
+    let coursesData: Course[] = [];
+    coursesSnapshot.forEach((d) => {
+      const data = d.data() as Course;
+      const docId = (data?.id && typeof data.id === 'string' && data.id.trim()) ? data.id.trim() : d.id;
+      if (LEGACY_SEED_PROJECT_IDS.has(d.id) || LEGACY_SEED_PROJECT_IDS.has(docId)) {
+        deleteDoc(doc(db, 'courses', d.id)).catch(() => {});
+        return;
+      }
+      if (data) {
+        coursesData.push({
+          ...data,
+          id: docId,
+          title: data.title || 'Untitled Course',
+          category: data.category || 'Programming',
+          videos: Array.isArray(data.videos) ? data.videos : [],
+        });
+      }
+    });
+
+    let pathsData: LearningPath[] = [];
+    pathsSnapshot.forEach((doc) => {
+      pathsData.push(doc.data() as LearningPath);
+    });
+
+    let notificationsData: AppNotification[] = [];
+    if (notificationsSnapshot) {
+      notificationsSnapshot.forEach((doc) => {
+        notificationsData.push(doc.data() as AppNotification);
+      });
+    }
+
+    if (apiNotificationsRes && apiNotificationsRes.ok) {
+      try {
+        const apiJson = await apiNotificationsRes.json();
+        if (Array.isArray(apiJson.notifications)) {
+          const map = new Map<string, AppNotification>();
+          apiJson.notifications.forEach((n: AppNotification) => map.set(n.id, n));
+          notificationsData.forEach((n: AppNotification) => map.set(n.id, { ...map.get(n.id), ...n }));
+          notificationsData = Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        }
+      } catch (e) {}
+    }
+
+    let bannersData: AdBannerData[] = [];
+    if (bannersSnapshot) {
+      bannersSnapshot.forEach((doc) => {
+        bannersData.push(doc.data() as AdBannerData);
+      });
+    }
+
     let firestoreBooks: Book[] = [];
-    try {
-      const booksSnapshot = await getDocs(collection(db, 'books'));
+    if (booksSnapshot) {
       booksSnapshot.forEach((d) => {
         const data = d.data() as Book;
         if (LEGACY_SEED_BOOK_IDS.has(d.id) || (data && LEGACY_SEED_BOOK_IDS.has(data.id))) {
-          // Silently clean up legacy seed books if previously synced to Firestore
           deleteDoc(doc(db, 'books', d.id)).catch(() => {});
           return;
         }
         firestoreBooks.push(data);
       });
-    } catch (e) {
-      console.warn("Firestore books read warning:", e);
     }
 
     let apiBooks: Book[] = [];
     let serverDeletedBookIds: string[] = [];
-    try {
-      const bRes = await fetch('/api/books');
-      if (bRes.ok) {
-        const bJson = await bRes.json();
+    if (apiBooksRes && apiBooksRes.ok) {
+      try {
+        const bJson = await apiBooksRes.json();
         if (Array.isArray(bJson.books)) {
           apiBooks = bJson.books.filter((b: Book) => b && !LEGACY_SEED_BOOK_IDS.has(b.id));
         }
         if (Array.isArray(bJson.deletedIds)) {
           serverDeletedBookIds = bJson.deletedIds;
         }
-      }
-    } catch (e) {
-      console.warn("API books read warning:", e);
+      } catch (e) {}
     }
 
     let localDeletedBookIds: string[] = [];
@@ -142,8 +167,7 @@ export async function fetchFirestoreContent() {
       (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
     );
 
-    import('../lib/courseUtils').then(); // ensure loaded
-    const { normalizeCategory } = await import('../lib/courseUtils');
+    const { normalizeCategory } = courseUtilsModule;
     const categoriesMap: Record<string, Set<string>> = {};
     coursesData.forEach(c => {
       const cat = normalizeCategory(c.category);
@@ -293,6 +317,15 @@ export async function addOrUpdateCourse(course: Course, skipBackup = false) {
     ? course.id.trim()
     : 'course_' + Math.random().toString(36).substring(2, 9);
   const safeCourse: Course = { ...course, id: safeId };
+  try {
+    const rawDeleted = localStorage.getItem('deleted_course_ids');
+    if (rawDeleted) {
+      const list = JSON.parse(rawDeleted) as string[];
+      if (list.includes(safeId)) {
+        localStorage.setItem('deleted_course_ids', JSON.stringify(list.filter(id => id !== safeId)));
+      }
+    }
+  } catch (e) {}
   await setDoc(doc(db, 'courses', safeId), safeCourse);
   if (!skipBackup) {
     await runAutoBackup();
@@ -301,6 +334,14 @@ export async function addOrUpdateCourse(course: Course, skipBackup = false) {
 
 export async function deleteCourseInFirestore(courseId: string) {
   if (!courseId || typeof courseId !== 'string') return;
+  try {
+    const rawDeleted = localStorage.getItem('deleted_course_ids');
+    const list: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+    if (!list.includes(courseId)) {
+      list.push(courseId);
+      localStorage.setItem('deleted_course_ids', JSON.stringify(list));
+    }
+  } catch (e) {}
   await deleteDoc(doc(db, 'courses', courseId));
   await runAutoBackup();
 }
