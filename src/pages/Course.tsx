@@ -103,7 +103,17 @@ export function Course() {
 
   const course = useMemo(() => resolveCourseFromParam(courses, courseId), [courses, courseId]);
   const resolvedCourseId = course?.id || courseId || '';
-  const courseVideos = course ? filterByLanguage(course.videos, language) : [];
+  const courseVideos = useMemo(() => {
+    if (!course?.videos) return [];
+    const list = filterByLanguage(course.videos, language);
+    const seen = new Set<string>();
+    return list.filter((v, idx) => {
+      const key = (v?.id || v?.youtubeId || `idx_${idx}`).trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [course, language]);
   const courseProgress = progress[resolvedCourseId] || { completedVideoIds: [], currentVideoId: courseVideos[0]?.id, isCompleted: false, videoTimestamps: {} };
 
   const currentVideoIndex = courseVideos.findIndex(v => v.id === courseProgress.currentVideoId) !== -1 
@@ -959,8 +969,8 @@ export function Course() {
                   : `Course Syllabus & Video Lessons (${courseVideos.length})`}
               </h2>
               <ol className="space-y-2 text-xs sm:text-sm text-foreground/90 list-decimal list-inside">
-                {courseVideos.map((v) => (
-                  <li key={v.id} className="truncate py-1 border-b border-border/40 last:border-none">
+                {courseVideos.map((v, vIdx) => (
+                  <li key={`syllabus-${v.id || v.youtubeId || vIdx}-${vIdx}`} className="truncate py-1 border-b border-border/40 last:border-none">
                     <span className="font-medium">{v.title}</span>
                     {v.duration ? <span className="text-muted-foreground ms-2">({v.duration})</span> : null}
                   </li>
@@ -2101,7 +2111,7 @@ export function Course() {
 
               return (
                 <button
-                  key={video.id}
+                  key={`video-lesson-${video.id || video.youtubeId || index}-${index}`}
                   disabled={isLocked}
                   onClick={() => !isLocked && setCurrentVideo(course.id, video.id)}
                   className={cn(

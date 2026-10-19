@@ -554,6 +554,7 @@ export const syncCourseRealtimeWithYouTube = async (
         for (const liveVid of plData.videos) {
           const cleanId = (liveVid.youtubeId || '').trim();
           if (cleanId && !existingByYtId.has(cleanId)) {
+            existingByYtId.set(cleanId, liveVid);
             newVideosAddedCount++;
             hasChanges = true;
             mergedList.push({
@@ -571,7 +572,18 @@ export const syncCourseRealtimeWithYouTube = async (
           }
         }
 
-        updatedVideos = mergedList;
+        // Deduplicate mergedList by unique youtubeId or id
+        const uniqueMerged: Video[] = [];
+        const seenKeys = new Set<string>();
+        for (const v of mergedList) {
+          const key = (v.youtubeId || v.id || '').trim();
+          if (key && !seenKeys.has(key)) {
+            seenKeys.add(key);
+            uniqueMerged.push(v);
+          }
+        }
+
+        updatedVideos = uniqueMerged;
 
         if (plData.subscriberCount && plData.subscriberCount !== subscriberCount) {
           subscriberCount = plData.subscriberCount;
@@ -739,11 +751,15 @@ export const saveCachedCourseStats = (updates: Record<string, Course>) => {
         totalLikes: c.totalLikes,
         totalComments: c.totalComments,
         lastSyncedAt: c.lastSyncedAt,
-        videos: c.videos,
       };
     }
     localStorage.setItem(LIVE_STATS_CACHE_KEY, JSON.stringify(current));
-  } catch {}
+  } catch (e) {
+    console.warn('[saveCachedCourseStats] Storage quota exceeded or disabled, clearing stats cache:', e);
+    try {
+      localStorage.removeItem(LIVE_STATS_CACHE_KEY);
+    } catch {}
+  }
 };
 
 export const applyCachedStatsToCourses = (courses: Course[]): Course[] => {

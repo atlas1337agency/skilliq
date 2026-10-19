@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { courses as defaultCourses, learningPaths as defaultPaths, categories as defaultCategories, defaultBanners, defaultBooks, Course, LearningPath, Category, AppNotification, AdBannerData, Book } from '../data/courses';
@@ -7,6 +7,71 @@ import { fetchFirestoreContent, addOrUpdateCourse, LEGACY_SEED_PROJECT_IDS } fro
 import { syncAllCoursesLiveBackground, applyCachedStatsToCourses } from '../lib/youtube';
 import { PublicProfile, awardXPAndBadges, initializeOrUpdateProfile } from '../lib/gamification';
 import { recordPlatformMovement } from '../lib/telemetry';
+
+// Immediate cleanup of bloated historical localStorage items to prevent QuotaExceededError
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const rawNexa = localStorage.getItem('nexa-store-storage');
+    if (rawNexa && (rawNexa.includes('"courses"') || rawNexa.includes('"allCourses"') || rawNexa.length > 50000)) {
+      try {
+        const parsed = JSON.parse(rawNexa);
+        if (parsed?.state) {
+          delete parsed.state.courses;
+          delete parsed.state.allCourses;
+          delete parsed.state.books;
+          delete parsed.state.allBooks;
+          delete parsed.state.learningPaths;
+          delete parsed.state.categories;
+          delete parsed.state.banners;
+          localStorage.setItem('nexa-store-storage', JSON.stringify(parsed));
+        } else {
+          localStorage.removeItem('nexa-store-storage');
+        }
+      } catch {
+        localStorage.removeItem('nexa-store-storage');
+      }
+    }
+    // Also clean up heavy youtube stats cache if oversized
+    const rawStats = localStorage.getItem('skilliq_course_live_stats_v2');
+    if (rawStats && (rawStats.includes('"videos"') || rawStats.length > 100000)) {
+      localStorage.removeItem('skilliq_course_live_stats_v2');
+    }
+  }
+} catch {
+  // ignore
+}
+
+// Resilient localStorage wrapper that never throws unhandled QuotaExceededError
+const safeLocalStorage = {
+  getItem: (name: string): string | null => {
+    try {
+      return localStorage.getItem(name);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name: string, value: string): void => {
+    try {
+      localStorage.setItem(name, value);
+    } catch (err) {
+      console.warn(`[safeLocalStorage] Storage write failed for '${name}' (QuotaExceeded), recovering:`, err);
+      try {
+        localStorage.removeItem('skilliq_course_live_stats_v2');
+        localStorage.removeItem(name);
+        localStorage.setItem(name, value);
+      } catch {
+        // Graceful failover to memory without crashing React
+      }
+    }
+  },
+  removeItem: (name: string): void => {
+    try {
+      localStorage.removeItem(name);
+    } catch {
+      // ignore
+    }
+  },
+};
 
 interface Progress {
   courseId: string;
@@ -16,6 +81,27 @@ interface Progress {
   completionDate?: string;
   videoTimestamps?: Record<string, number>;
   updatedAt?: string;
+}
+
+function cleanProgressForFirestore(prog: Progress): Record<string, any> {
+  const clean: Record<string, any> = {
+    courseId: prog.courseId,
+    completedVideoIds: Array.isArray(prog.completedVideoIds) ? prog.completedVideoIds : [],
+    isCompleted: Boolean(prog.isCompleted),
+  };
+  if (prog.currentVideoId) clean.currentVideoId = String(prog.currentVideoId).slice(0, 100);
+  if (prog.completionDate) clean.completionDate = String(prog.completionDate).slice(0, 100);
+  if (prog.updatedAt) clean.updatedAt = String(prog.updatedAt).slice(0, 100);
+  if (prog.videoTimestamps && typeof prog.videoTimestamps === 'object') {
+    const cleanTimestamps: Record<string, number> = {};
+    for (const [vId, ts] of Object.entries(prog.videoTimestamps)) {
+      if (typeof ts === 'number' && !isNaN(ts)) {
+        cleanTimestamps[vId] = Math.floor(ts);
+      }
+    }
+    clean.videoTimestamps = cleanTimestamps;
+  }
+  return clean;
 }
 
 export type FavoriteItemType = 'playlist' | 'masterclass' | 'path' | 'book';
@@ -86,12 +172,14 @@ export const useStore = create<StoreState>()(
       setLanguage: (language) => set({ language }),
       setIsAuthModalOpen: (isOpen) => set({ isAuthModalOpen: isOpen }),
       setUser: async (user) => {
-        set({ user, userName: user?.displayName || 'Student' });
+        // Reset progress on user switch to ensure strict per-user progress isolation
+        set({ user, userName: user?.displayName || 'Student', progress: {} });
         if (user) {
           try {
             const profile = await initializeOrUpdateProfile(user);
             set({ publicProfile: profile });
             get().loadFavorites();
+            get().loadProgress();
           } catch (err) {
             console.error("Failed to initialize public profile", err);
           }
@@ -192,7 +280,10 @@ export const useStore = create<StoreState>()(
 
       loadProgress: async () => {
         const { user } = get();
-        if (!user) return;
+        if (!user) {
+          set({ progress: {} });
+          return;
+        }
         
         try {
           const { collection, getDocs } = await import('firebase/firestore');
@@ -345,7 +436,7 @@ export const useStore = create<StoreState>()(
 
         if (state.user) {
           try {
-            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), newProgress);
+            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), cleanProgressForFirestore(newProgress));
             if (isNewCompletion) {
               const hour = new Date().getHours();
               const isNightOwl = hour >= 22 || hour <= 4;
@@ -388,7 +479,7 @@ export const useStore = create<StoreState>()(
 
         if (state.user) {
           try {
-            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), newProgress);
+            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), cleanProgressForFirestore(newProgress));
           } catch (error) {
             console.error("Error saving progress:", error);
           }
@@ -428,7 +519,7 @@ export const useStore = create<StoreState>()(
 
         if (state.user) {
           try {
-            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), newProgress);
+            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), cleanProgressForFirestore(newProgress));
           } catch (error) {
             console.error("Error saving video timestamp:", error);
           }
@@ -468,7 +559,7 @@ export const useStore = create<StoreState>()(
 
         if (state.user) {
           try {
-            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), newProgress);
+            await setDoc(doc(db, `users/${state.user.uid}/progress/${courseId}`), cleanProgressForFirestore(newProgress));
             
             // Gamification checks
             const course = state.courses.find(c => c.id === courseId);
@@ -487,54 +578,11 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: 'nexa-store-storage',
-      merge: (persistedState: any, currentState) => {
-        const legacySeedBookIds = new Set([
-          "book-clean-code",
-          "book-deep-work",
-          "book-ai-superpowers",
-          "book-cyber-ghost",
-          "book-atomic-habits-en",
-          "book-pragmatic-programmer",
-          "book-zero-to-one",
-          "book-atomic-habits-ar",
-          "book-deep-work-ar",
-          "book-clean-code-ar",
-          "book-ai-future-ar",
-          "book-cyber-ar",
-          "book-ai-superpowers-en-2",
-          "book-ghost-in-the-wires",
-          "book-lean-startup",
-          "book-system-design-interview",
-          "book-refactoring",
-          "book-Zero-To-One-Ar-En"
-        ]);
-        const merged = { ...currentState, ...(persistedState || {}) };
-        if (Array.isArray(merged.books)) {
-          merged.books = merged.books.filter((b: any) => b && !legacySeedBookIds.has(b.id));
-        }
-        if (Array.isArray(merged.allBooks)) {
-          merged.allBooks = merged.allBooks.filter((b: any) => b && !legacySeedBookIds.has(b.id));
-        }
-        if (Array.isArray(merged.courses)) {
-          merged.courses = merged.courses.filter((c: any) => c && !LEGACY_SEED_PROJECT_IDS.has(c.id));
-        }
-        if (Array.isArray(merged.allCourses)) {
-          merged.allCourses = merged.allCourses.filter((c: any) => c && !LEGACY_SEED_PROJECT_IDS.has(c.id));
-        }
-        return merged;
-      },
+      storage: createJSONStorage(() => safeLocalStorage),
       partialize: (state) => ({ 
         language: state.language, 
         theme: state.theme,
         favorites: state.favorites,
-        courses: state.courses,
-        allCourses: state.allCourses,
-        books: state.books,
-        allBooks: state.allBooks,
-        learningPaths: state.learningPaths,
-        categories: state.categories,
-        banners: state.banners,
-        hasLoadedFromDb: state.hasLoadedFromDb
       }),
     }
   )

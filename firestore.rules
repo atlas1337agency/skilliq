@@ -90,12 +90,13 @@ service cloud.firestore {
     }
 
     function isValidCourseProgress(data) {
-      return hasOnlyAllowedFields(['courseId', 'completedVideoIds', 'currentVideoId', 'isCompleted', 'completionDate', 'videoTimestamps']) &&
+      return hasOnlyAllowedFields(['courseId', 'completedVideoIds', 'currentVideoId', 'isCompleted', 'completionDate', 'videoTimestamps', 'updatedAt']) &&
              data.courseId is string && data.courseId.size() > 0 && data.courseId.size() < 100 &&
              data.completedVideoIds is list && data.completedVideoIds.size() <= 1000 &&
              isValidOptionalString('currentVideoId', 0, 100) &&
              data.isCompleted is bool &&
              isValidOptionalString('completionDate', 0, 100) &&
+             isValidOptionalString('updatedAt', 0, 100) &&
              (!('videoTimestamps' in data) || data.videoTimestamps is map);
     }
 
@@ -265,7 +266,7 @@ service cloud.firestore {
       match /progress/{courseId} {
         allow read: if isOwner(userId) || isAdmin();
         allow create: if isOwner(userId) && isValidCourseProgress(request.resource.data) && request.resource.data.courseId == courseId;
-        allow update: if isOwner(userId) && isValidCourseProgress(request.resource.data) && request.resource.data.courseId == resource.data.courseId;
+        allow update: if isOwner(userId) && isValidCourseProgress(request.resource.data) && (request.resource.data.courseId == courseId || request.resource.data.courseId == resource.data.courseId);
         allow delete: if isOwner(userId) || isAdmin();
       }
       

@@ -51,7 +51,6 @@ import { DailyRewardCheckIn } from '../components/DailyRewardCheckIn';
 import { DailyTechQuest } from '../components/DailyTechQuest';
 import { AchievementsShowcase } from '../components/AchievementsShowcase';
 import { FavoriteButton } from '../components/FavoriteButton';
-import { DailyGoalExplainerModal } from '../components/DailyGoalExplainerModal';
 import { awardCustomXP } from '../lib/gamification';
 import { SupportTickets } from './SupportTickets';
 import { 
@@ -62,7 +61,7 @@ import {
   getLocalizedBookData 
 } from '../components/BookVideoModal';
 import { cn } from '../lib/utils';
-import { isCertificateEligible, getCategoryDisplayName } from '../lib/courseUtils';
+import { isCertificateEligible, getCategoryDisplayName, isProjectCourse, isMasterclassCourse } from '../lib/courseUtils';
 
 type DashboardTab = 'overview' | 'courses' | 'saved' | 'quests' | 'support';
 
@@ -114,15 +113,18 @@ export function Dashboard() {
 
   // Real-time Firestore snapshot listener for user progress (lessons, timestamps, courses)
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid) {
+      useStore.setState({ progress: {} });
+      return;
+    }
     try {
       const progressRef = collection(db, 'users', user.uid, 'progress');
       const unsub = onSnapshot(progressRef, (snapshot) => {
-        const currentProgress = { ...useStore.getState().progress };
+        const freshProgress: Record<string, any> = {};
         snapshot.docs.forEach((docSnap) => {
-          currentProgress[docSnap.id] = docSnap.data() as any;
+          freshProgress[docSnap.id] = docSnap.data() as any;
         });
-        useStore.setState({ progress: currentProgress });
+        useStore.setState({ progress: freshProgress });
       });
       return () => unsub();
     } catch (err) {
@@ -159,7 +161,8 @@ export function Dashboard() {
   const [submittedReviews, setSubmittedReviews] = useState<Record<string, boolean>>({});
 
   // Course filter & Pagination state
-  const [courseFilter, setCourseFilter] = useState<'all' | 'in_progress' | 'completed' | 'certified'>('all');
+  const [courseFilter, setCourseFilter] = useState<'all' | 'in_progress' | 'completed' | 'videos' | 'playlists' | 'projects' | 'certified'>('all');
+  const [trackTypeFilter, setTrackTypeFilter] = useState<'all' | 'videos' | 'playlists' | 'projects'>('all');
   const [courseCategoryFilter, setCourseCategoryFilter] = useState<string>('all');
   const [courseSearchQuery, setCourseSearchQuery] = useState('');
   const [courseCurrentPage, setCourseCurrentPage] = useState<number>(1);
@@ -208,7 +211,19 @@ export function Dashboard() {
     setCustomMinutesInput,
     showFloatingPopup,
     setShowFloatingPopup,
+    activeTaskTitle,
+    setActiveTaskTitle,
   } = useFocusTimer();
+
+  const [showGoalExplainerModal, setShowGoalExplainerModal] = useState<boolean>(false);
+  const [selectedGoalCourseId, setSelectedGoalCourseId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('skilliq_goal_course_id') || 'all';
+    } catch {
+      return 'all';
+    }
+  });
+  const [goalCelebrationToast, setGoalCelebrationToast] = useState<string | null>(null);
 
   const [customTimeInputVal, setCustomTimeInputVal] = useState<string>(String(customMinutesInput || 25));
 
@@ -254,6 +269,13 @@ export function Dashboard() {
     } catch {}
   };
 
+  const handleSelectGoalCourse = (courseId: string) => {
+    setSelectedGoalCourseId(courseId);
+    try {
+      localStorage.setItem('skilliq_goal_course_id', courseId);
+    } catch {}
+  };
+
   // Pools
   const coursePool = useMemo(() => courses.length > 0 ? courses : allCourses, [courses, allCourses]);
   const bookPool = useMemo(() => books.length > 0 ? books : allBooks, [books, allBooks]);
@@ -261,7 +283,15 @@ export function Dashboard() {
   // Real Enrolled Courses calculation - Realtime prioritized by most recent activity
   const startedCourses = useMemo(() => {
     return coursePool
-      .filter(c => progress[c.id])
+      .filter(c => {
+        const p = progress[c.id];
+        if (!p) return false;
+        const hasCompletedVideos = Array.isArray(p.completedVideoIds) && p.completedVideoIds.length > 0;
+        const hasCurrentVideo = Boolean(p.currentVideoId);
+        const hasTimestamps = Boolean(p.videoTimestamps && Object.keys(p.videoTimestamps).length > 0);
+        const isCompleted = Boolean(p.isCompleted);
+        return hasCompletedVideos || hasCurrentVideo || hasTimestamps || isCompleted;
+      })
       .sort((a, b) => {
         const progA = progress[a.id];
         const progB = progress[b.id];
@@ -277,6 +307,11 @@ export function Dashboard() {
   const completedCourses = useMemo(() => startedCourses.filter(c => progress[c.id]?.isCompleted), [startedCourses, progress]);
   const earnedCertificates = useMemo(() => completedCourses.filter(c => isCertificateEligible(c)), [completedCourses]);
   const inProgressCourses = useMemo(() => startedCourses.filter(c => !progress[c.id]?.isCompleted), [startedCourses, progress]);
+
+  // Breakdown by content type: Videos (Masterclasses / single video), Playlists (multi-lesson courses), Projects (practical builds)
+  const startedMasterclasses = useMemo(() => startedCourses.filter(c => isMasterclassCourse(c) && !isProjectCourse(c)), [startedCourses]);
+  const startedPlaylists = useMemo(() => startedCourses.filter(c => !isMasterclassCourse(c) && !isProjectCourse(c)), [startedCourses]);
+  const startedProjects = useMemo(() => startedCourses.filter(c => isProjectCourse(c)), [startedCourses]);
 
   // Real Lessons Completed Count Today (Realtime synced from localStorage & Firestore progress)
   const dailyLessonsCompletedCount = useMemo(() => {
@@ -300,6 +335,108 @@ export function Dashboard() {
 
     return count;
   }, [progress, inProgressCourses, progressTick]);
+
+  // Selected Course for Daily Goal (or null if 'all')
+  const selectedGoalCourse = useMemo(() => {
+    if (selectedGoalCourseId === 'all') return null;
+    return coursePool.find(c => c.id === selectedGoalCourseId) || null;
+  }, [coursePool, selectedGoalCourseId]);
+
+  // Lessons / Minutes achieved toward today's goal
+  const dailyGoalAchievedCount = useMemo(() => {
+    if (dailyGoalType === 'minutes') return focusMinutesToday;
+    if (!selectedGoalCourse) return dailyLessonsCompletedCount;
+
+    const courseProg = progress[selectedGoalCourse.id];
+    const todayStr = new Date().toISOString().split('T')[0];
+    let count = 0;
+    try {
+      const loggedToday: string[] = JSON.parse(localStorage.getItem(`skilliq_lessons_done_${todayStr}`) || '[]');
+      if (Array.isArray(loggedToday) && selectedGoalCourse.videos) {
+        const courseVidIds = new Set(selectedGoalCourse.videos.map(v => v.id));
+        count = loggedToday.filter(id => courseVidIds.has(id)).length;
+      }
+    } catch {}
+
+    if (courseProg?.updatedAt?.startsWith(todayStr)) {
+      count = Math.max(count, courseProg.completedVideoIds?.length || 0);
+    }
+    return Math.max(count, Math.min(dailyLessonsCompletedCount, dailyGoalTarget));
+  }, [dailyGoalType, selectedGoalCourse, focusMinutesToday, dailyLessonsCompletedCount, progress, dailyGoalTarget]);
+
+  const handleStartFocusOnCourse = (courseTitle: string, minutes?: number) => {
+    const mins = minutes || (dailyGoalType === 'minutes' ? dailyGoalTarget : 25);
+    setCustomMinutesInput(mins);
+    setActiveTaskTitle(courseTitle);
+    startFocus(mins, 'work', courseTitle);
+    setShowFloatingPopup(true);
+  };
+
+  const handleCompleteCourseVideo = async (targetCourseId?: string) => {
+    const courseId = (!targetCourseId || targetCourseId === 'all')
+      ? (selectedGoalCourseId !== 'all' ? selectedGoalCourseId : (startedCourses[0]?.id || coursePool[0]?.id))
+      : targetCourseId;
+
+    const course = coursePool.find(c => c.id === courseId) || coursePool[0];
+    if (!course || !course.videos || course.videos.length === 0) return;
+
+    const courseProg = progress[course.id] || { completedVideoIds: [] };
+    const completedSet = new Set(courseProg.completedVideoIds || []);
+    const nextVideo = course.videos.find(v => !completedSet.has(v.id)) || course.videos[0];
+    const nextIndex = course.videos.findIndex(v => v.id === nextVideo.id);
+    const followingVideo = course.videos[nextIndex + 1]?.id;
+
+    await markVideoCompleted(course.id, nextVideo.id, followingVideo);
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const newCount = dailyLessonsCompletedCount + 1;
+
+    let toastMsg = isRtl
+      ? `✅ تم تسجيل إكمال الفيديو: "${nextVideo.title}" (+15 XP)!`
+      : `✅ Completed video: "${nextVideo.title}" (+15 XP)!`;
+
+    if (dailyGoalType === 'lessons' && newCount >= dailyGoalTarget) {
+      const bonusKey = `skilliq_goal_bonus_${todayStr}_${user?.uid || 'guest'}`;
+      const alreadyClaimed = localStorage.getItem(bonusKey);
+      if (!alreadyClaimed) {
+        try {
+          localStorage.setItem(bonusKey, 'true');
+        } catch {}
+
+        const bonusXp = 30;
+        if (user?.uid) {
+          try {
+            const updated = await awardCustomXP(user.uid, bonusXp, {
+              id: 'daily_goal_champion',
+              name: 'Goal Crusher',
+              description: 'Completed daily learning target and earned the green check!',
+              icon: 'Target'
+            });
+            if (updated) {
+              useStore.setState({ publicProfile: updated as any });
+            }
+          } catch {}
+        } else {
+          useStore.setState(s => ({
+            publicProfile: s.publicProfile ? { ...s.publicProfile, xp: (s.publicProfile.xp || 0) + bonusXp } : null
+          }));
+        }
+
+        toastMsg = isRtl
+          ? `🎉 رائع! أنجزت هدف اليوم وحصلت على العلامة الخضراء (✅) مع +${bonusXp} نقطة XP إضافية!`
+          : `🎉 Daily Goal Accomplished! You earned the Green Check (✅) & +${bonusXp} Bonus XP!`;
+      }
+    }
+
+    setGoalCelebrationToast(toastMsg);
+    setTimeout(() => {
+      setGoalCelebrationToast(null);
+    }, 6000);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('skilliq-progress-updated'));
+    }
+  };
 
   // ==============================================================
   // REAL DATA & REALTIME: "Resume Where You Left Off" Engine
@@ -380,17 +517,20 @@ export function Dashboard() {
   // REAL DATA: "Active Learning Tracks"
   // ==============================================================
   const activeLearningTracks = useMemo(() => {
-    if (inProgressCourses.length >= 2) {
-      return inProgressCourses.slice(0, 4);
+    // Return strictly courses this user has actually enrolled in or started
+    // Filtered by selected content track (videos/masterclasses, playlists, or projects)
+    let pool = startedCourses;
+    if (trackTypeFilter === 'videos') {
+      pool = startedMasterclasses;
+    } else if (trackTypeFilter === 'playlists') {
+      pool = startedPlaylists;
+    } else if (trackTypeFilter === 'projects') {
+      pool = startedProjects;
     }
-    if (inProgressCourses.length === 1) {
-      // Combine the in-progress course with the top recommended platform course
-      const other = coursePool.find(c => c.id !== inProgressCourses[0].id);
-      return other ? [inProgressCourses[0], other] : inProgressCourses;
-    }
-    // No in-progress courses: provide the top 2 organic curated courses
-    return coursePool.slice(0, 2);
-  }, [inProgressCourses, coursePool]);
+
+    // Sort strictly by most recent activity timestamp, then by progress
+    return pool.slice(0, 6);
+  }, [startedCourses, startedMasterclasses, startedPlaylists, startedProjects, trackTypeFilter]);
 
   // Saved / Favorite items breakdown
   const favoriteItemsList = useMemo(() => {
@@ -443,6 +583,9 @@ export function Dashboard() {
     if (courseFilter === 'in_progress') list = inProgressCourses;
     else if (courseFilter === 'completed') list = completedCourses;
     else if (courseFilter === 'certified') list = earnedCertificates;
+    else if (courseFilter === 'videos') list = startedMasterclasses;
+    else if (courseFilter === 'playlists') list = startedPlaylists;
+    else if (courseFilter === 'projects') list = startedProjects;
 
     if (courseCategoryFilter !== 'all') {
       list = list.filter(c => c.category === courseCategoryFilter);
@@ -457,7 +600,7 @@ export function Dashboard() {
       );
     }
     return list;
-  }, [courseFilter, courseCategoryFilter, courseSearchQuery, startedCourses, inProgressCourses, completedCourses, earnedCertificates]);
+  }, [courseFilter, courseCategoryFilter, courseSearchQuery, startedCourses, inProgressCourses, completedCourses, earnedCertificates, startedMasterclasses, startedPlaylists, startedProjects]);
 
   // Paginated Courses Slice
   const totalCoursePages = Math.max(1, Math.ceil(displayedCourses.length / coursesPerPage));
@@ -495,7 +638,7 @@ export function Dashboard() {
     const today = new Date();
     const currentDayIdx = (today.getDay() + 6) % 7; // 0 for Mon, 6 for Sun
 
-    const currentAchieved = dailyGoalType === 'lessons' ? dailyLessonsCompletedCount : focusMinutesToday;
+    const currentAchieved = dailyGoalAchievedCount;
     const isTodayGoalComplete = currentAchieved >= dailyGoalTarget;
 
     return days.map((d, idx) => {
@@ -831,325 +974,25 @@ export function Dashboard() {
             {/* LEFT COLUMN: Velocity & Real Active Learning Tracks */}
             <div className="lg:col-span-7 xl:col-span-8 space-y-6">
               
-              {/* 2. VERY SMART WEEKLY VELOCITY & DAILY GOAL (REAL DATE/TIME + GREEN/RED CHECK) */}
-              <div className="rounded-2xl bg-card border border-border/80 p-5 sm:p-6 space-y-5 text-start">
-                
-                {/* Real Date & Live Ticking Clock Display Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-muted/40 border border-border/70">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
-                      <Calendar className="w-4 h-4" />
-                    </div>
+              {/* 3. SMART ACTIVE LEARNING TRACKS (REALTIME AUTO-SYNCED) */}
+              <div className="space-y-4 text-start">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-5 h-5 text-primary shrink-0" />
                     <div>
-                      <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                        {isRtl ? 'التاريخ الفعلي الحالي' : 'Live Current Date'}
-                      </div>
-                      <div className="font-bold text-foreground text-xs sm:text-sm">
-                        {currentLiveTime.toLocaleDateString(isRtl ? 'ar-EG' : 'en-US', {
-                          weekday: 'long',
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric'
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2.5 self-start sm:self-auto">
-                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 shrink-0">
-                      <Clock className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span>{isRtl ? 'الوقت المباشر' : 'Live Local Time'}</span>
-                      </div>
-                      <div className="font-mono font-extrabold text-foreground text-xs sm:text-sm tabular-nums tracking-tight">
-                        {currentLiveTime.toLocaleTimeString(isRtl ? 'ar-EG' : 'en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                          hour12: true
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Header with Title and Daily Goal Selector */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/60">
-                  <div className="flex items-center gap-2">
-                    <Target className="w-4 h-4 text-primary" />
-                    <h3 className="font-bold text-sm sm:text-base text-foreground">
-                      {isRtl ? 'وتيرة التعلم والهدف اليومي' : 'Weekly Velocity & Daily Goal'}
-                    </h3>
-                  </div>
-
-                  {/* Goal Mode & Target Selector */}
-                  <div className="flex items-center gap-2 self-start sm:self-auto text-xs">
-                    <div className="flex items-center gap-1 p-0.5 bg-muted/60 rounded-lg border border-border/60">
-                      <button
-                        onClick={() => handleSetDailyGoal(dailyGoalTarget, 'lessons')}
-                        className={cn(
-                          "px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer",
-                          dailyGoalType === 'lessons' ? "bg-card text-foreground font-bold shadow-2xs" : "text-muted-foreground"
-                        )}
-                      >
-                        {isRtl ? 'دروس' : 'Lessons'}
-                      </button>
-                      <button
-                        onClick={() => handleSetDailyGoal(30, 'minutes')}
-                        className={cn(
-                          "px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer",
-                          dailyGoalType === 'minutes' ? "bg-card text-foreground font-bold shadow-2xs" : "text-muted-foreground"
-                        )}
-                      >
-                        {isRtl ? 'دقائق' : 'Minutes'}
-                      </button>
-                    </div>
-
-                    {dailyGoalType === 'lessons' ? (
-                      <div className="flex items-center gap-1">
-                        {[1, 2, 3, 5].map(t => (
-                          <button
-                            key={t}
-                            onClick={() => handleSetDailyGoal(t, 'lessons')}
-                            className={cn(
-                              "px-2 py-1 rounded-md text-xs font-mono font-bold transition-colors cursor-pointer",
-                              dailyGoalTarget === t
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted text-muted-foreground hover:text-foreground"
-                            )}
-                          >
-                            {t}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1">
-                        {[15, 30, 45, 60].map(m => (
-                          <button
-                            key={m}
-                            onClick={() => handleSetDailyGoal(m, 'minutes')}
-                            className={cn(
-                              "px-2 py-1 rounded-md text-xs font-mono font-bold transition-colors cursor-pointer",
-                              dailyGoalTarget === m
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted text-muted-foreground hover:text-foreground"
-                            )}
-                          >
-                            {m}m
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 7-Day Velocity: GREEN CHECK IF COMPLETED, RED CHECK IF NOT COMPLETED */}
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <TrendingUp className="w-3.5 h-3.5 text-primary" />
-                      <span>{isRtl ? 'سجل الأيام السبعة (أخضر = مكتمل، أحمر = غير مكتمل)' : '7-Day Tracker (Green = Met, Red = Missed)'}</span>
-                    </span>
-                    <span className="font-mono tabular-nums font-semibold text-foreground">
-                      {streak} {isRtl ? 'أيام متواصلة' : 'days streak'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-                    {daysOfWeek.map((day) => (
-                      <div 
-                        key={day.key}
-                        className={cn(
-                          "p-2 sm:p-2.5 rounded-xl border flex flex-col items-center justify-center text-center transition-all",
-                          day.isToday 
-                            ? day.isGoalMet
-                              ? "border-emerald-500/60 bg-emerald-500/10 ring-2 ring-emerald-500/30"
-                              : "border-rose-500/60 bg-rose-500/10 ring-2 ring-rose-500/30"
-                            : day.isGoalMet
-                            ? "border-emerald-500/40 bg-emerald-500/5"
-                            : day.isGoalMissed
-                            ? "border-rose-500/40 bg-rose-500/5"
-                            : "border-border/60 bg-muted/20"
-                        )}
-                      >
-                        <span className="text-[10px] font-bold text-muted-foreground uppercase mb-1">
-                          {isRtl ? day.ar : day.en}
+                      <h3 className="font-bold text-sm sm:text-base text-foreground flex items-center gap-2">
+                        <span>{isRtl ? 'المسارات التعليمية النشطة' : 'Active Learning Tracks'}</span>
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold">
+                          {startedCourses.length} {isRtl ? 'مسجلة' : 'enrolled'}
                         </span>
-
-                        {/* GREEN CHECK if goal completed, RED CHECK if not completed / missed */}
-                        {day.isGoalMet ? (
-                          <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
-                            <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          </div>
-                        ) : day.isGoalMissed ? (
-                          <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-xs">
-                            <X className="w-3.5 h-3.5 stroke-[3]" />
-                          </div>
-                        ) : (
-                          <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-muted text-muted-foreground/40 flex items-center justify-center text-[10px] font-bold">
-                            ·
-                          </div>
-                        )}
-
-                        <span className={cn(
-                          "text-[9px] sm:text-[10px] font-extrabold mt-1",
-                          day.isGoalMet 
-                            ? "text-emerald-600 dark:text-emerald-400" 
-                            : day.isGoalMissed 
-                            ? "text-rose-600 dark:text-rose-400" 
-                            : "text-muted-foreground/50"
-                        )}>
-                          {day.isGoalMet 
-                            ? (isRtl ? 'مكتمل' : 'Met') 
-                            : day.isGoalMissed 
-                            ? (isRtl ? 'غير مكتمل' : 'Missed') 
-                            : (isRtl ? 'قادم' : 'Pending')}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Real Daily Goal Status Banner: GREEN IF COMPLETED, RED IF NOT COMPLETED */}
-                {(() => {
-                  const currentAchieved = dailyGoalType === 'lessons' ? dailyLessonsCompletedCount : focusMinutesToday;
-                  const currentTarget = dailyGoalTarget;
-                  const pct = Math.min(100, Math.round((currentAchieved / Math.max(currentTarget, 1)) * 100));
-                  const isDone = currentAchieved >= currentTarget;
-                  const remaining = Math.max(0, currentTarget - currentAchieved);
-
-                  return (
-                    <div className="space-y-3">
-                      {isDone ? (
-                        /* GREEN CHECK: GOAL COMPLETED */
-                        <div className="p-4 rounded-xl bg-emerald-500/10 border-2 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                              <Check className="w-5 h-5 stroke-[3]" />
-                            </div>
-                            <div>
-                              <div className="font-black text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm flex items-center gap-1.5">
-                                <span>{isRtl ? '🎉 تم إنجاز الهدف اليومي بنجاح!' : '🎉 Daily Goal Accomplished!'}</span>
-                              </div>
-                              <div className="text-[11px] text-muted-foreground mt-0.5">
-                                {isRtl 
-                                  ? `رائع! أنجزت ${currentAchieved} من أصل ${currentTarget} ${dailyGoalType === 'lessons' ? 'دروس' : 'دقيقة'} وتم حماية خطك اليومي بنجاح.` 
-                                  : `Target reached (${currentAchieved}/${currentTarget} ${dailyGoalType === 'lessons' ? 'lessons' : 'minutes'})! Your streak is safely shielded today.`}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                            <span className="px-3 py-1 rounded-full bg-emerald-500 text-white font-mono font-black text-xs flex items-center gap-1.5 shadow-xs">
-                              <Check className="w-3.5 h-3.5 stroke-[3]" />
-                              <span>100% {isRtl ? 'مكتمل' : 'Done'}</span>
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        /* RED CHECK: GOAL INCOMPLETE */
-                        <div className="p-4 rounded-xl bg-rose-500/10 border-2 border-rose-500/50 text-rose-600 dark:text-rose-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                              <X className="w-5 h-5 stroke-[3]" />
-                            </div>
-                            <div>
-                              <div className="font-black text-rose-600 dark:text-rose-400 text-xs sm:text-sm flex items-center gap-1.5">
-                                <span>{isRtl ? '⚠️ الهدف اليومي غير مكتمل بعد' : '⚠️ Daily Goal Incomplete'}</span>
-                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-600 dark:text-rose-400">
-                                  {isRtl ? `متبقي ${remaining}` : `${remaining} left`}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-muted-foreground mt-0.5">
-                                {isRtl 
-                                  ? `أنجزت ${currentAchieved} من أصل ${currentTarget} ${dailyGoalType === 'lessons' ? 'دروس' : 'دقيقة'} — تبقّى ${remaining} لإنجاز هدف اليوم وتأمين الخط.` 
-                                  : `Completed ${currentAchieved} of ${currentTarget} ${dailyGoalType === 'lessons' ? 'lessons' : 'minutes'} — finish ${remaining} more before midnight to shield your streak!`}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                            <span className="px-3 py-1 rounded-full bg-rose-500 text-white font-mono font-black text-xs flex items-center gap-1.5 shadow-xs">
-                              <X className="w-3.5 h-3.5 stroke-[3]" />
-                              <span>{pct}% {isRtl ? 'غير مكتمل' : 'Incomplete'}</span>
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Progress Line with Live Midnight Countdown */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span>{isRtl ? 'ينتهي موعد هدف اليوم خلال:' : 'Daily goal window closes in:'}</span>
-                            <span className="font-mono font-bold text-foreground ms-1">{midnightCountdown}</span>
-                          </span>
-                          <span className="font-mono font-bold tabular-nums text-foreground">
-                            {currentAchieved} / {currentTarget} {dailyGoalType === 'lessons' ? (isRtl ? 'دروس' : 'lessons') : (isRtl ? 'دقيقة' : 'mins')}
-                          </span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2.5 overflow-hidden">
-                          <div 
-                            className={cn(
-                              "h-full rounded-full transition-all duration-500",
-                              isDone ? "bg-emerald-500" : "bg-rose-500"
-                            )}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Interactive Focus Link when in minutes mode or incomplete */}
-                      <div className="pt-2 border-t border-border/60 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                          <Timer className="w-3.5 h-3.5 text-primary" />
-                          <span>{isRtl ? 'متصل مباشرة بمساعد التركيز الذكي:' : 'Connected directly to Focus Companion:'}</span>
-                          <span className="font-mono font-bold text-foreground">{focusMinutesToday}m {isRtl ? 'اليوم' : 'today'}</span>
-                        </div>
-
-                        {!isDone && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const minsNeeded = dailyGoalType === 'minutes' ? Math.max(5, remaining) : 25;
-                              setCustomMinutesInput(minsNeeded);
-                              startFocus(minsNeeded, 'work');
-                              setShowFloatingPopup(true);
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
-                          >
-                            <Play className="w-3 h-3 fill-current" />
-                            <span>
-                              {isRtl 
-                                ? (dailyGoalType === 'minutes' ? `بدء جلسة تركيز (${remaining} دقيقة)` : 'بدء جلسة تركيز للهدف') 
-                                : (dailyGoalType === 'minutes' ? `Launch Focus (${remaining}m to complete)` : 'Start Focus Session')}
-                            </span>
-                          </button>
-                        )}
-                      </div>
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground hidden sm:block">
+                        {isRtl ? 'تتبع لحظي وتلقائي لآخر الفيديوهات، قوائم التشغيل، والمشاريع البرمجية التي تدرسها.' : 'Real-time automatic sync for your latest videos, playlists, and projects.'}
+                      </p>
                     </div>
-                  );
-                })()}
-              </div>
-
-              {/* 3. REAL DATA: "ACTIVE LEARNING TRACKS" - CONNECTED DIRECTLY WITH MY COURSES */}
-              <div className="space-y-3 text-start">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-primary" />
-                    <h3 className="font-bold text-sm sm:text-base text-foreground">
-                      {isRtl ? 'المسارات والدورات الجارية (بيانات حقيقية)' : 'Active Learning Tracks (Real Data)'}
-                    </h3>
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold">
-                      {startedCourses.length} {isRtl ? 'دورات مسجلة' : 'enrolled'}
-                    </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
                     <button
                       type="button"
                       onClick={() => {
@@ -1164,74 +1007,200 @@ export function Dashboard() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {activeLearningTracks.map(course => {
-                    const courseProg = progress[course.id] || { completedVideoIds: [] };
-                    const completedCount = courseProg.completedVideoIds?.length || 0;
-                    const totalCount = course.videos?.length || 1;
-                    const pct = Math.round((completedCount / totalCount) * 100);
-                    const isStarted = Boolean(progress[course.id]);
+                {/* Smart Track Filters: All, Videos, Playlists, Projects */}
+                {startedCourses.length > 0 && (
+                  <div className="flex items-center gap-1.5 p-1 bg-muted/40 rounded-xl border border-border/70 overflow-x-auto no-scrollbar">
+                    <button
+                      type="button"
+                      onClick={() => setTrackTypeFilter('all')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                        trackTypeFilter === 'all' ? "bg-card text-foreground shadow-2xs font-bold border border-border/60" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {isRtl ? 'الكل' : 'All'} ({startedCourses.length})
+                    </button>
 
-                    return (
-                      <div 
-                        key={course.id}
-                        className="p-4 rounded-2xl bg-card border border-border/80 hover:border-primary/40 transition-all flex flex-col justify-between space-y-3"
-                      >
-                        <div className="flex items-start gap-3">
-                          <img 
-                            src={course.thumbnail} 
-                            alt={course.title} 
-                            className="w-16 h-12 rounded-lg object-cover bg-muted shrink-0" 
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="space-y-1 min-w-0 flex-1">
-                            <span className="text-[10px] text-primary font-bold uppercase tracking-wider block">
-                              {course.category}
-                            </span>
-                            <h4 className="font-bold text-xs sm:text-sm text-foreground line-clamp-1">
-                              {course.title}
-                            </h4>
-                            <p className="text-[11px] text-muted-foreground line-clamp-1">
-                              {course.instructor}
-                            </p>
+                    <button
+                      type="button"
+                      onClick={() => setTrackTypeFilter('videos')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1",
+                        trackTypeFilter === 'videos' ? "bg-card text-foreground shadow-2xs font-bold border border-border/60" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <PlayCircle className="w-3 h-3 text-sky-500" />
+                      <span>{isRtl ? 'فيديوهات وماستركلاس' : 'Videos'}</span>
+                      <span className="font-mono text-[10px] opacity-75">({startedMasterclasses.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setTrackTypeFilter('playlists')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1",
+                        trackTypeFilter === 'playlists' ? "bg-card text-foreground shadow-2xs font-bold border border-border/60" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Layers className="w-3 h-3 text-indigo-500" />
+                      <span>{isRtl ? 'قوائم تشغيل ودورات' : 'Playlists'}</span>
+                      <span className="font-mono text-[10px] opacity-75">({startedPlaylists.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setTrackTypeFilter('projects')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1",
+                        trackTypeFilter === 'projects' ? "bg-card text-foreground shadow-2xs font-bold border border-border/60" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-500" />
+                      <span>{isRtl ? 'مشاريع عملية' : 'Projects'}</span>
+                      <span className="font-mono text-[10px] opacity-75">({startedProjects.length})</span>
+                    </button>
+                  </div>
+                )}
+
+                {activeLearningTracks.length === 0 ? (
+                  <div className="p-8 sm:p-10 rounded-2xl bg-card border border-dashed border-border/80 text-center space-y-3 shadow-2xs">
+                    <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center mx-auto">
+                      <BookOpen className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="font-bold text-sm sm:text-base text-foreground">
+                        {isRtl ? 'لا توجد مسارات نشطة حالياً' : 'No Active Tracks Yet'}
+                      </h4>
+                      <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                        {isRtl 
+                          ? 'لم تسجل في أي دورة أو مشروع بعد. استكشف كتالوج المقررات وابدأ أي فيديو أو قائمة أو مشروع ليتم تحديثه تلقائياً هنا.' 
+                          : 'You have not enrolled in any course, video, or project yet. Explore our catalog and launch any track to see automatic real-time progress here.'}
+                      </p>
+                    </div>
+                    <Link 
+                      to="/courses"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 transition-all shadow-2xs"
+                    >
+                      <span>{t('explore_courses', 'Explore Courses')}</span>
+                      <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {activeLearningTracks.map(course => {
+                      const courseProg = progress[course.id] || { completedVideoIds: [] };
+                      const completedCount = courseProg.completedVideoIds?.length || 0;
+                      const totalCount = course.videos?.length || 1;
+                      const pct = Math.round((completedCount / totalCount) * 100);
+                      const isStarted = Boolean(progress[course.id]);
+                      const isProj = isProjectCourse(course);
+                      const isMaster = isMasterclassCourse(course);
+
+                      // Smart detection of last active lesson
+                      const currentVid = course.videos?.find(v => v.id === courseProg.currentVideoId) 
+                        || course.videos?.find(v => !courseProg.completedVideoIds?.includes(v.id))
+                        || course.videos?.[0];
+
+                      return (
+                        <div 
+                          key={course.id}
+                          className="p-4 rounded-2xl bg-card border border-border/80 hover:border-primary/40 transition-all flex flex-col justify-between space-y-3 relative group"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="relative shrink-0">
+                              <img 
+                                src={course.thumbnail} 
+                                alt={course.title} 
+                                className="w-16 h-12 rounded-lg object-cover bg-muted shrink-0" 
+                                referrerPolicy="no-referrer"
+                              />
+                              {isProj ? (
+                                <span className="absolute -top-1.5 -start-1.5 px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[8px] uppercase tracking-wider shadow-xs">
+                                  {isRtl ? 'مشروع' : 'Project'}
+                                </span>
+                              ) : isMaster ? (
+                                <span className="absolute -top-1.5 -start-1.5 px-1.5 py-0.5 rounded-full bg-sky-500 text-white font-bold text-[8px] uppercase tracking-wider shadow-xs">
+                                  {isRtl ? 'ماستركلاس' : 'Video'}
+                                </span>
+                              ) : (
+                                <span className="absolute -top-1.5 -start-1.5 px-1.5 py-0.5 rounded-full bg-indigo-500 text-white font-bold text-[8px] uppercase tracking-wider shadow-xs">
+                                  {isRtl ? 'قائمة' : 'Playlist'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-1 min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[10px] text-primary font-bold uppercase tracking-wider truncate">
+                                  {course.category}
+                                </span>
+                                {courseProg.isCompleted && (
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                    {isRtl ? 'مكتمل ✓' : 'Done ✓'}
+                                  </span>
+                                )}
+                              </div>
+                              <h4 className="font-bold text-xs sm:text-sm text-foreground line-clamp-1 group-hover:text-primary transition-colors">
+                                {course.title}
+                              </h4>
+                              <p className="text-[11px] text-muted-foreground line-clamp-1">
+                                {course.instructor}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Last Video / Current Active Lesson indicator */}
+                          {currentVid && (
+                            <div className="px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50 text-[11px] flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 truncate text-foreground font-medium">
+                                <PlayCircle className="w-3 h-3 text-primary shrink-0" />
+                                <span className="truncate">{currentVid.title}</span>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                {currentVid.duration || ''}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="space-y-2 pt-1 border-t border-border/60">
+                            <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-muted-foreground">
+                              <span className="font-bold text-foreground">{pct}% {t('completed')}</span>
+                              <span>{completedCount} / {totalCount} {t('videos')}</span>
+                            </div>
+                            <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                              <div 
+                                className={cn("h-full rounded-full transition-all", courseProg.isCompleted ? "bg-emerald-500" : "bg-primary")} 
+                                style={{ width: `${pct}%` }} 
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <Link
+                                to={`/course/${course.id}`}
+                                className="py-2 px-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs text-center flex items-center justify-center gap-1 transition-colors shadow-2xs"
+                              >
+                                <span>{isStarted ? (isRtl ? 'متابعة' : 'Resume') : (isRtl ? 'بدء' : 'Start')}</span>
+                                <ArrowRight className="w-3 h-3 rtl:rotate-180" />
+                              </Link>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCourseSearchQuery(course.title);
+                                  setActiveTab('courses');
+                                }}
+                                className="py-2 px-2.5 rounded-lg bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs text-center flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <BookOpen className="w-3 h-3 text-muted-foreground" />
+                                <span className="truncate">{isRtl ? 'في دوراتي' : 'In My Courses'}</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
-
-                        <div className="space-y-2 pt-1 border-t border-border/60">
-                          <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-muted-foreground">
-                            <span>{pct}% {t('completed')}</span>
-                            <span>{completedCount} / {totalCount} {t('videos')}</span>
-                          </div>
-                          <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-                            <div className="bg-primary h-full rounded-full transition-all" style={{ width: `${pct}%` }} />
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <Link
-                              to={`/course/${course.id}`}
-                              className="py-2 px-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs text-center flex items-center justify-center gap-1 transition-colors"
-                            >
-                              <span>{isStarted ? (isRtl ? 'متابعة' : 'Resume') : (isRtl ? 'بدء' : 'Start')}</span>
-                              <ArrowRight className="w-3 h-3 rtl:rotate-180" />
-                            </Link>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCourseSearchQuery(course.title);
-                                setActiveTab('courses');
-                              }}
-                              className="py-2 px-2.5 rounded-lg bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs text-center flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                            >
-                              <BookOpen className="w-3 h-3 text-muted-foreground" />
-                              <span className="truncate">{isRtl ? 'في دوراتي' : 'In My Courses'}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
             </div>
@@ -1289,6 +1258,53 @@ export function Dashboard() {
                       <span>{isRtl ? 'استراحة قهوة' : 'Coffee Break'}</span>
                     </button>
                   </div>
+                </div>
+
+                {/* Active Focus Session Info */}
+                <div className="p-3 rounded-xl bg-muted/30 border border-border/70 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-foreground">
+                      <Target className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span>{isRtl ? 'جلسة التركيز المباشرة:' : 'Focus Target:'}</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold text-[10px] flex items-center gap-1 font-mono">
+                      <Clock className="w-3 h-3" />
+                      <span>{focusMinutesToday}m {isRtl ? 'اليوم' : 'today'}</span>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span className="truncate max-w-[200px] font-medium text-foreground">
+                      {activeTaskTitle 
+                        ? `🎯 ${activeTaskTitle}` 
+                        : (inProgressCourses[0] ? inProgressCourses[0].title : (isRtl ? 'جلسة دراسة مركزة' : 'Deep Study Session'))}
+                    </span>
+                    {activeTaskTitle && (
+                      <button 
+                        type="button" 
+                        onClick={() => setActiveTaskTitle(null)}
+                        className="text-muted-foreground hover:text-foreground ms-1 cursor-pointer"
+                        title={isRtl ? 'مسح' : 'Clear'}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {inProgressCourses.length > 0 && (
+                    <div className="pt-2 border-t border-border/50 flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground truncate max-w-[170px]">
+                        {inProgressCourses[0].title}
+                      </span>
+                      <Link
+                        to={`/course/${inProgressCourses[0].id}`}
+                        className="text-primary hover:underline font-bold text-[10px] flex items-center gap-1 shrink-0"
+                      >
+                        <span>{isRtl ? 'متابعة الدورة' : 'Resume'}</span>
+                        <ArrowRight className="w-2.5 h-2.5 rtl:rotate-180" />
+                      </Link>
+                    </div>
+                  )}
                 </div>
 
                 {/* Custom Time Selection & Presets */}
@@ -1494,7 +1510,7 @@ export function Dashboard() {
               </p>
             </div>
 
-            {/* Filter segments */}
+            {/* Filter segments: All, In Progress, Completed, Videos, Playlists, Projects, Certificates */}
             <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-xl border border-border/70 overflow-x-auto no-scrollbar shrink-0">
               <button
                 onClick={() => setCourseFilter('all')}
@@ -1513,6 +1529,39 @@ export function Dashboard() {
                 )}
               >
                 {t('filter_in_progress', 'In Progress')} ({inProgressCourses.length})
+              </button>
+              <button
+                onClick={() => setCourseFilter('videos')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1",
+                  courseFilter === 'videos' ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <PlayCircle className="w-3 h-3 text-sky-500" />
+                <span>{isRtl ? 'فيديوهات' : 'Videos'}</span>
+                <span className="font-mono text-[10px] opacity-75">({startedMasterclasses.length})</span>
+              </button>
+              <button
+                onClick={() => setCourseFilter('playlists')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1",
+                  courseFilter === 'playlists' ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Layers className="w-3 h-3 text-indigo-500" />
+                <span>{isRtl ? 'قوائم تشغيل' : 'Playlists'}</span>
+                <span className="font-mono text-[10px] opacity-75">({startedPlaylists.length})</span>
+              </button>
+              <button
+                onClick={() => setCourseFilter('projects')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1",
+                  courseFilter === 'projects' ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Sparkles className="w-3 h-3 text-amber-500" />
+                <span>{isRtl ? 'مشاريع' : 'Projects'}</span>
+                <span className="font-mono text-[10px] opacity-75">({startedProjects.length})</span>
               </button>
               <button
                 onClick={() => setCourseFilter('completed')}
@@ -1611,10 +1660,26 @@ export function Dashboard() {
                           </div>
                         )}
 
-                        <div className="absolute top-2.5 start-2.5 flex items-center gap-1.5">
+                        <div className="absolute top-2.5 start-2.5 flex items-center gap-1.5 flex-wrap">
                           <span className="bg-background/90 backdrop-blur-xs px-2 py-0.5 rounded-md text-[10px] font-bold text-foreground">
                             {course.category}
                           </span>
+                          {isProjectCourse(course) ? (
+                            <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-wider shadow-xs flex items-center gap-0.5">
+                              <Sparkles className="w-2.5 h-2.5" />
+                              <span>{isRtl ? 'مشروع' : 'Project'}</span>
+                            </span>
+                          ) : isMasterclassCourse(course) ? (
+                            <span className="px-1.5 py-0.5 rounded-md bg-sky-500 text-white font-bold text-[9px] uppercase tracking-wider shadow-xs flex items-center gap-0.5">
+                              <PlayCircle className="w-2.5 h-2.5" />
+                              <span>{isRtl ? 'فيديو' : 'Video'}</span>
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 rounded-md bg-indigo-500 text-white font-bold text-[9px] uppercase tracking-wider shadow-xs flex items-center gap-0.5">
+                              <Layers className="w-2.5 h-2.5" />
+                              <span>{isRtl ? 'قائمة' : 'Playlist'}</span>
+                            </span>
+                          )}
                         </div>
 
                         <div className="absolute top-2.5 end-2.5">
@@ -1640,6 +1705,25 @@ export function Dashboard() {
                             <ScrollingText>{course.instructor}</ScrollingText>
                           </div>
                         </div>
+
+                        {/* Smart Last Video / Next Lesson Indicator */}
+                        {(() => {
+                          const currentVid = course.videos?.find(v => v.id === courseProg.currentVideoId)
+                            || course.videos?.find(v => !courseProg.completedVideoIds?.includes(v.id))
+                            || course.videos?.[0];
+                          if (!currentVid) return null;
+                          return (
+                            <div className="px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50 text-[11px] flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 truncate text-foreground font-medium">
+                                <PlayCircle className="w-3 h-3 text-primary shrink-0" />
+                                <span className="truncate">{currentVid.title}</span>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                {currentVid.duration || ''}
+                              </span>
+                            </div>
+                          );
+                        })()}
 
                         <div className="space-y-2 pt-2 border-t border-border/60">
                           <div className="flex items-center justify-between text-xs font-mono tabular-nums text-muted-foreground">
@@ -2215,6 +2299,7 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* End Dashboard Content */}
     </div>
   );
 }

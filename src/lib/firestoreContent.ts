@@ -71,12 +71,21 @@ export async function fetchFirestoreContent() {
         return;
       }
       if (data) {
+        const rawVideos = Array.isArray(data.videos) ? data.videos : [];
+        const seenKeys = new Set<string>();
+        const dedupedVideos = rawVideos.filter((v: any, idx: number) => {
+          const key = (v?.youtubeId || v?.id || `idx_${idx}`).trim();
+          if (!key || seenKeys.has(key)) return false;
+          seenKeys.add(key);
+          return true;
+        });
+
         coursesData.push({
           ...data,
           id: docId,
           title: data.title || 'Untitled Course',
           category: data.category || 'Programming',
-          videos: Array.isArray(data.videos) ? data.videos : [],
+          videos: dedupedVideos,
         });
       }
     });
