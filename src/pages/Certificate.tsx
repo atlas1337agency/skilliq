@@ -16,7 +16,9 @@ import {
   Sparkles,
   Lock,
   ArrowRight,
-  QrCode
+  QrCode,
+  Star,
+  ExternalLink
 } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
 import * as htmlToImage from 'html-to-image';
@@ -24,6 +26,7 @@ import { jsPDF } from 'jspdf';
 import { CertificateDocument, CertificateData } from '../components/CertificateDocument';
 import { ResponsiveCertificateViewer } from '../components/ResponsiveCertificateViewer';
 import { isCertificateEligible, isProjectCertificateEligible, resolveCourseEducator, buildCertificateId } from '../lib/courseUtils';
+import { TRUSTPILOT_REVIEW_URL } from '../components/TrustpilotReviewBanner';
 
 export function Certificate() {
   const { courseId } = useParams<{ courseId: string }>();
@@ -444,6 +447,43 @@ export function Certificate() {
             <ShieldCheck className="w-4 h-4 text-emerald-500" />
             <span>{t('cert_hub_qr_scan', 'Scan QR to verify authenticity instantly on Skilliq')}</span>
           </p>
+        </div>
+
+        {/* Trustpilot Review Celebration Card */}
+        <div className="mt-8 p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-[#001c10]/80 via-card to-card border border-[#00b67a]/40 shadow-xl max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-start print:hidden">
+          <div className="space-y-1.5 flex-1">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-[#00b67a] text-white px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider">
+                <Star className="w-3 h-3 fill-white" />
+                <span>Trustpilot</span>
+              </div>
+              <div className="flex items-center gap-0.5" aria-hidden="true">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <Star key={i} className="w-3.5 h-3.5 fill-[#00b67a] text-[#00b67a]" />
+                ))}
+              </div>
+              <span className="text-xs font-mono font-bold text-[#00b67a]">5.0 ★</span>
+            </div>
+            <h4 className="font-bold text-sm sm:text-base text-foreground">
+              {isRtl ? 'فخور بإنجازك؟ ادعم استمرار Skilliq مجاناً للجميع' : 'Proud of your certificate? Support Skilliq on Trustpilot'}
+            </h4>
+            <p className="text-xs text-muted-foreground">
+              {isRtl
+                ? 'ساعد الطلاب الآخرين في العثور على منصتنا التعليمية المجانية بدون إعلانات من خلال تقييم سريع على Trustpilot.'
+                : 'Help future students discover our 100% free, distraction-free learning engine by dropping an honest review.'}
+            </p>
+          </div>
+
+          <a
+            href={TRUSTPILOT_REVIEW_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#00b67a] hover:bg-[#009b67] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-[#00b67a]/20 transition-all hover:scale-105 active:scale-95 shrink-0 cursor-pointer"
+          >
+            <Star className="w-3.5 h-3.5 fill-white" />
+            <span>{isRtl ? 'اكتب تقييمك' : 'Review on Trustpilot'}</span>
+            <ExternalLink className="w-3 h-3 rtl:rotate-180" />
+          </a>
         </div>
 
       </div>

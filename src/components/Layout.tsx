@@ -6,6 +6,7 @@ import { Footer } from './Footer';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { PlatformTelemetryTracker } from './PlatformTelemetryTracker';
 import { SkilliqAiAgent } from './SkilliqAiAgent';
+import { TrustpilotReviewBanner } from './TrustpilotReviewBanner';
 
 export function Layout() {
   const location = useLocation();
@@ -24,8 +25,10 @@ export function Layout() {
         </main>
       </div>
       {!isCoursePage && <BottomNav />}
+      <TrustpilotReviewBanner />
       <SkilliqAiAgent />
       <ScrollToTopButton />
     </div>
   );
 }
+

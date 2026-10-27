@@ -53,6 +53,8 @@ import { AchievementsShowcase } from '../components/AchievementsShowcase';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { awardCustomXP } from '../lib/gamification';
 import { SupportTickets } from './SupportTickets';
+import { TRUSTPILOT_REVIEW_URL } from '../components/TrustpilotReviewBanner';
+import confetti from 'canvas-confetti';
 import { 
   BookVideoModal, 
   BookCoverVisual, 
@@ -281,16 +283,40 @@ export function Dashboard() {
   const bookPool = useMemo(() => books.length > 0 ? books : allBooks, [books, allBooks]);
 
   // Real Enrolled Courses calculation - Realtime prioritized by most recent activity
+  // Strictly guarantees new users or users without active learning history see 0 courses
   const startedCourses = useMemo(() => {
+    if (!progress || Object.keys(progress).length === 0) {
+      return [];
+    }
+
     return coursePool
       .filter(c => {
         const p = progress[c.id];
         if (!p) return false;
+
+        // 1. Course is marked completed
+        if (p.isCompleted) return true;
+
+        // 2. Has completed at least one video in the course
         const hasCompletedVideos = Array.isArray(p.completedVideoIds) && p.completedVideoIds.length > 0;
-        const hasCurrentVideo = Boolean(p.currentVideoId);
-        const hasTimestamps = Boolean(p.videoTimestamps && Object.keys(p.videoTimestamps).length > 0);
-        const isCompleted = Boolean(p.isCompleted);
-        return hasCompletedVideos || hasCurrentVideo || hasTimestamps || isCompleted;
+        if (hasCompletedVideos) return true;
+
+        // 3. User actually spent time learning (at least 10s of saved watch time)
+        const hasRealWatchTime = Boolean(
+          p.videoTimestamps &&
+          Object.values(p.videoTimestamps).some(t => typeof t === 'number' && t >= 10)
+        );
+        if (hasRealWatchTime) return true;
+
+        // 4. Has a current active video with at least 5s of tracked playback
+        const hasActivePlayback = Boolean(
+          p.currentVideoId &&
+          p.videoTimestamps?.[p.currentVideoId] &&
+          p.videoTimestamps[p.currentVideoId] >= 5
+        );
+        if (hasActivePlayback) return true;
+
+        return false;
       })
       .sort((a, b) => {
         const progA = progress[a.id];
@@ -1088,7 +1114,7 @@ export function Dashboard() {
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {activeLearningTracks.map(course => {
-                      const courseProg = progress[course.id] || { completedVideoIds: [] };
+                      const courseProg = progress[course.id] || { completedVideoIds: [], isCompleted: false, currentVideoId: '', videoTimestamps: {} };
                       const completedCount = courseProg.completedVideoIds?.length || 0;
                       const totalCount = course.videos?.length || 1;
                       const pct = Math.round((completedCount / totalCount) * 100);
@@ -1476,6 +1502,45 @@ export function Dashboard() {
                       {isCheckinDoneToday ? (isRtl ? 'تم الاستلام ✓' : 'Claimed ✓') : (isRtl ? 'جاهز للاستلام' : 'Ready')}
                     </span>
                   </div>
+
+                  <a
+                    href={TRUSTPILOT_REVIEW_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      try {
+                        confetti({
+                          particleCount: 50,
+                          spread: 60,
+                          origin: { y: 0.8 },
+                          colors: ['#00b67a', '#22c55e', '#38bdf8']
+                        });
+                      } catch {}
+                      if (user?.uid) {
+                        awardCustomXP(user.uid, 50, {
+                          id: 'trustpilot_advocate',
+                          name: isRtl ? 'سفير مجتمع Skilliq' : 'Community Advocate',
+                          description: isRtl ? 'قيّم منصة Skilliq على Trustpilot' : 'Reviewed Skilliq on Trustpilot',
+                          icon: '⭐',
+                        });
+                      }
+                      localStorage.setItem('skilliq_trustpilot_status', 'reviewed');
+                    }}
+                    className="p-2.5 rounded-xl bg-emerald-50/90 hover:bg-emerald-100/90 border border-emerald-200/90 dark:bg-[#002416]/60 dark:hover:bg-[#002e1c]/80 dark:border-[#00b67a]/40 flex items-center justify-between transition-all group cursor-pointer shadow-2xs dark:shadow-none"
+                  >
+                    <div className="flex items-center gap-2 font-medium text-emerald-950 dark:text-emerald-50">
+                      <div className="w-5 h-5 rounded-full bg-[#00b67a]/15 dark:bg-[#00b67a]/25 flex items-center justify-center shrink-0">
+                        <Star className="w-3.5 h-3.5 fill-[#00b67a] text-[#00b67a]" />
+                      </div>
+                      <span className="group-hover:text-emerald-700 dark:group-hover:text-[#00b67a] transition-colors font-medium">
+                        {isRtl ? 'تقييم المنصة على Trustpilot (+50 XP)' : 'Rate Skilliq on Trustpilot (+50 XP)'}
+                      </span>
+                    </div>
+                    <span className="font-bold px-2.5 py-0.5 rounded text-[11px] bg-white text-emerald-800 border border-emerald-200/90 group-hover:bg-[#00b67a] group-hover:text-white dark:bg-[#00b67a]/20 dark:text-[#00b67a] dark:border-[#00b67a]/30 dark:group-hover:bg-[#00b67a] dark:group-hover:text-white flex items-center gap-1 font-mono transition-colors shadow-2xs">
+                      <span>5.0 ★</span>
+                      <ArrowRight className="w-2.5 h-2.5 rtl:rotate-180" />
+                    </span>
+                  </a>
                 </div>
 
                 <button
@@ -1637,7 +1702,7 @@ export function Dashboard() {
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {paginatedCourses.map(course => {
-                  const courseProg = progress[course.id] || { completedVideoIds: [], isCompleted: false };
+                  const courseProg = progress[course.id] || { completedVideoIds: [], isCompleted: false, currentVideoId: '', videoTimestamps: {} };
                   const percent = Math.round(((courseProg.completedVideoIds?.length || 0) / (course.videos?.length || 1)) * 100);
                   const isCompleted = courseProg.isCompleted;
 
@@ -2211,6 +2276,71 @@ export function Dashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             <DailyRewardCheckIn />
             <DailyTechQuest />
+          </div>
+
+          {/* COMMUNITY ADVOCATE QUEST: TRUSTPILOT REVIEW */}
+          <div className="rounded-2xl p-5 sm:p-6 bg-gradient-to-r from-emerald-50/90 via-card to-card dark:from-[#002416]/80 border border-emerald-200/90 dark:border-[#00b67a]/40 shadow-xs dark:shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5 text-start">
+            <div className="space-y-2 max-w-xl">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 bg-[#00b67a] text-white px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider">
+                  <Star className="w-3 h-3 fill-white" />
+                  <span>Trustpilot</span>
+                </div>
+                <div className="flex items-center gap-0.5" aria-label="5 stars">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="w-3.5 h-3.5 bg-[#00b67a] rounded-[1px] flex items-center justify-center">
+                      <Star className="w-2.5 h-2.5 fill-white text-white" />
+                    </div>
+                  ))}
+                </div>
+                <span className="text-xs font-mono font-bold text-[#00b67a]">+50 XP</span>
+                <span className="text-[11px] font-bold text-muted-foreground">
+                  · {isRtl ? 'مهمة المجتمع الكبرى' : 'Community Quest'}
+                </span>
+              </div>
+
+              <h3 className="font-bold text-base sm:text-lg text-foreground">
+                {isRtl ? 'مهمة سفير المجتمع: تقييم منصة Skilliq على Trustpilot' : 'Community Quest: Rate Skilliq on Trustpilot'}
+              </h3>
+
+              <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                {isRtl 
+                  ? 'منصة Skilliq مجانية بالكامل وبدون إعلانات. تقييمك الحقيقي لدقيقة واحدة على Trustpilot يساعد الطلاب الجدد على اكتشاف المنصة، ويمنحك وسام سفير المجتمع و +50 XP.' 
+                  : 'Skilliq is 100% free with zero ads. Your 1-minute honest review on Trustpilot helps thousands of new students discover our platform and grants you +50 XP.'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
+              <a
+                href={TRUSTPILOT_REVIEW_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  try {
+                    confetti({
+                      particleCount: 70,
+                      spread: 60,
+                      origin: { y: 0.8 },
+                      colors: ['#00b67a', '#22c55e', '#38bdf8', '#fbbf24']
+                    });
+                  } catch {}
+                  if (user?.uid) {
+                    awardCustomXP(user.uid, 50, {
+                      id: 'trustpilot_advocate',
+                      name: isRtl ? 'سفير مجتمع Skilliq' : 'Community Advocate',
+                      description: isRtl ? 'قيّم منصة Skilliq على Trustpilot' : 'Reviewed Skilliq on Trustpilot',
+                      icon: '⭐',
+                    });
+                  }
+                  localStorage.setItem('skilliq_trustpilot_status', 'reviewed');
+                }}
+                className="w-full md:w-auto px-5 py-3 rounded-xl bg-[#00b67a] hover:bg-[#009b67] text-white font-bold text-xs sm:text-sm shadow-md shadow-[#00b67a]/20 flex items-center justify-center gap-2 transition-all hover:scale-102 active:scale-98 cursor-pointer"
+              >
+                <Star className="w-4 h-4 fill-white" />
+                <span>{isRtl ? 'اكتب تقييمك الآن (+50 XP)' : 'Write Review (+50 XP)'}</span>
+                <ExternalLink className="w-3.5 h-3.5 rtl:rotate-180" />
+              </a>
+            </div>
           </div>
 
           <AchievementsShowcase />

@@ -6,7 +6,8 @@ import {
   Layers, 
   Award, 
   ArrowUpRight,
-  Sparkles
+  Sparkles,
+  Star
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -271,10 +272,22 @@ export function Footer() {
                   {isRtl ? 'برنامج صناع المحتوى (Creator Program)' : 'Original Creator Program'}
                 </Link>
               </li>
+              <li>
+                <a 
+                  href="https://www.trustpilot.com/review/skilliq1337.online"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-500 font-bold hover:underline transition-colors inline-flex items-center gap-1 py-0.5"
+                >
+                  <Star className="w-3.5 h-3.5 fill-[#00b67a] text-[#00b67a]" />
+                  <span>{isRtl ? 'قيّمنا على Trustpilot (5.0 ★)' : 'Review Us on Trustpilot (5.0 ★)'}</span>
+                  <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                </a>
+              </li>
             </ul>
 
             {/* 100% FREE FOREVER CARD */}
-            <div className="p-3.5 rounded-xl bg-muted/40 border border-border/60">
+            <div className="p-3.5 rounded-xl bg-muted/40 border border-border/60 mb-3">
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <span className="text-xs font-bold text-foreground">
                   {t('footer_free_always', '100% Free Forever')}
@@ -285,6 +298,44 @@ export function Footer() {
                 {t('footer_free_desc', 'No subscriptions, no hidden fees, no ads. Built for learners worldwide.')}
               </p>
             </div>
+
+            {/* TRUSTPILOT COMMUNITY RATING CARD */}
+            <a
+              href="https://www.trustpilot.com/review/skilliq1337.online"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block p-3.5 rounded-xl bg-[#001c10]/80 dark:bg-[#002416]/70 border border-[#00b67a]/40 hover:border-[#00b67a] transition-all group shadow-sm text-start"
+            >
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1 bg-[#00b67a] text-white px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider">
+                    <Star className="w-2.5 h-2.5 fill-white text-white" />
+                    <span>Trustpilot</span>
+                  </div>
+                  <div className="flex items-center gap-0.5" aria-hidden="true">
+                    {[1, 2, 3, 4, 5].map((i) => (
+                      <div key={i} className="w-3 h-3 bg-[#00b67a] rounded-[1px] flex items-center justify-center">
+                        <Star className="w-2 h-2 fill-white text-white" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <ArrowUpRight className="w-3.5 h-3.5 text-[#00b67a] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-bold text-white group-hover:text-[#00b67a] transition-colors">
+                  {isRtl ? 'ادعمنا على Trustpilot' : 'Support Us on Trustpilot'}
+                </span>
+                <span className="text-[10px] font-mono text-[#00b67a] font-bold">
+                  5.0 ★
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-300 dark:text-zinc-400 mt-1 leading-snug">
+                {isRtl 
+                  ? 'ساعد الطلاب الآخرين في العثور على تعليم مجاني وخالٍ من المشتتات.' 
+                  : 'Help other learners discover 100% free, distraction-free education.'}
+              </p>
+            </a>
 
           </div>
 

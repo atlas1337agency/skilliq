@@ -506,26 +506,18 @@ export function Header() {
                   <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform duration-200", isDropdownOpen && "rotate-180")} />
                 </button>
               ) : (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                    className="relative flex items-center gap-1 p-2 rounded-full border border-border/80 bg-card hover:bg-muted text-foreground transition-all cursor-pointer shadow-2xs"
-                    aria-label="User preferences menu"
-                    title={isRtl ? 'القائمة والمظهر' : 'Menu & Preferences'}
-                  >
+                <button
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="relative flex items-center gap-1.5 p-1 ps-2 pe-2 rounded-full border border-border/80 bg-card hover:bg-muted text-foreground transition-all cursor-pointer shadow-2xs"
+                  aria-label="User preferences menu"
+                  title={isRtl ? 'القائمة والمظهر وتسجيل الدخول' : 'Menu & Preferences'}
+                >
+                  <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center">
                     <User className="w-4 h-4 text-muted-foreground" />
-                    <ChevronDown className={cn("w-3 h-3 text-muted-foreground transition-transform duration-200", isDropdownOpen && "rotate-180")} />
-                    <span className="absolute -top-0.5 -end-0.5 w-2 h-2 bg-primary rounded-full" />
-                  </button>
-
-                  <button 
-                    onClick={() => setIsAuthModalOpen(true)}
-                    className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/95 rounded-xl font-bold text-xs sm:text-sm shadow-xs transition-all active:scale-95 cursor-pointer shrink-0"
-                  >
-                    <LogIn className="w-3.5 h-3.5 rtl:rotate-180" />
-                    <span>{t('login')}</span>
-                  </button>
-                </div>
+                  </div>
+                  <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform duration-200", isDropdownOpen && "rotate-180")} />
+                  <span className="absolute -top-0.5 -end-0.5 w-2.5 h-2.5 bg-primary rounded-full ring-2 ring-background" />
+                </button>
               )}
 
               <AnimatePresence>
@@ -761,8 +753,8 @@ export function Header() {
                       )}
                     </div>
 
-                    {/* Logout Action */}
-                    {user && (
+                    {/* Logout or Login Action */}
+                    {user ? (
                       <div className="border-t border-border/60 p-1.5 mt-1">
                         <button 
                           onClick={handleLogout}
@@ -772,6 +764,21 @@ export function Header() {
                             <LogOut className="w-4 h-4 rtl:rotate-180" />
                           </div>
                           <span>{t('logout')}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="border-t border-border/60 p-1.5 mt-1">
+                        <button 
+                          onClick={() => {
+                            setIsDropdownOpen(false);
+                            setIsAuthModalOpen(true);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2 text-xs font-bold text-primary hover:bg-primary/10 rounded-xl transition-colors text-start cursor-pointer"
+                        >
+                          <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                            <LogIn className="w-4 h-4 rtl:rotate-180" />
+                          </div>
+                          <span>{t('login')}</span>
                         </button>
                       </div>
                     )}
