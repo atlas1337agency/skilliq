@@ -5,7 +5,6 @@ import { cn } from '../lib/utils';
 import { Footer } from './Footer';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { PlatformTelemetryTracker } from './PlatformTelemetryTracker';
-import { SkilliqAiAgent } from './SkilliqAiAgent';
 import { TrustpilotReviewBanner } from './TrustpilotReviewBanner';
 
 export function Layout() {
@@ -26,7 +25,6 @@ export function Layout() {
       </div>
       {!isCoursePage && <BottomNav />}
       <TrustpilotReviewBanner />
-      <SkilliqAiAgent />
       <ScrollToTopButton />
     </div>
   );

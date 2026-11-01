@@ -17,7 +17,10 @@ import {
   Layers, 
   Zap, 
   Compass,
-  BookOpen
+  BookOpen,
+  GitBranch,
+  FolderTree,
+  Tag
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useStore } from '../store/useStore';
@@ -78,6 +81,7 @@ export function Paths() {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [hierarchyFilter, setHierarchyFilter] = useState<'all' | 'parents' | 'branches'>('all');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const itemsPerPage = 6;
 
@@ -86,35 +90,58 @@ export function Paths() {
     return filterPathsByLanguage(learningPaths, courses, language);
   }, [learningPaths, courses, language]);
 
-  // Search & category filtered paths
+  // Search, category & hierarchy filtered paths
   const filteredPaths = useMemo(() => {
     return availablePaths.filter(path => {
       if (showFavoritesOnly && !favorites?.[`path_${path.id}`]) {
         return false;
       }
 
-      // Category filter
-      if (selectedCategory !== 'all') {
-        const pathCourses = path.courseIds.map(id => courses.find(c => c.id === id)).filter(Boolean);
-        const matchesCategory = pathCourses.some(c => 
-          (c?.category || '').toLowerCase() === selectedCategory.toLowerCase()
-        );
-        if (!matchesCategory) return false;
+      // Hierarchy view filter
+      if (hierarchyFilter === 'parents') {
+        const isParentOrStandalone = path.isParent || (!path.parentId);
+        if (!isParentOrStandalone) return false;
+      } else if (hierarchyFilter === 'branches') {
+        if (!path.parentId) return false;
       }
 
-      // Search query
+      // Robust Category filter: matches path's category, inner courses, parent category, or child categories
+      if (selectedCategory !== 'all') {
+        const target = selectedCategory.toLowerCase();
+        const directMatch = (path.category || '').toLowerCase() === target;
+
+        const pathCourses = path.courseIds.map(id => courses.find(c => c.id === id)).filter(Boolean);
+        const coursesMatch = pathCourses.some(c => 
+          (c?.category || '').toLowerCase() === target
+        );
+
+        // If child, check parent's category
+        const parent = path.parentId ? learningPaths.find(p => p.id === path.parentId) : null;
+        const parentMatch = parent ? (parent.category || '').toLowerCase() === target : false;
+
+        // If parent, check if any of its children match
+        const children = (path.childPathIds || []).map(id => learningPaths.find(p => p.id === id)).filter(Boolean);
+        const childrenMatch = children.some(ch => (ch?.category || '').toLowerCase() === target);
+
+        if (!directMatch && !coursesMatch && !parentMatch && !childrenMatch) {
+          return false;
+        }
+      }
+
+      // Search query: checks path title, description, category, specialization field, and course titles
       if (!searchQuery) return true;
-      const lowerQuery = searchQuery.toLowerCase();
-      const inTitle = path.title.toLowerCase().includes(lowerQuery);
-      const inDesc = path.description.toLowerCase().includes(lowerQuery);
+      const lowerQuery = searchQuery.toLowerCase().trim();
+      const inTitle = (path.title || '').toLowerCase().includes(lowerQuery);
+      const inDesc = (path.description || '').toLowerCase().includes(lowerQuery);
+      const inCat = (path.category || '').toLowerCase().includes(lowerQuery);
+      const inField = (path.specializationField || '').toLowerCase().includes(lowerQuery);
       
-      // Also search course titles inside the path
       const pathCourses = path.courseIds.map(id => courses.find(c => c.id === id)).filter(Boolean);
       const inCourses = pathCourses.some(c => c?.title?.toLowerCase().includes(lowerQuery));
 
-      return inTitle || inDesc || inCourses;
+      return inTitle || inDesc || inCat || inField || inCourses;
     });
-  }, [availablePaths, courses, searchQuery, selectedCategory, showFavoritesOnly, favorites]);
+  }, [availablePaths, learningPaths, courses, searchQuery, selectedCategory, hierarchyFilter, showFavoritesOnly, favorites]);
 
   const totalPages = Math.ceil(filteredPaths.length / itemsPerPage);
   
@@ -263,9 +290,68 @@ export function Paths() {
           )}
         </div>
 
-        {/* Category Pills & Count */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-          
+        {/* Hierarchy View Switcher & Category Pills */}
+        <div className="space-y-3 pt-2">
+          {/* Hierarchy Mode Selector (All vs Parent Career Hubs vs Specialization Branches) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-border/50">
+            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-muted/50 border border-border/80">
+              <button
+                type="button"
+                onClick={() => {
+                  setHierarchyFilter('all');
+                  setCurrentPage(1);
+                }}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5',
+                  hierarchyFilter === 'all'
+                    ? 'bg-card text-foreground shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <span>{isRtl ? 'جميع المسارات والتخصصات' : 'All Paths & Branches'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setHierarchyFilter('parents');
+                  setCurrentPage(1);
+                }}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5',
+                  hierarchyFilter === 'parents'
+                    ? 'bg-violet-600 text-white shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <span>🌟</span>
+                <span>{isRtl ? 'المسارات الرئيسية (Career Hubs)' : 'Parent Career Hubs'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setHierarchyFilter('branches');
+                  setCurrentPage(1);
+                }}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5',
+                  hierarchyFilter === 'branches'
+                    ? 'bg-emerald-600 text-white shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+                <span>{isRtl ? 'التخصصات المتفرعة' : 'Specialization Branches'}</span>
+              </button>
+            </div>
+
+            {/* Results count */}
+            <div className="text-xs font-semibold text-muted-foreground shrink-0 text-start">
+              <span>{t('paths_showing_count', { count: filteredPaths.length, defaultValue: `Showing ${filteredPaths.length} curated paths` })}</span>
+            </div>
+          </div>
+
           {/* Scrollable Category Chips */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none">
             <button
@@ -291,7 +377,7 @@ export function Paths() {
                   setCurrentPage(1);
                 }}
                 className={cn(
-                  "px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all cursor-pointer border",
+                  "px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all cursor-pointer border shrink-0",
                   selectedCategory === cat.id
                     ? "bg-primary text-primary-foreground border-primary shadow-xs"
                     : "bg-card text-muted-foreground hover:text-foreground border-border/70 hover:bg-muted/50"
@@ -301,12 +387,6 @@ export function Paths() {
               </button>
             ))}
           </div>
-
-          {/* Results count */}
-          <div className="text-xs font-semibold text-muted-foreground shrink-0 text-start">
-            <span>{t('paths_showing_count', { count: filteredPaths.length, defaultValue: `Showing ${filteredPaths.length} curated paths` })}</span>
-          </div>
-
         </div>
 
       </div>
@@ -321,6 +401,14 @@ export function Paths() {
           const pathCourses = path.courseIds
             .map(id => courses.find(c => c.id === id))
             .filter((c): c is any => Boolean(c));
+
+          // Resolve child specialization tracks if this is a parent path
+          const childTracks = (path.childPathIds || [])
+            .map(cId => learningPaths.find(p => p.id === cId))
+            .filter((p): p is any => Boolean(p));
+
+          const isParentTrack = Boolean(path.isParent || childTracks.length > 0);
+          const parentTrack = path.parentId ? learningPaths.find(p => p.id === path.parentId) : null;
 
           return (
             <div
@@ -347,16 +435,54 @@ export function Paths() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap justify-end">
-                    <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2.5 py-1 rounded-lg border border-border/40">
-                      {isRtl ? 'مسار مهني' : 'Career Track'}
-                    </span>
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
+                    {/* Category Tag */}
+                    {path.category && (
+                      <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg border border-primary/20">
+                        {path.category}
+                      </span>
+                    )}
+
+                    {/* Hierarchy badge */}
+                    {isParentTrack ? (
+                      <span className="text-[11px] font-bold text-violet-600 dark:text-violet-400 bg-violet-500/15 border border-violet-500/30 px-2.5 py-1 rounded-lg">
+                        🌟 {isRtl ? 'مسار شامل وتخصصات' : 'Career Hub'}
+                      </span>
+                    ) : path.parentId ? (
+                      <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                        <GitBranch className="w-3 h-3" />
+                        <span>{isRtl ? 'تخصص فرعي' : 'Specialization'}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2.5 py-1 rounded-lg border border-border/40">
+                        {isRtl ? 'مسار مهني' : 'Career Track'}
+                      </span>
+                    )}
+
                     <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg">
                       {path.courseIds.length} {t('playlists_in_this_path').split(' ')[0]}
                     </span>
                     <FavoriteButton itemId={path.id} itemType="path" size="sm" />
                   </div>
                 </div>
+
+                {/* Parent Track Breadcrumb if Child */}
+                {parentTrack && (
+                  <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
+                      <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                      <span>{isRtl ? 'تخصص متفرع من:' : 'Specialization in:'}</span>
+                      <Link to={`/path/${parentTrack.id}`} className="underline hover:text-emerald-500 font-extrabold truncate max-w-[200px]">
+                        {parentTrack.title}
+                      </Link>
+                    </div>
+                    {path.specializationField && (
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-muted text-foreground">
+                        {path.specializationField}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* Path Title */}
                 <h3 className="text-xl sm:text-2xl font-bold text-foreground mb-2 group-hover:text-primary transition-colors">
@@ -368,8 +494,56 @@ export function Paths() {
                   {path.description}
                 </p>
 
-                {/* Visual Roadmap Sequence Preview */}
-                {pathCourses.length > 0 && (
+                {/* Case 1: Parent Path - What's Next Specializations Chooser */}
+                {isParentTrack && childTracks.length > 0 && (
+                  <div className="mb-6 p-4 rounded-2xl bg-violet-500/5 border border-violet-500/25">
+                    <div className="flex items-center justify-between gap-2 mb-2.5">
+                      <div className="text-[11px] font-black text-violet-600 dark:text-violet-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{isRtl ? 'الخطوة التالية: اختر التخصص الذي تحبه' : "What's Next: Choose Your Field"}</span>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400">
+                        {childTracks.length} {isRtl ? 'تخصصات متفرعة' : 'branches'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {childTracks.map((child, cIdx) => (
+                        <Link
+                          key={child.id || cIdx}
+                          to={`/path/${child.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-card/90 border border-border/70 hover:border-violet-500/50 hover:bg-violet-500/10 transition-all group/branch"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="w-5 h-5 rounded-md bg-violet-500/15 text-violet-600 dark:text-violet-400 flex items-center justify-center font-mono text-[10px] font-bold shrink-0">
+                              {cIdx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-foreground group-hover/branch:text-violet-600 dark:group-hover/branch:text-violet-400 truncate block">
+                                {child.title}
+                              </span>
+                              {child.specializationField && (
+                                <span className="text-[10px] text-muted-foreground block truncate">
+                                  {child.specializationField}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                              {child.courseIds.length} {isRtl ? 'دورات' : 'courses'}
+                            </span>
+                            <ArrowRight className="w-3.5 h-3.5 text-muted-foreground group-hover/branch:text-violet-500 rtl:rotate-180 group-hover/branch:translate-x-0.5 rtl:group-hover/branch:-translate-x-0.5 transition-transform" />
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Case 2: Visual Roadmap Sequence Preview for standard & child paths */}
+                {pathCourses.length > 0 && (!isParentTrack || childTracks.length === 0) && (
                   <div className="mb-6 p-3.5 sm:p-4 rounded-2xl bg-muted/30 border border-border/50">
                     <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
                       <Layers className="w-3.5 h-3.5 text-primary" />

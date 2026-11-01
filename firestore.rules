@@ -149,16 +149,22 @@ service cloud.firestore {
     }
 
     function isValidLearningPath(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'description', 'courseIds', 'icon', 'iconUrl', 'language', 'graphicRoadmap', 'createdAt']) &&
+      return hasOnlyAllowedFields(['id', 'title', 'description', 'courseIds', 'icon', 'iconUrl', 'language', 'category', 'isParent', 'parentId', 'childPathIds', 'level', 'specializationField', 'graphicRoadmap', 'createdAt']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
-             data.description is string && data.description.size() <= 5000 &&
+             data.description is string && data.description.size() <= 10000 &&
              data.courseIds is list && data.courseIds.size() <= 200 &&
              data.icon is string && data.icon.size() <= 50 &&
              isValidOptionalString('iconUrl', 0, 2000) &&
              isValidOptionalString('language', 0, 50) &&
-             (!('graphicRoadmap' in data) || data.graphicRoadmap is map) &&
-             (!('createdAt' in data) || data.createdAt is number);
+             isValidOptionalString('category', 0, 100) &&
+             (!('isParent' in data) || data.isParent == null || data.isParent is bool) &&
+             isValidOptionalString('parentId', 0, 100) &&
+             (!('childPathIds' in data) || data.childPathIds == null || (data.childPathIds is list && data.childPathIds.size() <= 200)) &&
+             isValidOptionalString('level', 0, 50) &&
+             isValidOptionalString('specializationField', 0, 200) &&
+             (!('graphicRoadmap' in data) || data.graphicRoadmap == null || data.graphicRoadmap is map) &&
+             (!('createdAt' in data) || data.createdAt == null || data.createdAt is number);
     }
 
     function isValidNotification(data) {
@@ -316,7 +322,7 @@ service cloud.firestore {
     match /learningPaths/{pathId} {
       allow read: if true;
       allow create: if isAdmin() && isValidLearningPath(request.resource.data) && request.resource.data.id == pathId;
-      allow update: if isAdmin() && isValidLearningPath(request.resource.data) && request.resource.data.id == resource.data.id;
+      allow update: if isAdmin() && isValidLearningPath(request.resource.data) && (request.resource.data.id == resource.data.id || request.resource.data.id == pathId);
       allow delete: if isAdmin();
     }
 

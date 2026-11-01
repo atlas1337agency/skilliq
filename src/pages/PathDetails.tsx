@@ -15,7 +15,10 @@ import {
   MessageSquare,
   Zap,
   Layers,
-  Compass
+  Compass,
+  Sparkles,
+  GitBranch,
+  ArrowRight
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
@@ -71,6 +74,17 @@ export function PathDetails() {
   const pathCourses = langFiltered.length > 0 ? langFiltered : allLinkedCourses;
 
   const Icon = iconMap[path.icon] || Code;
+
+  // Resolve hierarchy relationships
+  const parentPath = path.parentId ? learningPaths.find(p => p.id === path.parentId) : null;
+  const childTracks = (path.childPathIds || [])
+    .map(cId => learningPaths.find(p => p.id === cId))
+    .filter((p): p is any => Boolean(p));
+  const isParentTrack = Boolean(path.isParent || childTracks.length > 0);
+  const sisterTracks = (parentPath?.childPathIds || [])
+    .filter(id => id !== path.id)
+    .map(id => learningPaths.find(p => p.id === id))
+    .filter((p): p is any => Boolean(p));
 
   // Calculate overall path completion progress for the student
   const completedCount = pathCourses.filter(c => Boolean(progress[c.id]?.isCompleted)).length;
@@ -139,6 +153,29 @@ export function PathDetails() {
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div className="max-w-3xl">
+            {parentPath && (
+              <div className="mb-3.5 flex items-center gap-2 flex-wrap">
+                <Link
+                  to={`/path/${parentPath.id}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-colors"
+                >
+                  <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isRtl ? 'ضمن المسار الرئيسي:' : 'Part of Career Track:'}</span>
+                  <span className="underline font-black">{parentPath.title}</span>
+                </Link>
+                {path.specializationField && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-muted text-foreground border border-border">
+                    {path.specializationField}
+                  </span>
+                )}
+                {path.level && (
+                  <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
+                    {path.level === 'foundation' ? (isRtl ? 'تأسيسي' : 'Foundation') : (isRtl ? 'تخصصي' : 'Specialization')}
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center gap-3 mb-4">
               <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 overflow-hidden p-2">
                 {path.iconUrl ? (
@@ -152,11 +189,23 @@ export function PathDetails() {
                   <Icon className="w-7 h-7 sm:w-8 sm:h-8 text-primary" />
                 )}
               </div>
-              <div className="text-xs text-muted-foreground font-semibold">
+              <div className="text-xs text-muted-foreground font-semibold flex items-center flex-wrap gap-1.5">
                 <span className="text-primary font-bold">
-                  {isRtl ? 'مسار تعليمي متسلسل' : 'Structured Career Learning Path'}
+                  {isParentTrack 
+                    ? (isRtl ? '🌟 مسار مهني شامل وتخصصات' : '🌟 Parent Career Hub')
+                    : parentPath
+                    ? (isRtl ? '🌿 تخصص فرعي مركز' : '🌿 Focused Specialization')
+                    : (isRtl ? 'مسار تعليمي متسلسل' : 'Structured Career Learning Path')}
                 </span>
-                <span aria-hidden="true" className="mx-2">·</span>
+                {path.category && (
+                  <>
+                    <span aria-hidden="true" className="mx-1">·</span>
+                    <span className="font-bold text-foreground bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md">
+                      {path.category}
+                    </span>
+                  </>
+                )}
+                <span aria-hidden="true" className="mx-1">·</span>
                 <span>
                   {pathCourses.length} {isRtl ? 'قوائم تشغيل مرتبة' : t('playlists_in_this_path', 'Sequential Playlists')}
                 </span>
@@ -222,6 +271,86 @@ export function PathDetails() {
           )}
         </div>
       </div>
+
+      {/* WHAT'S NEXT: CHOOSE YOUR SPECIALIZATION FIELD (For Parent Career Hubs) */}
+      {isParentTrack && childTracks.length > 0 && (
+        <div className="mb-10 sm:mb-12 p-6 sm:p-8 rounded-3xl bg-gradient-to-br from-violet-500/10 via-card to-card border border-violet-500/30 shadow-xs">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400 font-bold text-xs mb-2">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isRtl ? 'اختر تخصصك المفضل' : 'Choose Your Specialization Field'}</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">
+                {isRtl ? 'الخطوة التالية: اختر التخصص الذي تحبه في هذا المسار' : "What's Next: Choose Your Specialized Field"}
+              </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1 max-w-2xl leading-relaxed">
+                {isRtl
+                  ? 'يحتوي هذا المسار المهني الشامل على عدة فروع وتخصصات. يمكنك البدء بالأساسيات أو التوجه مباشرة للتخصص الدقيق الذي ترغب في احترافه:'
+                  : 'This comprehensive career track branches into dedicated specializations. Start with the core foundations or dive directly into the focused field you love:'}
+              </p>
+            </div>
+            <span className="text-xs font-bold text-violet-600 dark:text-violet-400 bg-violet-500/10 border border-violet-500/20 px-3 py-1.5 rounded-xl shrink-0">
+              {childTracks.length} {isRtl ? 'تخصصات متفرعة متاحة' : 'Specialization branches available'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+            {childTracks.map((child: any, idx: number) => {
+              const ChildIcon = iconMap[child.icon] || Shield;
+              return (
+                <div
+                  key={child.id}
+                  className="group relative bg-card/90 border border-border/80 hover:border-violet-500/50 rounded-2xl p-5 flex flex-col justify-between shadow-xs hover:shadow-md transition-all text-start"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+                          <ChildIcon className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                            {child.level ? (child.level === 'foundation' ? (isRtl ? 'المرحلة: تأسيسي' : 'Foundation Stage') : (isRtl ? 'المرحلة: تخصصي' : 'Specialization Stage')) : (isRtl ? `تخصص ${idx + 1}` : `Branch ${idx + 1}`)}
+                          </span>
+                          {child.specializationField && (
+                            <span className="text-xs font-bold text-violet-600 dark:text-violet-400">
+                              {child.specializationField}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-bold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
+                        {child.courseIds.length} {isRtl ? 'دورات' : 'courses'}
+                      </span>
+                    </div>
+
+                    <h3 className="text-base sm:text-lg font-bold text-foreground mb-1.5 group-hover:text-primary transition-colors">
+                      {child.title}
+                    </h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mb-4">
+                      {child.description}
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-border/60 flex items-center justify-between gap-2 mt-auto">
+                    <span className="text-[11px] text-muted-foreground font-medium">
+                      {isRtl ? 'خريطة طريق وشهادة موثقة' : 'Roadmap & Certificate'}
+                    </span>
+                    <Link
+                      to={`/path/${child.id}`}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-xs active:scale-98 transition-all"
+                    >
+                      <span>{isRtl ? 'دخول هذا التخصص' : 'Explore Field'}</span>
+                      <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Interactive Graphic Explain & Roadmap (Collapsible Show/Hide for Distraction-Free UX) */}
       <PathGraphicRoadmap
@@ -388,6 +517,61 @@ export function PathDetails() {
           })}
         </div>
       </div>
+
+      {/* SISTER TRACKS IN SAME CAREER PATH (For Child Specialization Pages) */}
+      {sisterTracks.length > 0 && parentPath && (
+        <div className="mt-12 sm:mt-16 p-6 sm:p-8 rounded-3xl bg-muted/30 border border-border/80">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <div>
+              <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mb-1">
+                <GitBranch className="w-4 h-4" />
+                <span>{isRtl ? `تخصصات أخرى ضمن مسار: ${parentPath.title}` : `Other Specializations in ${parentPath.title}`}</span>
+              </div>
+              <h3 className="text-lg sm:text-xl font-bold text-foreground">
+                {isRtl ? 'استكشف مجالات أخرى في هذا المسار' : 'Explore Sister Specializations'}
+              </h3>
+            </div>
+            <Link
+              to={`/path/${parentPath.id}`}
+              className="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1"
+            >
+              <span>{isRtl ? 'عرض المسار الرئيسي الشامل' : 'View Parent Career Hub'}</span>
+              <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {sisterTracks.map((sister: any) => (
+              <Link
+                key={sister.id}
+                to={`/path/${sister.id}`}
+                className="p-4 rounded-2xl bg-card border border-border/80 hover:border-emerald-500/50 hover:shadow-md transition-all flex flex-col justify-between group text-start"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                      {sister.specializationField || (sister.level === 'foundation' ? (isRtl ? 'تأسيسي' : 'Foundation') : (isRtl ? 'تخصصي' : 'Specialization'))}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground font-mono">
+                      {sister.courseIds.length} {isRtl ? 'دورات' : 'courses'}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1 mb-1">
+                    {sister.title}
+                  </h4>
+                  <p className="text-xs text-muted-foreground line-clamp-2">
+                    {sister.description}
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-border/60 text-xs font-bold text-primary flex items-center justify-end gap-1">
+                  <span>{isRtl ? 'انتقل إلى التخصص' : 'Switch Field'}</span>
+                  <ArrowRight className="w-3 h-3 rtl:rotate-180" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -40,7 +40,10 @@ import {
   Map as MapIcon,
   Wrench,
   Layers,
-  Search
+  Search,
+  GitBranch,
+  FolderTree,
+  Tag
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { 
@@ -134,7 +137,7 @@ export function AdminForms({
   onClose: () => void 
 }) {
   const { t } = useTranslation();
-  const { loadContent, allCourses, allBooks, language } = useStore();
+  const { loadContent, allCourses, allBooks, learningPaths, language } = useStore();
   const isAdmin = useStore.getState().user?.role === 'admin';
 
   // Active step for course wizard
@@ -419,10 +422,19 @@ export function AdminForms({
   const [path, setPath] = useState<Partial<LearningPath>>(() => {
     if (itemToEdit && type === 'path') {
       const detectedAr = /[\u0600-\u06FF]/.test(`${itemToEdit.title || ''} ${itemToEdit.description || ''}`);
+      const isParentTrack = Boolean(
+        itemToEdit.isParent ?? (!itemToEdit.parentId && (itemToEdit.childPathIds?.length > 0))
+      );
       return {
         ...itemToEdit,
         iconUrl: itemToEdit.iconUrl || '',
         language: itemToEdit.language || (detectedAr ? 'Arabic' : 'English'),
+        category: itemToEdit.category || 'Web Development',
+        isParent: isParentTrack,
+        parentId: itemToEdit.parentId || null,
+        childPathIds: itemToEdit.childPathIds || [],
+        level: itemToEdit.level || (itemToEdit.parentId ? 'specialization' : 'foundation'),
+        specializationField: itemToEdit.specializationField || '',
         courseIds: itemToEdit.courseIds || [],
         graphicRoadmap: {
           enabled: itemToEdit.graphicRoadmap?.enabled !== false,
@@ -444,6 +456,12 @@ export function AdminForms({
       icon: 'Code',
       iconUrl: '',
       language: language === 'ar' ? 'Arabic' : 'English',
+      category: 'Web Development',
+      isParent: false,
+      parentId: null,
+      childPathIds: [],
+      level: 'foundation',
+      specializationField: '',
       courseIds: [],
       graphicRoadmap: {
         enabled: true,
@@ -1014,26 +1032,79 @@ export function AdminForms({
 
     setIsSaving(true);
     try {
-      const cleanPath = JSON.parse(JSON.stringify(path));
-      cleanPath.courseIds = (cleanPath.courseIds || []).map((id: string) => id.trim()).filter(Boolean);
-      if (cleanPath.graphicRoadmap) {
-        cleanPath.graphicRoadmap.essentialTools = (cleanPath.graphicRoadmap.essentialTools || []).filter(
-          (t: any) => t && t.title?.trim()
-        );
-        cleanPath.graphicRoadmap.globalResources = (cleanPath.graphicRoadmap.globalResources || []).filter(
-          (r: any) => r && r.title?.trim()
-        );
-        cleanPath.graphicRoadmap.steps = (cleanPath.graphicRoadmap.steps || [])
-          .filter((s: any) => s && s.title?.trim())
-          .map((s: any, idx: number) => ({
-            ...s,
-            id: s.id || `step_${idx + 1}_${Date.now()}`,
-            tools: (s.tools || []).filter((t: any) => t && t.title?.trim()),
-            resources: (s.resources || []).filter((r: any) => r && r.title?.trim()),
-            skills: (s.skills || []).map((sk: string) => sk.trim()).filter(Boolean)
-          }));
+      const cleanPath: any = {
+        id: (path.id && typeof path.id === 'string' && path.id.trim()) ? path.id.trim() : 'path_' + Math.random().toString(36).substring(2, 9),
+        title: (path.title || '').trim(),
+        description: (path.description || '').trim(),
+        courseIds: (path.courseIds || []).map((id: string) => id.trim()).filter(Boolean),
+        icon: path.icon || 'Code',
+        iconUrl: (path.iconUrl || '').trim(),
+        language: path.language || 'English',
+        category: (path.category || 'Web Development').trim(),
+        isParent: Boolean(path.isParent),
+        parentId: (!path.isParent && path.parentId) ? path.parentId.trim() : null,
+        childPathIds: (path.isParent && Array.isArray(path.childPathIds)) 
+          ? path.childPathIds.filter((cId: string) => cId && cId !== path.id) 
+          : [],
+        level: path.level || (path.parentId ? 'specialization' : 'foundation'),
+        specializationField: (path.specializationField || '').trim(),
+        createdAt: path.createdAt || Date.now()
+      };
+
+      if (path.graphicRoadmap) {
+        cleanPath.graphicRoadmap = {
+          enabled: path.graphicRoadmap.enabled !== false,
+          defaultExpanded: path.graphicRoadmap.defaultExpanded !== false,
+          title: (path.graphicRoadmap.title || '').trim(),
+          subtitle: (path.graphicRoadmap.subtitle || '').trim(),
+          overviewText: (path.graphicRoadmap.overviewText || '').trim(),
+          diagramImageUrl: (path.graphicRoadmap.diagramImageUrl || '').trim(),
+          essentialTools: (path.graphicRoadmap.essentialTools || []).filter((t: any) => t && t.title?.trim()),
+          globalResources: (path.graphicRoadmap.globalResources || []).filter((r: any) => r && r.title?.trim()),
+          steps: (path.graphicRoadmap.steps || [])
+            .filter((s: any) => s && s.title?.trim())
+            .map((s: any, idx: number) => ({
+              ...s,
+              id: s.id || `step_${idx + 1}_${Date.now()}`,
+              tools: (s.tools || []).filter((t: any) => t && t.title?.trim()),
+              resources: (s.resources || []).filter((r: any) => r && r.title?.trim()),
+              skills: (s.skills || []).map((sk: string) => sk.trim()).filter(Boolean)
+            }))
+        };
       }
+
       await addOrUpdatePath(cleanPath as LearningPath);
+
+      // Safe secondary synchronization of linked parent / child paths
+      try {
+        if (cleanPath.parentId) {
+          const parentPath = learningPaths.find(p => p.id === cleanPath.parentId);
+          if (parentPath) {
+            const updatedChildren = Array.from(new Set([...(parentPath.childPathIds || []), cleanPath.id]));
+            await addOrUpdatePath({
+              ...parentPath,
+              isParent: true,
+              childPathIds: updatedChildren
+            });
+          }
+        }
+
+        if (cleanPath.isParent && cleanPath.childPathIds.length > 0) {
+          for (const childId of cleanPath.childPathIds) {
+            const childPath = learningPaths.find(p => p.id === childId);
+            if (childPath && childPath.parentId !== cleanPath.id) {
+              await addOrUpdatePath({
+                ...childPath,
+                parentId: cleanPath.id,
+                isParent: false
+              });
+            }
+          }
+        }
+      } catch (syncErr) {
+        console.warn("Secondary path hierarchy sync warning:", syncErr);
+      }
+
       await loadContent();
       onClose();
     } catch (err: any) {
@@ -2741,6 +2812,275 @@ export function AdminForms({
                                 : 'Describe what students will master in this learning path...'
                             }
                           />
+                        </div>
+
+                        {/* Category Selector (Syncs with Paths Page Filter Chips) */}
+                        <div className="sm:col-span-12 pt-2 border-t border-border/60">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                            <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                              <Tag className="w-3.5 h-3.5 text-primary" />
+                              <span>{isArUI ? 'تصنيف ومجال المسار (يعمل مع فلاتر صفحة المسارات) *' : 'Path Category & Domain (Works with Paths page filter chips) *'}</span>
+                            </label>
+                            <span className="text-[11px] text-muted-foreground font-medium">
+                              {isArUI ? 'اختر تصنيفاً سريعاً أو اكتب مجالاً مخصصاً' : 'Pick a quick tag or type custom'}
+                            </span>
+                          </div>
+                          
+                          <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
+                            {[
+                              'Web Development',
+                              'Cyber Security',
+                              'Programming',
+                              'Design',
+                              'AI',
+                              'DevOps & Cloud',
+                              'Mobile Apps',
+                              'Data Science'
+                            ].map(catName => {
+                              const isSelected = (path.category || '').toLowerCase() === catName.toLowerCase();
+                              return (
+                                <button
+                                  key={catName}
+                                  type="button"
+                                  onClick={() => setPath({ ...path, category: catName })}
+                                  className={cn(
+                                    'px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border',
+                                    isSelected
+                                      ? 'bg-primary text-primary-foreground border-primary shadow-2xs'
+                                      : 'bg-card text-muted-foreground hover:text-foreground border-border/80 hover:bg-muted/50'
+                                  )}
+                                >
+                                  {catName}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <input
+                            dir="auto"
+                            value={path.category || ''}
+                            onChange={e => setPath({ ...path, category: e.target.value })}
+                            placeholder={isArUI ? 'اكتب اسم التصنيف (مثال: Cyber Security, Web Development...)' : 'Type category name (e.g. Cyber Security, Web Development...)'}
+                            className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all"
+                          />
+                        </div>
+
+                        {/* Path Hierarchy & Parent / Child Architecture */}
+                        <div className="sm:col-span-12 pt-3 border-t border-border/60">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2.5">
+                            <div>
+                              <h4 className="text-xs sm:text-sm font-black text-foreground flex items-center gap-1.5">
+                                <FolderTree className="w-4 h-4 text-violet-500 shrink-0" />
+                                <span>{isArUI ? 'هيكلية المسار (رئيسي أو تخصص فرعي أو مسار مستقل)' : 'Path Hierarchy (Parent Career Hub, Child Specialization, or Standalone)'}</span>
+                              </h4>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                {isArUI 
+                                  ? 'تتيح للطلاب اختيار مسار رئيسي كبير (مثل الأمن السيبراني) ورؤية التخصصات المتاحة لاختيار المجال الذي يحبونه.'
+                                  : 'Allows learners to choose a parent track (e.g. Cybersecurity) and discover specialized fields (Foundations, Web Security, etc.).'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* 3 Architecture Modes */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-3">
+                            {/* Option 1: Parent Career Hub */}
+                            <button
+                              type="button"
+                              onClick={() => setPath({ ...path, isParent: true, parentId: null })}
+                              className={cn(
+                                'p-3 rounded-xl border text-start transition-all cursor-pointer flex flex-col justify-between gap-2',
+                                path.isParent
+                                  ? 'bg-violet-500/10 border-violet-500 text-foreground ring-1 ring-violet-500'
+                                  : 'bg-card border-border/80 text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-black flex items-center gap-1.5 text-violet-500">
+                                  <span>🌟</span>
+                                  <span>{isArUI ? 'مسار رئيسي شامل' : 'Parent Career Hub'}</span>
+                                </span>
+                                {path.isParent && <Check className="w-3.5 h-3.5 text-violet-500" />}
+                              </div>
+                              <span className="text-[11px] leading-relaxed opacity-85">
+                                {isArUI
+                                  ? 'يضم تخصصات فرعية ومسارات تابعة (مثل مسار الأمن السيبراني العام).'
+                                  : 'Main career umbrella containing specialization branches.'}
+                              </span>
+                            </button>
+
+                            {/* Option 2: Child Specialization */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const candidateParents = (learningPaths || []).filter(p => p.id !== path.id && (p.isParent || !p.parentId));
+                                const defaultParent = candidateParents[0]?.id || null;
+                                setPath({
+                                  ...path,
+                                  isParent: false,
+                                  parentId: path.parentId || defaultParent,
+                                  level: path.level || 'specialization'
+                                });
+                              }}
+                              className={cn(
+                                'p-3 rounded-xl border text-start transition-all cursor-pointer flex flex-col justify-between gap-2',
+                                !path.isParent && Boolean(path.parentId)
+                                  ? 'bg-emerald-500/10 border-emerald-500 text-foreground ring-1 ring-emerald-500'
+                                  : 'bg-card border-border/80 text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-black flex items-center gap-1.5 text-emerald-500">
+                                  <GitBranch className="w-3.5 h-3.5" />
+                                  <span>{isArUI ? 'تخصص فرعي تابع' : 'Child Specialization'}</span>
+                                </span>
+                                {!path.isParent && Boolean(path.parentId) && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                              </div>
+                              <span className="text-[11px] leading-relaxed opacity-85">
+                                {isArUI
+                                  ? 'تخصص محدد تابع لمسار رئيسي (مثل أساسيات أو أمن تطبيقات الويب).'
+                                  : 'Specialized branch linked directly under a parent track.'}
+                              </span>
+                            </button>
+
+                            {/* Option 3: Standalone */}
+                            <button
+                              type="button"
+                              onClick={() => setPath({ ...path, isParent: false, parentId: null, childPathIds: [] })}
+                              className={cn(
+                                'p-3 rounded-xl border text-start transition-all cursor-pointer flex flex-col justify-between gap-2',
+                                !path.isParent && !path.parentId
+                                  ? 'bg-primary/10 border-primary text-foreground ring-1 ring-primary'
+                                  : 'bg-card border-border/80 text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-black flex items-center gap-1.5 text-primary">
+                                  <span>📌</span>
+                                  <span>{isArUI ? 'مسار مستقل' : 'Standalone Track'}</span>
+                                </span>
+                                {!path.isParent && !path.parentId && <Check className="w-3.5 h-3.5 text-primary" />}
+                              </div>
+                              <span className="text-[11px] leading-relaxed opacity-85">
+                                {isArUI
+                                  ? 'مسار دراسي مباشر بدون علاقة أب أو ابن.'
+                                  : 'Standard standalone roadmap without sub-branches.'}
+                              </span>
+                            </button>
+                          </div>
+
+                          {/* Dynamic Configuration based on selected Mode */}
+                          {/* Case A: Parent Career Hub Details */}
+                          {path.isParent && (
+                            <div className="p-3.5 rounded-xl bg-violet-500/5 border border-violet-500/20 space-y-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+                                  <span>{isArUI ? 'اختر التخصصات الفرعية المرتبطة بهذا المسار الرئيسي:' : 'Select Child Specializations linked to this Parent Track:'}</span>
+                                </div>
+                                <span className="text-[11px] font-bold text-violet-600 dark:text-violet-400">
+                                  {(path.childPathIds || []).length} {isArUI ? 'تخصصات محددة' : 'selected'}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">
+                                {(learningPaths || [])
+                                  .filter(p => p.id !== path.id)
+                                  .map(otherP => {
+                                    const isLinked = (path.childPathIds || []).includes(otherP.id);
+                                    return (
+                                      <label
+                                        key={otherP.id}
+                                        className={cn(
+                                          'flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-all',
+                                          isLinked
+                                            ? 'bg-violet-500/15 border-violet-500/50 text-foreground font-bold'
+                                            : 'bg-card border-border/70 text-muted-foreground hover:text-foreground'
+                                        )}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isLinked}
+                                          onChange={e => {
+                                            const current = new Set(path.childPathIds || []);
+                                            if (e.target.checked) {
+                                              current.add(otherP.id);
+                                            } else {
+                                              current.delete(otherP.id);
+                                            }
+                                            setPath({ ...path, childPathIds: Array.from(current) });
+                                          }}
+                                          className="rounded border-border text-violet-600 focus:ring-violet-500"
+                                        />
+                                        <span className="truncate flex-1">{otherP.title}</span>
+                                        {otherP.level && (
+                                          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-muted">
+                                            {otherP.level}
+                                          </span>
+                                        )}
+                                      </label>
+                                    );
+                                  })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Case B: Child Specialization Details */}
+                          {!path.isParent && Boolean(path.parentId) && (
+                            <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                                {/* Parent Track Dropdown */}
+                                <div className="sm:col-span-5">
+                                  <label className="block text-[11px] font-bold text-foreground mb-1">
+                                    {isArUI ? 'المسار الرئيسي التابع له (Parent Track) *' : 'Parent Career Track *'}
+                                  </label>
+                                  <select
+                                    value={path.parentId || ''}
+                                    onChange={e => setPath({ ...path, parentId: e.target.value || null })}
+                                    className="w-full bg-card border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-emerald-500/40 focus:outline-none font-semibold"
+                                  >
+                                    <option value="">{isArUI ? '-- اختر المسار الرئيسي --' : '-- Select Parent Track --'}</option>
+                                    {(learningPaths || [])
+                                      .filter(p => p.id !== path.id)
+                                      .map(parentOpt => (
+                                        <option key={parentOpt.id} value={parentOpt.id}>
+                                          {parentOpt.isParent ? '🌟 ' : ''}{parentOpt.title}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </div>
+
+                                {/* Specialization Field Label */}
+                                <div className="sm:col-span-4">
+                                  <label className="block text-[11px] font-bold text-foreground mb-1">
+                                    {isArUI ? 'اسم مجال التخصص (Field Title)' : 'Specialization Field Title'}
+                                  </label>
+                                  <input
+                                    dir="auto"
+                                    value={path.specializationField || ''}
+                                    onChange={e => setPath({ ...path, specializationField: e.target.value })}
+                                    placeholder={isArUI ? 'مثال: Foundations, Web Security...' : 'e.g. Foundations & Networks, Web Pentesting'}
+                                    className="w-full bg-card border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-emerald-500/40 focus:outline-none"
+                                  />
+                                </div>
+
+                                {/* Level Badge Selector */}
+                                <div className="sm:col-span-3">
+                                  <label className="block text-[11px] font-bold text-foreground mb-1">
+                                    {isArUI ? 'مستوى المرحلة (Level)' : 'Level Stage'}
+                                  </label>
+                                  <select
+                                    value={path.level || 'specialization'}
+                                    onChange={e => setPath({ ...path, level: e.target.value })}
+                                    className="w-full bg-card border border-border/80 rounded-xl px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-emerald-500/40 focus:outline-none"
+                                  >
+                                    <option value="foundation">{isArUI ? 'تأسيسي (Foundation)' : 'Foundation'}</option>
+                                    <option value="specialization">{isArUI ? 'تخصصي (Specialization)' : 'Specialization'}</option>
+                                    <option value="advanced">{isArUI ? 'متقدم (Advanced)' : 'Advanced'}</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

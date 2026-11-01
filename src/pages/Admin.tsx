@@ -1350,11 +1350,43 @@ export function Admin() {
                             {pathItem.language.toLowerCase().includes('ar') ? 'AR' : 'EN'}
                           </span>
                         )}
+                        {pathItem.category && (
+                          <span className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-[10px] font-black">
+                            {pathItem.category}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 rounded-md bg-violet-500/10 border border-violet-500/20 text-violet-600 dark:text-violet-400 text-[11px] font-black">
                           {pathItem.courseIds.length} {isRtl ? 'قائمة تشغيل' : t('courses_linked', 'Playlists')}
                         </span>
                       </div>
                     </div>
+
+                    {/* Hierarchy Relationship Badge */}
+                    <div className="mb-2 flex items-center gap-2 flex-wrap text-xs">
+                      {pathItem.isParent || (pathItem.childPathIds && pathItem.childPathIds.length > 0) ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-500/15 border border-violet-500/30 text-violet-600 dark:text-violet-400 font-bold text-[11px]">
+                          <span>🌟</span>
+                          <span>{isRtl ? 'مسار رئيسي شامل (Parent Hub)' : 'Parent Career Hub'}</span>
+                          <span className="opacity-80">· {(pathItem.childPathIds || []).length} {isRtl ? 'تخصصات فرعية' : 'branches'}</span>
+                        </span>
+                      ) : pathItem.parentId ? (() => {
+                        const parentPath = learningPaths.find(p => p.id === pathItem.parentId);
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-bold text-[11px]">
+                            <span>🌿</span>
+                            <span>{isRtl ? 'تخصص فرعي تابع لـ:' : 'Child Specialization of:'}</span>
+                            <span className="underline font-black">{parentPath?.title || pathItem.parentId}</span>
+                            {pathItem.specializationField && <span>({pathItem.specializationField})</span>}
+                          </span>
+                        );
+                      })() : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted/60 text-muted-foreground font-semibold text-[10px]">
+                          <span>📌</span>
+                          <span>{isRtl ? 'مسار مستقل' : 'Standalone Path'}</span>
+                        </span>
+                      )}
+                    </div>
+
                     <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
                       {pathItem.description}
                     </p>

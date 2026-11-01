@@ -101,6 +101,12 @@ export interface LearningPath {
   icon: string;
   iconUrl?: string;
   language?: string;
+  category?: string;
+  isParent?: boolean;
+  parentId?: string | null;
+  childPathIds?: string[];
+  level?: 'foundation' | 'specialization' | 'advanced' | string;
+  specializationField?: string;
   graphicRoadmap?: LearningPathGraphicRoadmap;
   createdAt?: number;
 }
@@ -234,6 +240,8 @@ export interface LearningPath {
     description: "Master the fundamentals of frontend web development from HTML to React.",
     courseIds: ["html-crash-course", "css-grid", "javascript-basics", "react-basics"],
     icon: "Code",
+    category: "Web Development",
+    isParent: true,
     graphicRoadmap: {
       enabled: true,
       defaultExpanded: true,
@@ -325,10 +333,97 @@ export interface LearningPath {
   },
   {
     id: "cyber-security-expert",
-    title: "Cyber Security Expert",
-    description: "Master the fundamentals of networking, programming, and ethical hacking to become a Cyber Security Expert.",
+    title: "Cyber Security Career Track",
+    description: "Master cybersecurity from fundamentals to advanced web application exploitation and penetration testing. Choose your specialization branch below.",
     courseIds: ["network-basics", "comptia-a-plus", "python-for-security", "ceh-prep"],
-    icon: "Shield"
+    icon: "Shield",
+    category: "Cyber Security",
+    isParent: true,
+    childPathIds: ["cyber-security-foundations", "cyber-security-web"]
+  },
+  {
+    id: "cyber-security-foundations",
+    title: "Cyber Security: Core Foundations & Networking",
+    description: "Build an impenetrable foundation in computer hardware, networking topologies, TCP/IP, and basic security hygiene before choosing an offensive or defensive specialty.",
+    courseIds: ["network-basics", "comptia-a-plus"],
+    icon: "Shield",
+    category: "Cyber Security",
+    parentId: "cyber-security-expert",
+    level: "foundation",
+    specializationField: "Foundations & Networks",
+    graphicRoadmap: {
+      enabled: true,
+      defaultExpanded: true,
+      title: "Cyber Security Foundations Roadmap",
+      subtitle: "Milestone 1 · Hardware, Operating Systems & Network Topologies",
+      overviewText: "Start here if you are new to Cybersecurity. This foundational branch equips you with core networking architectures and system troubleshooting.",
+      essentialTools: [
+        { title: "Wireshark Packet Analyzer", url: "https://www.wireshark.org/", type: "tool" },
+        { title: "VirtualBox", url: "https://www.virtualbox.org/", type: "tool" }
+      ],
+      steps: [
+        {
+          id: "cs_f_1",
+          title: "Computer Hardware & System Essentials (CompTIA A+)",
+          subtitle: "Stage 1 · Hardware, BIOS & OS Fundamentals",
+          description: "Master hardware components, memory management, command-line basics, and storage setups.",
+          linkedCourseId: "comptia-a-plus",
+          durationEstimate: "Weeks 1–2",
+          skills: ["Hardware Architecture", "OS Basics", "System Troubleshooting"]
+        },
+        {
+          id: "cs_f_2",
+          title: "Networking Protocols & TCP/IP Architecture",
+          subtitle: "Stage 2 · Subnetting, Routing & Packet Flows",
+          description: "Understand packets, routing tables, DNS, DHCP, and the OSI 7-layer model.",
+          linkedCourseId: "network-basics",
+          durationEstimate: "Weeks 3–4",
+          skills: ["TCP/IP", "Subnetting", "DNS / DHCP", "OSI Model"]
+        }
+      ]
+    }
+  },
+  {
+    id: "cyber-security-web",
+    title: "Cyber Security: Web Exploitation & Ethical Hacking",
+    description: "Specialize in penetration testing, offensive security tools, Python recon scripts, and CEH certified ethical hacker methodology.",
+    courseIds: ["python-for-security", "ceh-prep"],
+    icon: "Shield",
+    category: "Cyber Security",
+    parentId: "cyber-security-expert",
+    level: "specialization",
+    specializationField: "Web Security & Penetration Testing",
+    graphicRoadmap: {
+      enabled: true,
+      defaultExpanded: true,
+      title: "Web Security & Ethical Hacking Roadmap",
+      subtitle: "Milestone 2 · Scripting, Reconnaissance & Vulnerability Assessment",
+      overviewText: "Specialize in offensive security. Learn to write custom Python recon scripts and master the standardized ethical hacking assessment methodology.",
+      essentialTools: [
+        { title: "Kali Linux", url: "https://www.kali.org/", type: "tool" },
+        { title: "Burp Suite Community", url: "https://portswigger.net/burp", type: "tool" }
+      ],
+      steps: [
+        {
+          id: "cs_w_1",
+          title: "Python for Security & Recon Automation",
+          subtitle: "Stage 1 · Custom Scanners & Socket Programming",
+          description: "Write custom scripts for port scanning, banner grabbing, and automated reconnaissance.",
+          linkedCourseId: "python-for-security",
+          durationEstimate: "Weeks 1–3",
+          skills: ["Python Scripting", "Socket API", "Banner Grabbing", "Automation"]
+        },
+        {
+          id: "cs_w_2",
+          title: "Ethical Hacking & Penetration Testing (CEH Prep)",
+          subtitle: "Stage 2 · Vulnerability Scanning & Web Defense",
+          description: "Learn practical penetration testing methodologies, OWASP Top 10 vulnerabilities, and remediation.",
+          linkedCourseId: "ceh-prep",
+          durationEstimate: "Weeks 4–7",
+          skills: ["OWASP Top 10", "Burp Suite", "Reconnaissance", "Vulnerability Remediation"]
+        }
+      ]
+    }
   },
   {
     id: "web-mobile-ar",
@@ -336,6 +431,7 @@ export interface LearningPath {
     description: "تعلم بناء المواقع وتطبيقات الهواتف الذكية من الصفر باستخدام ووردبريس وفلاتر ودارت باحترافية.",
     courseIds: ["ipkxu", "l02pbl"],
     icon: "Code",
+    category: "Web Development",
     graphicRoadmap: {
       enabled: true,
       defaultExpanded: true,
@@ -395,14 +491,16 @@ export interface LearningPath {
     title: "مسار الذكاء الاصطناعي والتسويق الرقمي",
     description: "احترف أتمتة الأعمال باستخدام N8N وإدارة الحملات الإعلانية الممولة والميديا باينج مع الذكاء الاصطناعي.",
     courseIds: ["4ptzav", "312ar"],
-    icon: "Zap"
+    icon: "Zap",
+    category: "AI"
   },
   {
     id: "design-3d-ar",
     title: "مسار التصميم الإبداعي والنمذجة ثلاثية الأبعاد",
     description: "إتقان تصميم واجهات المستخدم والأنظمة المرئية بالذكاء الاصطناعي والتصميم المعماري مع سكتش آب.",
     courseIds: ["m1pdcj", "glpr5t"],
-    icon: "Layout"
+    icon: "Layout",
+    category: "Design"
   }
 ];
 

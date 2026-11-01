@@ -14,6 +14,7 @@ import { PushNotificationPopup } from './components/PushNotificationPopup';
 import { AuthFeedbackToast } from './components/AuthFeedbackToast';
 import { ScrollToTop } from './components/ScrollToTop';
 import { GlobalFocusTimerPopup } from './components/GlobalFocusTimerPopup';
+import { InitialAppLoader } from './components/InitialAppLoader';
 
 // Eagerly load primary discovery pages for zero-latency navigation
 import { Home } from './pages/Home';
@@ -40,7 +41,7 @@ const Community = lazy(() => import('./pages/Community').then(m => ({ default: m
 const SupportTickets = lazy(() => import('./pages/SupportTickets').then(m => ({ default: m.SupportTickets })));
 
 export default function App() {
-  const { loadContent, language } = useStore();
+  const { loadContent, language, theme } = useStore();
   const { i18n } = useTranslation();
 
   useEffect(() => {
@@ -62,6 +63,14 @@ export default function App() {
   }, [loadContent]);
 
   useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
+
+  useEffect(() => {
     i18n.changeLanguage(language);
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = language || 'en';
@@ -69,6 +78,7 @@ export default function App() {
 
   return (
     <HelmetProvider>
+      <InitialAppLoader />
       <Router>
         <ScrollToTop />
         <GlobalFocusTimerPopup />
