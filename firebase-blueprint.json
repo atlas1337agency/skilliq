@@ -62,19 +62,26 @@
     },
     "Course": {
       "title": "Course",
-      "description": "A learning course or masterclass.",
+      "description": "A learning course, multi-channel curated playlist, project build, or masterclass.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
         "instructor": { "type": "string" },
+        "professorName": { "type": "string" },
+        "youtubeChannelName": { "type": "string" },
         "instructorAvatar": { "type": "string" },
         "instructorUrl": { "type": "string" },
+        "channelId": { "type": "string" },
+        "playlistId": { "type": "string" },
+        "isMultiChannel": { "type": "boolean" },
         "thumbnail": { "type": "string" },
         "category": { "type": "string" },
         "subCategory": { "type": "string" },
         "isSingleVideo": { "type": "boolean" },
+        "isProject": { "type": "boolean" },
+        "isApproved": { "type": "boolean" },
         "language": { "type": "string" },
         "videos": {
           "type": "array",
@@ -87,6 +94,11 @@
               "youtubeId": { "type": "string" },
               "description": { "type": "string" },
               "language": { "type": "string" },
+              "channelName": { "type": "string" },
+              "channelAvatar": { "type": "string" },
+              "channelUrl": { "type": "string" },
+              "channelId": { "type": "string" },
+              "professorName": { "type": "string" },
               "resources": {
                 "type": "array",
                 "items": {
@@ -247,6 +259,40 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["id", "ticketNumber", "userId", "subject", "category", "status", "createdAt"]
+    },
+    "CourseQuiz": {
+      "title": "CourseQuiz",
+      "description": "Interactive multiple choice and practical coding quizzes for courses and video lessons.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "videoTitle": { "type": "string" },
+        "title": { "type": "object" },
+        "description": { "type": "object" },
+        "passingScore": { "type": "number" },
+        "xpReward": { "type": "number" },
+        "questions": { "type": "array" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "courseId", "title", "passingScore", "questions"]
+    },
+    "CourseFeatures": {
+      "title": "CourseFeatures",
+      "description": "Administrator configuration for interactive learning features visibility per course.",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "enableSandbox": { "type": "boolean" },
+        "enableFlashcards": { "type": "boolean" },
+        "enableLessonQuiz": { "type": "boolean" },
+        "enableCourseExam": { "type": "boolean" },
+        "sandboxMode": { "type": "string" },
+        "flashcardsCategory": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["courseId"]
     }
   },
   "firestore": {
@@ -289,6 +335,14 @@
     "/support_tickets/{ticketId}": {
       "schema": { "$ref": "#/entities/SupportTicket" },
       "description": "Support tickets opened by users to converse with admins."
+    },
+    "/course_quizzes/{quizId}": {
+      "schema": { "$ref": "#/entities/CourseQuiz" },
+      "description": "Global course and lesson interactive quizzes created by administrators."
+    },
+    "/course_features/{courseId}": {
+      "schema": { "$ref": "#/entities/CourseFeatures" },
+      "description": "Admin configuration to toggle interactive features (sandbox, flashcards, quizzes, exams) per course."
     }
   }
 }

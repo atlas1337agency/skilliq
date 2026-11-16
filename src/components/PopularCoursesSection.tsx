@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { filterByLanguage, cn } from '../lib/utils';
 import { formatCompactNumber } from '../lib/youtube';
-import { getCoursePath } from '../lib/courseUtils';
+import { getCoursePath, resolveCourseEducator } from '../lib/courseUtils';
 import { ScrollingText } from './ScrollingText';
 import { FavoriteButton } from './FavoriteButton';
 import { ShareCourseButton } from './ShareCourseButton';
@@ -145,14 +145,24 @@ export function PopularCoursesSection() {
                       <BookOpen className="w-3.5 h-3.5 text-primary" />
                       <span>{course.videos.length} {t('videos')}</span>
                     </div>
-                    <div className="font-medium text-foreground max-w-[55%] truncate flex items-center gap-1.5">
-                      <ScrollingText>{course.instructor}</ScrollingText>
-                      {(course.subscriberCountText || (course.subscriberCount && course.subscriberCount > 0)) && (
-                        <span className="shrink-0 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full border border-red-500/20">
-                          {course.subscriberCountText || formatCompactNumber(course.subscriberCount)}
-                        </span>
-                      )}
-                    </div>
+                    {(() => {
+                      const educator = resolveCourseEducator(course);
+                      const contributorCount = educator.contributors?.length || 0;
+                      return (
+                        <div className="font-medium text-foreground max-w-[58%] truncate flex items-center gap-1.5">
+                          <ScrollingText>{educator.youtubeChannelName}</ScrollingText>
+                          {educator.isMultiChannel && contributorCount > 1 ? (
+                            <span className="shrink-0 text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded-full border border-primary/20">
+                              {contributorCount} {isRtl ? 'قنوات' : 'Channels'}
+                            </span>
+                          ) : (course.subscriberCountText || (course.subscriberCount && course.subscriberCount > 0)) ? (
+                            <span className="shrink-0 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full border border-red-500/20">
+                              {course.subscriberCountText || formatCompactNumber(course.subscriberCount)}
+                            </span>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {(() => {

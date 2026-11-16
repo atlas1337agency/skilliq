@@ -12,9 +12,17 @@ export interface Badge {
 
 export interface PublicProfile {
   uid: string;
+  username?: string;
   displayName: string;
   photoURL: string;
   email?: string;
+  headline?: string;
+  bio?: string;
+  location?: string;
+  githubUrl?: string;
+  linkedinUrl?: string;
+  websiteUrl?: string;
+  skills?: string[];
   xp: number;
   streak: number;
   lastActive: string;
@@ -66,8 +74,14 @@ export async function initializeOrUpdateProfile(user: { uid: string; displayName
       { id: 'streak_master', name: 'Streak Champion', description: '365+ Days Consistent Learning', icon: '🔥', unlockedAt: now.toISOString() }
     ] : [];
 
+    const defaultUsername = (user.email ? user.email.split('@')[0] : `user_${user.uid.slice(0, 6)}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '')
+      .slice(0, 30);
+
     const newProfile: PublicProfile = {
       uid: user.uid,
+      username: isAdmin ? 'marouan1337' : defaultUsername,
       displayName: isAdmin ? 'Mr. Marouan Anouar' : resolvedDisplayName,
       photoURL: resolvedPhotoURL,
       email: user.email || '',

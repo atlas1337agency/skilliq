@@ -12,6 +12,8 @@ export interface CertificateData {
   verificationUrl: string;
   isDemo?: boolean;
   isProjectBuild?: boolean;
+  isMultiChannel?: boolean;
+  contributors?: { name: string; videoCount: number }[];
 }
 
 interface CertificateDocumentProps {
@@ -23,12 +25,17 @@ interface CertificateDocumentProps {
 export function CertificateDocument({ data, certRef }: CertificateDocumentProps) {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const isProject = Boolean(data.isProjectBuild);
+  const isMulti = Boolean(data.isMultiChannel) || Boolean(data.contributors && data.contributors.length > 1);
 
-  const rawProf = (data.professorName || data.instructorName || 'Course Educator').trim();
-  const professorDisplay = /^(prof\.?|professor|dr\.?|mr\.?|أ\.|الأستاذ|د\.)\s/i.test(rawProf)
+  const rawProf = (data.professorName || (isMulti ? 'SkilliQ Curated Faculty' : data.instructorName) || 'Course Educator').trim();
+  const professorDisplay = /^(prof\.?|professor|dr\.?|mr\.?|أ\.|الأستاذ|د\.|skilliq|curated)/i.test(rawProf)
     ? rawProf.replace(/^professor\s+/i, 'Prof. ')
     : `Prof. ${rawProf}`;
   const channelDisplay = (data.youtubeChannelName || data.instructorName || 'Official YouTube Channel').trim();
+  const channelSignatureSub =
+    isMulti && data.contributors && data.contributors.length > 1
+      ? `${data.contributors.length} Contributing Channels`
+      : channelDisplay;
 
   // Detect if studentName or courseTitle contains Arabic script
   const isArabicStudent = /[\u0600-\u06FF]/.test(data.studentName || '');
@@ -224,17 +231,17 @@ export function CertificateDocument({ data, certRef }: CertificateDocumentProps)
             </div>
 
             {/* Pure Typographic Educator & Channel Credit */}
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-6 gap-y-1 text-[11px] text-slate-600">
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[11px] text-slate-600 max-w-2xl">
               <div>
                 <span className="uppercase tracking-[0.16em] text-[9.5px] font-bold text-slate-400 mr-1.5">
-                  PROJECT INSTRUCTOR:
+                  {isMulti ? 'PROJECT FACULTY:' : 'PROJECT INSTRUCTOR:'}
                 </span>
                 <span className="font-bold text-[#0b1e47]">{professorDisplay}</span>
               </div>
               <span className="text-slate-300">|</span>
-              <div>
+              <div className="max-w-[380px] truncate">
                 <span className="uppercase tracking-[0.16em] text-[9.5px] font-bold text-slate-400 mr-1.5">
-                  OFFICIAL CHANNEL:
+                  {isMulti ? 'FEATURED CHANNELS:' : 'OFFICIAL CHANNEL:'}
                 </span>
                 <span className="font-bold text-[#0b1e47]">{channelDisplay}</span>
               </div>
@@ -283,10 +290,10 @@ export function CertificateDocument({ data, certRef }: CertificateDocumentProps)
                   </span>
                 </div>
                 <span className="text-[8.5px] font-extrabold uppercase tracking-[0.2em] text-[#0b1e47]">
-                  PROJECT EDUCATOR
+                  {isMulti ? 'PROJECT FACULTY' : 'PROJECT EDUCATOR'}
                 </span>
                 <span className="text-[8.5px] text-slate-500 font-semibold mt-0.5 truncate max-w-[180px]">
-                  {channelDisplay}
+                  {channelSignatureSub}
                 </span>
               </div>
 
@@ -498,17 +505,17 @@ export function CertificateDocument({ data, certRef }: CertificateDocumentProps)
           </div>
 
           {/* Pure Typographic Educator & YouTube Channel Credit */}
-          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-6 gap-y-1 text-[11px] text-slate-600 border-t border-b border-amber-700/25 py-1.5 px-6">
+          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[11px] text-slate-600 border-t border-b border-amber-700/25 py-1.5 px-6 max-w-2xl">
             <div>
               <span className="uppercase tracking-[0.16em] text-[9.5px] font-bold text-amber-800 mr-1.5">
-                COURSE PROFESSOR:
+                {isMulti ? 'CURRICULUM FACULTY:' : 'COURSE PROFESSOR:'}
               </span>
               <span className="font-bold text-[#0a1938]">{professorDisplay}</span>
             </div>
             <span className="text-amber-600/60">|</span>
-            <div>
+            <div className="max-w-[380px] truncate">
               <span className="uppercase tracking-[0.16em] text-[9.5px] font-bold text-amber-800 mr-1.5">
-                YOUTUBE CHANNEL:
+                {isMulti ? 'FEATURED CHANNELS:' : 'YOUTUBE CHANNEL:'}
               </span>
               <span className="font-bold text-[#0a1938]">{channelDisplay}</span>
             </div>
@@ -557,10 +564,10 @@ export function CertificateDocument({ data, certRef }: CertificateDocumentProps)
                 </span>
               </div>
               <span className="text-[8.5px] font-extrabold uppercase tracking-[0.2em] text-amber-800">
-                COURSE PROFESSOR
+                {isMulti ? 'CURATED FACULTY' : 'COURSE PROFESSOR'}
               </span>
               <span className="text-[8.5px] text-slate-500 font-semibold mt-0.5 truncate max-w-[180px]">
-                {channelDisplay}
+                {channelSignatureSub}
               </span>
             </div>
 

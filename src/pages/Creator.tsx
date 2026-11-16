@@ -36,7 +36,7 @@ import { FavoriteButton } from '../components/FavoriteButton';
 import { ShareCourseButton } from '../components/ShareCourseButton';
 import { SEO } from '../components/SEO';
 import { fetchFullYoutubeVideoMetadata, formatCompactNumber } from '../lib/youtube';
-import { getCoursePath } from '../lib/courseUtils';
+import { getCoursePath, getCourseContributors } from '../lib/courseUtils';
 
 export function Creator() {
   const { creatorId } = useParams<{ creatorId: string }>();
@@ -53,12 +53,18 @@ export function Creator() {
     return list.filter(c => c.isApproved !== false);
   }, [courses, allCourses]);
 
-  // Filter courses for specific creator
+  // Filter courses for specific creator (matches top-level instructor OR any contributing channel in multi-channel playlists)
   const creatorCourses = useMemo(() => {
     if (!decodedCreatorId) return [];
-    return sourceCourses.filter(
-      c => c.instructor?.toLowerCase().trim() === decodedCreatorId.toLowerCase()
-    );
+    const target = decodedCreatorId.toLowerCase();
+    return sourceCourses.filter(c => {
+      if (c.instructor?.toLowerCase().trim() === target) return true;
+      return (c.videos || []).some(
+        v =>
+          v.channelName?.toLowerCase().trim() === target ||
+          v.professorName?.toLowerCase().trim() === target
+      );
+    });
   }, [sourceCourses, decodedCreatorId]);
 
   // Live fetched subscriber counts keyed by instructor name
@@ -66,7 +72,7 @@ export function Creator() {
     Record<string, { subscriberCount: number; subscriberCountText: string; avatar?: string }>
   >({});
 
-  // Aggregate all unique curated educators automatically
+  // Aggregate all unique curated educators automatically (including every contributor in multi-channel courses)
   const allInstructors = useMemo(() => {
     const map = new Map<string, { 
       name: string; 
@@ -81,39 +87,57 @@ export function Creator() {
     }>();
 
     sourceCourses.forEach(c => {
-      const name = c.instructor?.trim();
-      if (!name) return;
-      if (!map.has(name)) {
-        map.set(name, {
-          name,
-          avatar: c.instructorAvatar?.trim() || '',
-          coursesCount: 0,
-          categories: new Set(),
-          totalVideos: 0,
-          subscriberCount: c.subscriberCount || 0,
-          subscriberCountText: c.subscriberCountText || '',
-          totalViews: 0,
-          sampleYoutubeId: c.videos?.[0]?.youtubeId || '',
-        });
-      }
-      const item = map.get(name)!;
-      item.coursesCount++;
-      if (!item.avatar && c.instructorAvatar?.trim()) {
-        item.avatar = c.instructorAvatar.trim();
-      }
-      if (c.subscriberCount && c.subscriberCount > item.subscriberCount) {
-        item.subscriberCount = c.subscriberCount;
-      }
-      if (!item.subscriberCountText && c.subscriberCountText) {
-        item.subscriberCountText = c.subscriberCountText;
-      }
-      if (!item.sampleYoutubeId && c.videos?.[0]?.youtubeId) {
-        item.sampleYoutubeId = c.videos[0].youtubeId;
-      }
-      const courseViews = c.totalViews || (c.videos || []).reduce((acc, v) => acc + (v.viewCount || 0), 0);
-      item.totalViews += courseViews;
-      if (c.category?.trim()) item.categories.add(c.category.trim());
-      item.totalVideos += (c.videos?.length || 1);
+      const contributors = getCourseContributors(c);
+      const isMulti = Boolean(c.isMultiChannel) || contributors.length > 1;
+      const entries = contributors.length > 0
+        ? contributors
+        : c.instructor?.trim()
+        ? [{ name: c.instructor.trim(), avatar: c.instructorAvatar?.trim(), videoCount: c.videos?.length || 1 }]
+        : [];
+
+      entries.forEach(contrib => {
+        const name = contrib.name?.trim();
+        if (!name) return;
+        const matchingVideo = (c.videos || []).find(
+          v => v.channelName?.toLowerCase().trim() === name.toLowerCase()
+        ) || c.videos?.[0];
+
+        if (!map.has(name)) {
+          map.set(name, {
+            name,
+            avatar: contrib.avatar?.trim() || (!isMulti ? c.instructorAvatar?.trim() : '') || '',
+            coursesCount: 0,
+            categories: new Set(),
+            totalVideos: 0,
+            subscriberCount: !isMulti ? (c.subscriberCount || 0) : 0,
+            subscriberCountText: !isMulti ? (c.subscriberCountText || '') : '',
+            totalViews: 0,
+            sampleYoutubeId: matchingVideo?.youtubeId || '',
+          });
+        }
+        const item = map.get(name)!;
+        item.coursesCount++;
+        if (!item.avatar && (contrib.avatar?.trim() || (!isMulti && c.instructorAvatar?.trim()))) {
+          item.avatar = contrib.avatar?.trim() || c.instructorAvatar?.trim() || '';
+        }
+        if (!isMulti && c.subscriberCount && c.subscriberCount > item.subscriberCount) {
+          item.subscriberCount = c.subscriberCount;
+        }
+        if (!isMulti && !item.subscriberCountText && c.subscriberCountText) {
+          item.subscriberCountText = c.subscriberCountText;
+        }
+        if (!item.sampleYoutubeId && matchingVideo?.youtubeId) {
+          item.sampleYoutubeId = matchingVideo.youtubeId;
+        }
+        const contributorViews = isMulti
+          ? (c.videos || [])
+              .filter(v => v.channelName?.toLowerCase().trim() === name.toLowerCase())
+              .reduce((acc, v) => acc + (v.viewCount || 0), 0)
+          : (c.totalViews || (c.videos || []).reduce((acc, v) => acc + (v.viewCount || 0), 0));
+        item.totalViews += contributorViews;
+        if (c.category?.trim()) item.categories.add(c.category.trim());
+        item.totalVideos += (contrib.videoCount || 1);
+      });
     });
 
     return Array.from(map.values()).sort((a, b) => b.coursesCount - a.coursesCount);
@@ -238,7 +262,24 @@ export function Creator() {
 
   const playlists = filteredCourses.filter(c => !c.isSingleVideo);
   const masterclasses = filteredCourses.filter(c => c.isSingleVideo);
-  const creatorAvatar = creatorCourses[0]?.instructorAvatar?.trim() || '';
+  const creatorAvatar = useMemo(() => {
+    if (!decodedCreatorId) return '';
+    const target = decodedCreatorId.toLowerCase();
+    const matched = allInstructors.find(i => i.name.toLowerCase() === target);
+    if (matched?.avatar) return matched.avatar;
+    const liveAvatar = matched ? liveCreatorStats[matched.name]?.avatar : undefined;
+    if (liveAvatar) return liveAvatar;
+    for (const c of creatorCourses) {
+      const vidAvatar = (c.videos || []).find(
+        v => v.channelName?.toLowerCase().trim() === target && v.channelAvatar?.trim()
+      )?.channelAvatar;
+      if (vidAvatar) return vidAvatar.trim();
+      if (c.instructor?.toLowerCase().trim() === target && c.instructorAvatar?.trim()) {
+        return c.instructorAvatar.trim();
+      }
+    }
+    return '';
+  }, [decodedCreatorId, allInstructors, liveCreatorStats, creatorCourses]);
 
   const handleHubSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

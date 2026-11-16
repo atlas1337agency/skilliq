@@ -154,6 +154,14 @@ export function Footer() {
               </li>
               <li>
                 <Link 
+                  to="/collection" 
+                  className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5 font-medium"
+                >
+                  {isRtl ? 'مجموعة Skilliq المختارة' : 'Skilliq Collection'}
+                </Link>
+              </li>
+              <li>
+                <Link 
                   to="/paths" 
                   className="text-muted-foreground hover:text-primary transition-colors inline-block py-0.5"
                 >

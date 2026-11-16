@@ -242,6 +242,11 @@ function compactCourseForBackup(course: Course): Course {
           ...(v.viewCount !== undefined ? { viewCount: v.viewCount } : {}),
           ...(v.likeCount !== undefined ? { likeCount: v.likeCount } : {}),
           ...(v.commentCount !== undefined ? { commentCount: v.commentCount } : {}),
+          ...(v.channelName ? { channelName: v.channelName } : {}),
+          ...(v.channelAvatar ? { channelAvatar: v.channelAvatar } : {}),
+          ...(v.channelUrl ? { channelUrl: v.channelUrl } : {}),
+          ...(v.channelId ? { channelId: v.channelId } : {}),
+          ...(v.professorName ? { professorName: v.professorName } : {}),
         }))
       : [],
   };

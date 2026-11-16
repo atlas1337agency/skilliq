@@ -79,12 +79,12 @@ export function ShareCourseButton({
         {copied ? (
           <>
             <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span>{isRtl ? 'تم نسخ الرابط!' : 'Link Copied!'}</span>
+            <span className={cn(size === 'sm' && "hidden sm:inline")}>{isRtl ? 'تم نسخ الرابط!' : 'Link Copied!'}</span>
           </>
         ) : (
           <>
             <Share2 className="w-3.5 h-3.5 text-primary shrink-0" />
-            <span>{isRtl ? 'مشاركة' : 'Share'}</span>
+            <span className={cn(size === 'sm' && "hidden sm:inline")}>{isRtl ? 'مشاركة' : 'Share'}</span>
           </>
         )}
       </button>

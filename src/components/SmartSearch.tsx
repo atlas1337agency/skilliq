@@ -17,6 +17,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { filterByLanguage, filterPathsByLanguage } from '../lib/utils';
+import { getCoursePath, isMultiChannelCourse } from '../lib/courseUtils';
 import { Course, LearningPath } from '../data/courses';
 
 /**
@@ -156,14 +157,18 @@ export function SmartSearch({
 
     const queryTokens = cleanQuery.split(/\s+/).filter(Boolean);
 
-    // Match courses
+    // Match courses (including multi-channel lesson contributors)
     const matchedCourses = availableCourses.filter(course => {
       const titleNorm = normalizeSearchQuery(course.title || '');
       const instructorNorm = normalizeSearchQuery(course.instructor || '');
       const categoryNorm = normalizeSearchQuery(course.category || '');
       const descNorm = normalizeSearchQuery(course.description || '');
+      const videoChannelsNorm = (course.videos || [])
+        .map(v => `${v.channelName || ''} ${v.professorName || ''}`)
+        .join(' ');
+      const contributorsNorm = normalizeSearchQuery(videoChannelsNorm);
 
-      const fullHaystack = `${titleNorm} ${instructorNorm} ${categoryNorm} ${descNorm}`;
+      const fullHaystack = `${titleNorm} ${instructorNorm} ${categoryNorm} ${descNorm} ${contributorsNorm}`;
       return queryTokens.every(token => fullHaystack.includes(token));
     });
 
@@ -240,7 +245,7 @@ export function SmartSearch({
                 {suggestedCourses.map(course => (
                   <Link
                     key={course.id}
-                    to={`/course/${course.id}`}
+                    to={getCoursePath(course)}
                     onClick={() => {
                       setIsOpen(false);
                       if (onCloseMobileModal) onCloseMobileModal();
@@ -260,7 +265,7 @@ export function SmartSearch({
                         {course.title}
                       </div>
                       <div className="text-[11px] text-muted-foreground truncate">
-                        {course.instructor} · {course.category}
+                        {course.instructor} · {course.category}{isMultiChannelCourse(course) ? (isRtl ? ' · مجموعة Skilliq' : ' · Skilliq Collection') : ''}
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-primary rtl:rotate-180 transition-transform" />
@@ -348,7 +353,7 @@ export function SmartSearch({
                     {searchResults.courses.map(course => (
                       <Link
                         key={course.id}
-                        to={`/course/${course.id}`}
+                        to={getCoursePath(course)}
                         onClick={() => {
                           setIsOpen(false);
                           if (onCloseMobileModal) onCloseMobileModal();
@@ -368,7 +373,7 @@ export function SmartSearch({
                             {course.title}
                           </div>
                           <div className="text-[11px] text-muted-foreground truncate">
-                            {course.instructor} · <span className="text-primary/90">{course.category}</span>
+                            {course.instructor} · <span className="text-primary/90">{course.category}</span>{isMultiChannelCourse(course) ? (isRtl ? ' · مجموعة Skilliq' : ' · Skilliq Collection') : ''}
                           </div>
                         </div>
                         <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-primary rtl:rotate-180 transition-transform" />

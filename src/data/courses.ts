@@ -16,6 +16,11 @@ export interface Video {
   likeCount?: number;
   commentCount?: number;
   publishedAt?: string;
+  channelName?: string;
+  channelAvatar?: string;
+  channelUrl?: string;
+  channelId?: string;
+  professorName?: string;
 }
 
 export interface Course {
@@ -31,6 +36,7 @@ export interface Course {
   subscriberCount?: number;
   subscriberCountText?: string;
   playlistId?: string;
+  isMultiChannel?: boolean;
   totalViews?: number;
   totalLikes?: number;
   totalComments?: number;
@@ -46,6 +52,12 @@ export interface Course {
   resources?: VideoResource[];
   videos: Video[];
   createdAt?: number;
+  enableSandbox?: boolean;
+  enableFlashcards?: boolean;
+  enableLessonQuiz?: boolean;
+  enableCourseExam?: boolean;
+  sandboxMode?: 'terminal' | 'frontend' | 'python' | 'javascript' | 'sql';
+  flashcardsCategory?: string;
 }
 
 export interface Category {

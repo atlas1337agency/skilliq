@@ -27,6 +27,7 @@ import { CertificateDocument, CertificateData } from '../components/CertificateD
 import { ResponsiveCertificateViewer } from '../components/ResponsiveCertificateViewer';
 import { isCertificateEligible, isProjectCertificateEligible, resolveCourseEducator, buildCertificateId } from '../lib/courseUtils';
 import { TRUSTPILOT_REVIEW_URL } from '../components/TrustpilotReviewBanner';
+import { InteractiveQuizModal } from '../components/InteractiveQuizModal';
 
 export function Certificate() {
   const { courseId } = useParams<{ courseId: string }>();
@@ -42,6 +43,7 @@ export function Certificate() {
   const [certId, setCertId] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [isQuizOpen, setIsQuizOpen] = useState(false);
 
   const courseRaw = courses.find(c => c.id === courseId);
   const isProjectCert = Boolean((courseRaw && isProjectCertificateEligible(courseRaw)) || isProjectPreview);
@@ -72,8 +74,14 @@ export function Certificate() {
   }
 
   const handleBack = () => {
+    const currentPath = window.location.pathname;
     if (window.history.length > 1 && window.history.state && window.history.state.idx > 0) {
       navigate(-1);
+      setTimeout(() => {
+        if (window.location.pathname === currentPath) {
+          navigate('/certificates', { replace: true });
+        }
+      }, 120);
     } else {
       navigate('/certificates');
     }
@@ -175,7 +183,9 @@ export function Certificate() {
     issueDate: dateFormatted,
     verificationUrl: `${window.location.origin}/verify?id=${certId}`,
     isDemo: isPreview,
-    isProjectBuild: isProjectCert
+    isProjectBuild: isProjectCert,
+    isMultiChannel: educator.isMultiChannel,
+    contributors: educator.contributors?.map(c => ({ name: c.name, videoCount: c.videoCount })),
   };
 
   const handleDownloadPDF = async () => {
@@ -388,6 +398,17 @@ export function Certificate() {
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                   <span className="hidden sm:inline">{t('verify_certificate', 'Verify')}</span>
                 </Link>
+
+                {/* Take / Retake Mastery Quiz */}
+                <button
+                  type="button"
+                  onClick={() => setIsQuizOpen(true)}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-98"
+                  title={isRtl ? 'اختبار التحصيل والكفاءة' : 'Take Comprehension Quiz'}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>{isRtl ? 'اختبار الكفاءة (+XP)' : 'Quiz (+XP)'}</span>
+                </button>
               </>
             )}
 
@@ -488,6 +509,16 @@ export function Certificate() {
 
       </div>
 
+      {/* Interactive Quiz Modal */}
+      {course && (
+        <InteractiveQuizModal
+          isOpen={isQuizOpen}
+          onClose={() => setIsQuizOpen(false)}
+          courseId={course.id}
+          courseTitle={course.title}
+          courseCategory={(course as any).category}
+        />
+      )}
     </div>
   );
 }

@@ -26,7 +26,8 @@ import {
   Heart,
   LayoutGrid,
   MessageSquareHeart,
-  LifeBuoy
+  LifeBuoy,
+  FolderGit2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState, useRef } from 'react';
@@ -230,6 +231,9 @@ export function Header() {
   // Nav Links helper for active state
   const isNavActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
+    if (path === '/collection') {
+      return location.pathname.startsWith('/collection') || location.pathname.startsWith('/skilliq-collection');
+    }
     return location.pathname.startsWith(path);
   };
 
@@ -247,6 +251,13 @@ export function Header() {
       desc: isRtl ? 'قوائم تشغيل تعليمية متكاملة ومختارة' : 'Multi-lesson curated video playlists',
       icon: BookOpen,
       color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+    },
+    {
+      to: '/collection',
+      label: isRtl ? 'مجموعة Skilliq المختارة' : 'Skilliq Collection',
+      desc: isRtl ? 'دورات مجمعة من عدة قنوات ومعلمين في قائمة واحدة' : 'Multi-channel playlists uniting lessons from top teachers',
+      icon: LayoutGrid,
+      color: 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20',
     },
     {
       to: '/projects',
@@ -611,6 +622,22 @@ export function Header() {
                               <LayoutDashboard className="w-4 h-4" />
                             </div>
                             <span>{t('dashboard')}</span>
+                          </Link>
+
+                          <Link 
+                            to={publicProfile?.username ? `/p/${publicProfile.username}` : `/p/${user.uid}`} 
+                            onClick={() => setIsDropdownOpen(false)}
+                            className="flex items-center justify-between px-3 py-2.5 text-xs font-semibold text-foreground hover:bg-muted/80 rounded-xl transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
+                                <FolderGit2 className="w-4 h-4" />
+                              </div>
+                              <span>{isRtl ? 'ملفي المهني وشجرة المهارات' : 'Public Portfolio & Skill Tree'}</span>
+                            </div>
+                            <span className="px-1.5 py-0.2 rounded-full bg-primary/10 text-primary font-bold text-[10px]">
+                              CV
+                            </span>
                           </Link>
 
                           <Link 

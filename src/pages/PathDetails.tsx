@@ -91,8 +91,14 @@ export function PathDetails() {
   const completionPct = pathCourses.length > 0 ? Math.round((completedCount / pathCourses.length) * 100) : 0;
 
   const handleBack = () => {
+    const currentPath = window.location.pathname;
     if (window.history.length > 1 && window.history.state && window.history.state.idx > 0) {
       navigate(-1);
+      setTimeout(() => {
+        if (window.location.pathname === currentPath) {
+          navigate('/paths', { replace: true });
+        }
+      }, 120);
     } else {
       navigate('/paths');
     }

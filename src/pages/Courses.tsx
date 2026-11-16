@@ -38,7 +38,8 @@ import {
   isCourseNew,
   isProjectCourse,
   normalizeSubCategory,
-  getCoursePath
+  getCoursePath,
+  resolveCourseEducator
 } from '../lib/courseUtils';
 
 type LengthFilter = 'all' | 'short' | 'medium' | 'long';
@@ -148,12 +149,16 @@ export function Courses() {
       const matchSub = selectedSubCategory === "All" || 
         (c.subCategory && normalizeSubCategory(c.subCategory).toLowerCase() === normalizeSubCategory(selectedSubCategory).toLowerCase());
 
-      // Search
+      // Search (including per-lesson contributing channels & teachers)
+      const q = searchQuery.toLowerCase();
       const matchQuery = !searchQuery.trim() || 
-        c.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        c.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.instructor?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.subCategory?.toLowerCase().includes(searchQuery.toLowerCase());
+        c.title.toLowerCase().includes(q) || 
+        c.description?.toLowerCase().includes(q) ||
+        c.instructor?.toLowerCase().includes(q) ||
+        c.subCategory?.toLowerCase().includes(q) ||
+        (c.videos || []).some(
+          v => v.channelName?.toLowerCase().includes(q) || v.professorName?.toLowerCase().includes(q)
+        );
       
       // Course length
       let matchLength = true;
@@ -888,14 +893,24 @@ export function Courses() {
                         <BookOpen className="w-3.5 h-3.5 text-primary" />
                         <span>{course.videos.length} {t('videos')}</span>
                       </div>
-                      <div className="font-medium text-foreground max-w-[55%] truncate flex items-center gap-1.5">
-                        <ScrollingText>{course.instructor}</ScrollingText>
-                        {(course.subscriberCountText || (course.subscriberCount && course.subscriberCount > 0)) && (
-                          <span className="shrink-0 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full border border-red-500/20">
-                            {course.subscriberCountText || formatCompactNumber(course.subscriberCount)}
-                          </span>
-                        )}
-                      </div>
+                      {(() => {
+                        const educator = resolveCourseEducator(course);
+                        const contributorCount = educator.contributors?.length || 0;
+                        return (
+                          <div className="font-medium text-foreground max-w-[58%] truncate flex items-center gap-1.5">
+                            <ScrollingText>{educator.youtubeChannelName}</ScrollingText>
+                            {educator.isMultiChannel && contributorCount > 1 ? (
+                              <span className="shrink-0 text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded-full border border-primary/20">
+                                {contributorCount} {isRtl ? 'قنوات' : 'Channels'}
+                              </span>
+                            ) : (course.subscriberCountText || (course.subscriberCount && course.subscriberCount > 0)) ? (
+                              <span className="shrink-0 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full border border-red-500/20">
+                                {course.subscriberCountText || formatCompactNumber(course.subscriberCount)}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {(() => {

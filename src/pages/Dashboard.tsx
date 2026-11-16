@@ -21,6 +21,7 @@ import {
   Trash2, 
   Play, 
   LifeBuoy,
+  FolderGit2,
   Search,
   Timer,
   Pause,
@@ -38,7 +39,9 @@ import {
   Volume2,
   Maximize2,
   Coffee,
-  HelpCircle
+  HelpCircle,
+  Headphones,
+  Terminal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { onSnapshot, doc, collection } from 'firebase/firestore';
@@ -50,6 +53,11 @@ import { ScrollingText } from '../components/ScrollingText';
 import { DailyRewardCheckIn } from '../components/DailyRewardCheckIn';
 import { DailyTechQuest } from '../components/DailyTechQuest';
 import { AchievementsShowcase } from '../components/AchievementsShowcase';
+import { ActivityHeatmap } from '../components/ActivityHeatmap';
+import { VirtualStudyRoomModal } from '../components/VirtualStudyRoomModal';
+import { WeeklyTechChallenge } from '../components/WeeklyTechChallenge';
+import { FlashcardsModal } from '../components/FlashcardsModal';
+import { CodeTerminalSandboxModal } from '../components/CodeTerminalSandboxModal';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { awardCustomXP } from '../lib/gamification';
 import { SupportTickets } from './SupportTickets';
@@ -218,6 +226,10 @@ export function Dashboard() {
   } = useFocusTimer();
 
   const [showGoalExplainerModal, setShowGoalExplainerModal] = useState<boolean>(false);
+  const [isStudyRoomOpen, setIsStudyRoomOpen] = useState<boolean>(false);
+  const [isFlashcardsOpen, setIsFlashcardsOpen] = useState<boolean>(false);
+  const [isSandboxOpen, setIsSandboxOpen] = useState<boolean>(false);
+  const [dashboardSandboxMode, setDashboardSandboxMode] = useState<'terminal' | 'frontend' | 'python'>('terminal');
   const [selectedGoalCourseId, setSelectedGoalCourseId] = useState<string>(() => {
     try {
       return localStorage.getItem('skilliq_goal_course_id') || 'all';
@@ -795,6 +807,12 @@ export function Dashboard() {
         onSelectBook={(b) => setSelectedBookForModal(b)}
       />
 
+      {/* Virtual Study Room Modal */}
+      <VirtualStudyRoomModal
+        isOpen={isStudyRoomOpen}
+        onClose={() => setIsStudyRoomOpen(false)}
+      />
+
       {/* 1. TOP SMART HUB BANNER */}
       <section className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-card border border-border/80 p-5 sm:p-6 lg:p-7 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
@@ -888,6 +906,20 @@ export function Dashboard() {
                 {totalSavedCount}
               </span>
             </div>
+
+            <Link
+              to={publicProfile?.username ? `/p/${publicProfile.username}` : `/p/${user?.uid}`}
+              className="p-3 sm:px-4 sm:py-3 rounded-xl bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-violet-600/10 border border-primary/30 hover:border-primary flex flex-col items-center justify-center text-center transition-all group cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-primary mb-0.5">
+                <FolderGit2 className="w-3.5 h-3.5" />
+                <span>{isRtl ? 'ملفي المهني العام' : 'Public Portfolio'}</span>
+              </div>
+              <span className="text-xs font-bold text-foreground group-hover:text-primary transition-colors flex items-center gap-1">
+                <span>{isRtl ? 'عرض وشجرة المهارات' : 'View & Share CV'}</span>
+                <ArrowRight className="w-3 h-3 rtl:rotate-180" />
+              </span>
+            </Link>
 
           </div>
 
@@ -1000,6 +1032,50 @@ export function Dashboard() {
             {/* LEFT COLUMN: Velocity & Real Active Learning Tracks */}
             <div className="lg:col-span-7 xl:col-span-8 space-y-6">
               
+              {/* STUDY ACTIVITY HEATMAP */}
+              <ActivityHeatmap />
+
+              {/* INTERACTIVE LEARNING & SANDBOX QUICK LAUNCH */}
+              <div className="rounded-2xl border border-border/80 bg-gradient-to-r from-card via-card to-primary/5 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+                    <Terminal className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
+                      <span>{isRtl ? 'المحاكي ومختبر الأكواد السريع' : 'Interactive Terminal & Code Sandbox'}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold">Live</span>
+                    </h4>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {isRtl ? 'جرب أوامر Linux، اختبر أكواد Frontend أو شغّل سكريبتات Python مباشرة' : 'Execute Linux commands, prototype Frontend components, or run Python scripts'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsFlashcardsOpen(true)}
+                    className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isRtl ? 'بطاقات المراجعة (+XP)' : 'Flashcards (+XP)'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDashboardSandboxMode('terminal');
+                      setIsSandboxOpen(true);
+                    }}
+                    className="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <Terminal className="w-3.5 h-3.5" />
+                    <span>{isRtl ? 'فتح الطرفية' : 'Launch Sandbox'}</span>
+                  </button>
+                </div>
+              </div>
+
               {/* 3. SMART ACTIVE LEARNING TRACKS (REALTIME AUTO-SYNCED) */}
               <div className="space-y-4 text-start">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1452,6 +1528,16 @@ export function Dashboard() {
                   </button>
                 </div>
 
+                {/* Virtual Study Room Launch Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsStudyRoomOpen(true)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-violet-600/10 hover:from-blue-600/20 hover:to-violet-600/20 border border-primary/30 text-xs font-bold text-foreground flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs group"
+                >
+                  <Headphones className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
+                  <span>{isRtl ? 'غرفة الدراسة الجماعية وأصوات التركيز 🎧' : 'Virtual Co-Working Study Room 🎧'}</span>
+                </button>
+
                 {/* Alarm test & Logged info */}
                 <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground font-mono tabular-nums">
                   <span>{isRtl ? 'دقائق اليوم:' : 'Logged today:'}</span>
@@ -1551,6 +1637,9 @@ export function Dashboard() {
                   <ArrowRight className="w-3 h-3 rtl:rotate-180" />
                 </button>
               </div>
+
+              {/* WEEKLY TECH CHALLENGE */}
+              <WeeklyTechChallenge />
 
             </div>
 
@@ -2278,6 +2367,8 @@ export function Dashboard() {
             <DailyTechQuest />
           </div>
 
+          <WeeklyTechChallenge />
+
           {/* COMMUNITY ADVOCATE QUEST: TRUSTPILOT REVIEW */}
           <div className="rounded-2xl p-5 sm:p-6 bg-gradient-to-r from-emerald-50/90 via-card to-card dark:from-[#002416]/80 border border-emerald-200/90 dark:border-[#00b67a]/40 shadow-xs dark:shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5 text-start">
             <div className="space-y-2 max-w-xl">
@@ -2428,6 +2519,26 @@ export function Dashboard() {
           </motion.div>
         </div>
       )}
+
+      {/* Virtual Study Room & Soundscapes Modal */}
+      <VirtualStudyRoomModal
+        isOpen={isStudyRoomOpen}
+        onClose={() => setIsStudyRoomOpen(false)}
+      />
+
+      {/* Smart Technical Flashcards Modal */}
+      <FlashcardsModal
+        isOpen={isFlashcardsOpen}
+        onClose={() => setIsFlashcardsOpen(false)}
+        initialCategory="all"
+      />
+
+      {/* Interactive Code & Terminal Sandbox Modal */}
+      <CodeTerminalSandboxModal
+        isOpen={isSandboxOpen}
+        onClose={() => setIsSandboxOpen(false)}
+        initialMode={dashboardSandboxMode}
+      />
 
       {/* End Dashboard Content */}
     </div>

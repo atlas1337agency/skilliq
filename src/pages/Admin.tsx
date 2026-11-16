@@ -32,7 +32,12 @@ import {
   LifeBuoy,
   ThumbsUp,
   MessageSquare,
-  RefreshCw
+  RefreshCw,
+  Award,
+  SlidersHorizontal,
+  Layers,
+  HelpCircle,
+  ChevronDown
 } from 'lucide-react';
 import { 
   deleteCourseInFirestore, 
@@ -46,6 +51,7 @@ import {
   addOrUpdateCourse
 } from '../lib/firestoreContent';
 import { formatCompactNumber, syncAllCoursesLiveBackground } from '../lib/youtube';
+import { isMultiChannelCourse, getCourseContributors } from '../lib/courseUtils';
 import { AdminForms } from '../components/AdminForms';
 import { AdminAnalytics } from '../components/AdminAnalytics';
 import { AdminUsers } from '../components/AdminUsers';
@@ -53,6 +59,7 @@ import { AdminReports } from '../components/AdminReports';
 import { AdminSubmissions } from '../components/AdminSubmissions';
 import { AdminCommunity } from '../components/AdminCommunity';
 import { AdminTickets } from '../components/AdminTickets';
+import { AdminQuizzes } from '../components/AdminQuizzes';
 import { BookCoverVisual, BookVideoModal, AmazonIcon } from '../components/BookVideoModal';
 import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -84,8 +91,8 @@ export function Admin() {
   const { user, allCourses, allBooks, learningPaths, notifications, banners, loadContent, language } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  // Active Tab: Analytics, Courses, Books, Users, Notifications (Push Notif), Banners, Reports, Paths, Submissions, Tickets
-  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'books' | 'community' | 'tickets' | 'users' | 'notifications' | 'banners' | 'reports' | 'paths' | 'submissions'>('analytics');
+  // Active Tab: Analytics, Courses, Quizzes, Books, Users, Notifications (Push Notif), Banners, Reports, Paths, Submissions, Tickets
+  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'quizzes' | 'books' | 'community' | 'tickets' | 'users' | 'notifications' | 'banners' | 'reports' | 'paths' | 'submissions'>('analytics');
   const [pendingSubmissionsCount, setPendingSubmissionsCount] = useState(0);
   const [openTicketsCount, setOpenTicketsCount] = useState(0);
   
@@ -102,8 +109,10 @@ export function Admin() {
 
   // Courses state
   const [courseSearch, setCourseSearch] = useState('');
+  const [courseTypeFilter, setCourseTypeFilter] = useState<'all' | 'multi' | 'playlists' | 'projects' | 'masterclasses'>('all');
   const [coursePage, setCoursePage] = useState(1);
   const [isSyncingAllStats, setIsSyncingAllStats] = useState(false);
+  const [showAdminGuide, setShowAdminGuide] = useState(false);
 
   const handleSyncAllCoursesStats = async () => {
     if (isSyncingAllStats) return;
@@ -328,27 +337,34 @@ export function Admin() {
       {/* DELETE CONFIRMATION MODAL */}
       {deleteDialog && createPortal(
         <div className="fixed inset-0 z-[100] w-screen h-[100dvh] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl p-6 space-y-4">
+          <div
+            dir={isRtl ? 'rtl' : 'ltr'}
+            className="bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl p-5 sm:p-6 space-y-4 text-start"
+          >
             <div className="flex items-center gap-3 text-red-500">
-              <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
                 <Trash2 className="w-5 h-5" />
               </div>
-              <h3 className="text-lg font-bold text-foreground">
-                Delete {deleteDialog.type.toUpperCase()}?
+              <h3 className="text-base sm:text-lg font-bold text-foreground">
+                {isRtl ? 'تأكيد الحذف النهائي' : `Delete ${deleteDialog.type.toUpperCase()}?`}
               </h3>
             </div>
 
             <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-              Are you sure you want to permanently delete <strong className="text-foreground">"{deleteDialog.title}"</strong>? This action cannot be undone.
+              {isRtl ? (
+                <>هل أنت متأكد من حذف <strong className="text-foreground">"{deleteDialog.title}"</strong> نهائياً؟ لا يمكن التراجع عن هذا الإجراء.</>
+              ) : (
+                <>Are you sure you want to permanently delete <strong className="text-foreground">"{deleteDialog.title}"</strong>? This action cannot be undone.</>
+              )}
             </p>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
               <button 
                 onClick={() => setDeleteDialog(null)}
                 className="px-4 py-2 bg-card border border-border/80 hover:bg-muted text-foreground text-xs font-bold rounded-xl transition-all cursor-pointer"
                 disabled={isDeleting}
               >
-                Cancel
+                {isRtl ? 'إلغاء' : 'Cancel'}
               </button>
               <button 
                 onClick={handleConfirmDelete}
@@ -356,7 +372,11 @@ export function Admin() {
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {isDeleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>{isDeleting ? 'Deleting...' : 'Delete Permanently'}</span>
+                <span>
+                  {isDeleting
+                    ? (isRtl ? 'جاري الحذف...' : 'Deleting...')
+                    : (isRtl ? 'حذف نهائي' : 'Delete Permanently')}
+                </span>
               </button>
             </div>
           </div>
@@ -382,223 +402,360 @@ export function Admin() {
         />
       )}
 
-      {/* ADMIN COMMAND CENTER HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 sm:p-6 bg-card border border-border/80 rounded-2xl sm:rounded-3xl shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
-            <ShieldAlert className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">
-                {t('command_center', 'SkilliQ Command Center')}
-              </h1>
-              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 uppercase tracking-wider">
-                {user.role.toUpperCase()}
-              </span>
+      {/* ADMIN COMMAND CENTER HEADER (2-Tier Responsive Layout: never squishes title on Laptop, Tablet, or Mobile) */}
+      <div className="bg-card border border-border/80 rounded-2xl sm:rounded-3xl shadow-xs overflow-hidden">
+        <div className="p-4 sm:p-6 space-y-4">
+          {/* Top Row: Brand Title & Help Button */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+            <div className="flex items-start sm:items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-lg sm:text-2xl font-black text-foreground tracking-tight">
+                    {isRtl ? 'لوحة تحكم SkilliQ' : t('command_center', 'SkilliQ Command Center')}
+                  </h1>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 uppercase tracking-wider shrink-0">
+                    {user.role.toUpperCase()}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-[13px] text-muted-foreground mt-0.5 leading-relaxed">
+                  {isRtl
+                    ? 'إدارة الدورات، القوائم متعددة القنوات (Skilliq Collection)، المسارات، المشاريع العملية، الكتب، التحليلات والمستخدمين.'
+                    : 'Manage courses, multi-channel curated playlists (Skilliq Collection), paths, projects, books, analytics & users.'}
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Live analytics, user accounts, push notifications, ad banners, books library, and course curriculum management.
-            </p>
-          </div>
-        </div>
 
-        {/* Quick Course, Book, Project & Path Add Shortcuts */}
-        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-          <button
-            onClick={() => setEditingItem({ type: 'course', item: { isProject: true, isSingleVideo: false, videos: [] } })}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{isRtl ? 'إضافة مشروع عملي (Project)' : 'Add Real Project'}</span>
-          </button>
-          <button
-            onClick={() => setEditingItem({ type: 'path' })}
-            className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-black transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{isRtl ? 'إضافة مسار (Path)' : 'Add Path'}</span>
-          </button>
-          <button
-            onClick={() => setEditingItem({ type: 'book' })}
-            className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{isRtl ? 'إضافة كتاب جديد' : 'Add Book'}</span>
-          </button>
-          <button
-            onClick={() => setEditingItem({ type: 'course' })}
-            className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-98"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{isRtl ? 'إضافة دورة' : 'New Course'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* RESPONSIVE HORIZONTAL TABS BAR (Mobile touch scrollable, clean segmented pills on laptop) */}
-      <div className="w-full overflow-x-auto pb-1 no-scrollbar">
-        <div className="flex items-center gap-1.5 bg-muted/50 p-1.5 rounded-2xl border border-border/70 min-w-max">
-          
-          {isAdmin && (
-            <button 
-              onClick={() => setActiveTab('analytics')}
+            <button
+              type="button"
+              onClick={() => setShowAdminGuide((prev) => !prev)}
               className={cn(
-                "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                activeTab === 'analytics' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                "px-3.5 py-2 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center",
+                showAdminGuide
+                  ? "bg-muted text-foreground border-primary/40"
+                  : "bg-background hover:bg-muted text-muted-foreground hover:text-foreground border-border/80"
               )}
             >
-              <TrendingUp className="w-3.5 h-3.5 text-primary" />
-              <span>{t('analytics', 'Analytics')}</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Live Telemetry" />
+              <HelpCircle className="w-4 h-4 text-primary shrink-0" />
+              <span>{isRtl ? 'دليل الاستخدام' : 'How It Works'}</span>
+              <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showAdminGuide && "rotate-180")} />
             </button>
-          )}
+          </div>
 
-          <button 
-            onClick={() => setActiveTab('courses')}
-            className={cn(
-              "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-              activeTab === 'courses' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-primary" />
-            <span>{t('courses', 'Courses')}</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border">
-              {allCourses.length}
-            </span>
-          </button>
+          {/* Dedicated Action Buttons Grid: 1 col Mobile, 2 cols Small, 3 cols Tablet, 5 cols Laptop/Desktop */}
+          <div className="pt-4 border-t border-border/60 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2.5 w-full">
+            <button
+              type="button"
+              onClick={() =>
+                setEditingItem({
+                  type: 'course',
+                  item: { isMultiChannel: true, isProject: false, isSingleVideo: false, videos: [] }
+                })
+              }
+              className="px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98 min-w-0"
+              title={
+                isRtl
+                  ? 'أنشئ دورة تجمع دروساً من عدة قنوات يوتيوب وتظهر في Skilliq Collection'
+                  : 'Create a Multi-Channel Curated Playlist (publishes directly to Skilliq Collection)'
+              }
+            >
+              <Layers className="w-4 h-4 shrink-0" />
+              <span className="truncate">
+                {isRtl ? 'قائمة متعددة القنوات' : 'Multi-Channel Curated Playlist'}
+              </span>
+            </button>
 
-          <button 
-            onClick={() => setActiveTab('books')}
-            className={cn(
-              "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-              activeTab === 'books' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-amber-500" />
-            <span>{isRtl ? 'الكتب (Books)' : 'Books'}</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-black">
-              {allBooks.length}
-            </span>
-          </button>
+            <button
+              type="button"
+              onClick={() =>
+                setEditingItem({
+                  type: 'course',
+                  item: { isProject: false, isSingleVideo: false, isMultiChannel: false, videos: [] }
+                })
+              }
+              className="px-3.5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98 min-w-0"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span className="truncate">{isRtl ? 'إضافة دورة جديدة' : 'New Course'}</span>
+            </button>
 
-          <button 
-            onClick={() => setActiveTab('paths')}
-            className={cn(
-              "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-              activeTab === 'paths' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-violet-500" />
-            <span>{isRtl ? 'المسارات (Paths)' : t('paths', 'Paths')}</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400 border border-violet-500/30 font-black">
-              {learningPaths.length}
-            </span>
-          </button>
+            <button
+              type="button"
+              onClick={() =>
+                setEditingItem({
+                  type: 'course',
+                  item: { isProject: true, isSingleVideo: false, isMultiChannel: false, videos: [] }
+                })
+              }
+              className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98 min-w-0"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span className="truncate">{isRtl ? 'إضافة مشروع عملي' : 'Add Real Project'}</span>
+            </button>
 
-          {isAdmin && (
-            <>
-              <button 
-                onClick={() => setActiveTab('community')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'community' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <MessageSquareHeart className="w-3.5 h-3.5 text-emerald-500" />
-                <span>{isRtl ? 'المجتمع (Community)' : 'Community'}</span>
-              </button>
+            <button
+              type="button"
+              onClick={() => setEditingItem({ type: 'path' })}
+              className="px-3.5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98 min-w-0"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span className="truncate">{isRtl ? 'إضافة مسار' : 'Add Path'}</span>
+            </button>
 
-              <button 
-                onClick={() => setActiveTab('users')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'users' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <Users className="w-3.5 h-3.5 text-primary" />
-                <span>{t('users', 'Users')}</span>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('notifications')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'notifications' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <Bell className="w-3.5 h-3.5 text-primary" />
-                <span>Push Notif</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border">
-                  {notifications.length}
-                </span>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('banners')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'banners' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <ImageIcon className="w-3.5 h-3.5 text-primary" />
-                <span>Banners</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border">
-                  {banners.length}
-                </span>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('reports')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'reports' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <AlertTriangle className={cn("w-3.5 h-3.5", pendingReportsCount > 0 ? "text-amber-500 animate-pulse" : "text-primary")} />
-                <span>Reports</span>
-                {pendingReportsCount > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-black">
-                    {pendingReportsCount}
-                  </span>
-                )}
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('tickets')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'tickets' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <LifeBuoy className={cn("w-3.5 h-3.5", openTicketsCount > 0 ? "text-rose-500 animate-pulse" : "text-primary")} />
-                <span>{isRtl ? 'تذاكر الدعم الفني' : 'Support Tickets'}</span>
-                {openTicketsCount > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black animate-pulse">
-                    {openTicketsCount}
-                  </span>
-                )}
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('submissions')}
-                className={cn(
-                  "px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5",
-                  activeTab === 'submissions' ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <Inbox className={cn("w-3.5 h-3.5", pendingSubmissionsCount > 0 ? "text-rose-500 animate-pulse" : "text-primary")} />
-                <span>{isRtl ? 'النماذج والرسائل' : 'Form Submissions'}</span>
-                {pendingSubmissionsCount > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black animate-pulse">
-                    {pendingSubmissionsCount}
-                  </span>
-                )}
-              </button>
-            </>
-          )}
-
+            <button
+              type="button"
+              onClick={() => setEditingItem({ type: 'book' })}
+              className="sm:col-span-2 md:col-span-1 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98 min-w-0"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span className="truncate">{isRtl ? 'إضافة كتاب' : 'Add Book'}</span>
+            </button>
+          </div>
         </div>
+
+        {/* COLLAPSIBLE QUICK GUIDE FOR ADMINS */}
+        {showAdminGuide && (
+          <div className="px-4 sm:px-6 pb-5 pt-3 border-t border-border/70 bg-muted/30">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="p-3 rounded-xl bg-card border border-indigo-500/25 space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-black text-indigo-600 dark:text-indigo-400">
+                  <Layers className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isRtl ? 'قائمة متعددة القنوات' : 'Multi-Channel Curated'}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {isRtl
+                    ? 'اجمع فيديوهات من عدة قنوات (قناة X + قناة Y) في كورس واحد متكامل. يظهر تلقائياً في قسم وصفحة Skilliq Collection وتوثّق الشهادة جميع المعلمين.'
+                    : 'Combine lessons from multiple YouTube channels (Channel X + Channel Y) into one complete course. Auto-publishes to Skilliq Collection & credits all teachers on certificates.'}
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-card border border-primary/25 space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-black text-primary">
+                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isRtl ? 'إضافة دورة جديدة' : 'New Course'}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {isRtl
+                    ? 'لاستيراد قائمة تشغيل كاملة من قناة واحدة أو فيديو ماستركلاس طويل (2+ ساعة) لصفحة الدورات أو الماستركلاس.'
+                    : 'Import a single-channel YouTube playlist or add a 2h+ Masterclass video for the Courses or Masterclasses catalog.'}
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-card border border-emerald-500/25 space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-black text-emerald-600 dark:text-emerald-400">
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isRtl ? 'مشروع عملي' : 'Add Real Project'}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {isRtl
+                    ? 'لدورات بناء التطبيقات والمشاريع العملية خطوة بخطوة، وتظهر مباشرة في قسم وصفحة المشاريع العملية.'
+                    : 'For hands-on real-world project builds (playlists or full build sessions) displayed on the Projects page.'}
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-card border border-violet-500/25 space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-black text-violet-600 dark:text-violet-400">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isRtl ? 'إضافة مسار' : 'Add Path'}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {isRtl
+                    ? 'رتب عدة دورات في مسار مهني متسلسل من الصفر للاحتراف مع خريطة طريق تفاعلية وأدوات مساعدة.'
+                    : 'Chain multiple courses into an ordered career roadmap with interactive stage guides and toolkit resources.'}
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-card border border-amber-500/25 space-y-1 sm:col-span-2 lg:col-span-1">
+                <div className="flex items-center gap-1.5 text-xs font-black text-amber-600 dark:text-amber-400">
+                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isRtl ? 'إضافة كتاب' : 'Add Book'}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {isRtl
+                    ? 'أضف كتاباً تقنياً مع ملخص فيديو بالإنجليزية والعربية، الغلاف التلقائي، وروابط الشراء.'
+                    : 'Add technical or mindset books with EN/AR video summaries, cover lookup, key takeaways & buy links.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* RESPONSIVE WRAPPING ADMIN NAVIGATION TABS (2-col Mobile grid, clean multi-row flex-wrap on Tablet & Laptop — zero horizontal clipping) */}
+      <div className="w-full bg-muted/50 p-1.5 rounded-2xl border border-border/70 grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-1.5">
+        {isAdmin && (
+          <button 
+            onClick={() => setActiveTab('analytics')}
+            className={cn(
+              "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+              activeTab === 'analytics' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+            )}
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span>{isRtl ? 'التحليلات' : t('analytics', 'Analytics')}</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="Live Telemetry" />
+          </button>
+        )}
+
+        <button 
+          onClick={() => setActiveTab('courses')}
+          className={cn(
+            "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+            activeTab === 'courses' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+          )}
+        >
+          <BookOpen className="w-3.5 h-3.5 text-primary shrink-0" />
+          <span>{isRtl ? 'الدورات' : t('courses', 'Courses')}</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border tabular-nums">
+            {allCourses.length}
+          </span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('quizzes')}
+          className={cn(
+            "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+            activeTab === 'quizzes' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+          )}
+        >
+          <Award className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+          <span>{isRtl ? 'الاختبارات' : 'Quizzes'}</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 font-bold">
+            Quiz
+          </span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('books')}
+          className={cn(
+            "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+            activeTab === 'books' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+          )}
+        >
+          <BookOpen className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+          <span>{isRtl ? 'الكتب' : 'Books'}</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-black tabular-nums">
+            {allBooks.length}
+          </span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('paths')}
+          className={cn(
+            "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+            activeTab === 'paths' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+          )}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+          <span>{isRtl ? 'المسارات' : t('paths', 'Paths')}</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400 border border-violet-500/30 font-black tabular-nums">
+            {learningPaths.length}
+          </span>
+        </button>
+
+        {isAdmin && (
+          <>
+            <button 
+              onClick={() => setActiveTab('community')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+                activeTab === 'community' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+              )}
+            >
+              <MessageSquareHeart className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span>{isRtl ? 'المجتمع' : 'Community'}</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('users')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+                activeTab === 'users' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+              )}
+            >
+              <Users className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>{isRtl ? 'المستخدمون' : t('users', 'Users')}</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('notifications')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+                activeTab === 'notifications' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+              )}
+            >
+              <Bell className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>{isRtl ? 'الإشعارات' : 'Push Notif'}</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border tabular-nums">
+                {notifications.length}
+              </span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('banners')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+                activeTab === 'banners' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+              )}
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>{isRtl ? 'البانرات' : 'Banners'}</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted border border-border tabular-nums">
+                {banners.length}
+              </span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('reports')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+                activeTab === 'reports' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+              )}
+            >
+              <AlertTriangle className={cn("w-3.5 h-3.5 shrink-0", pendingReportsCount > 0 ? "text-amber-500 animate-pulse" : "text-primary")} />
+              <span>{isRtl ? 'البلاغات' : 'Reports'}</span>
+              {pendingReportsCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-black tabular-nums">
+                  {pendingReportsCount}
+                </span>
+              )}
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('tickets')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+                activeTab === 'tickets' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+              )}
+            >
+              <LifeBuoy className={cn("w-3.5 h-3.5 shrink-0", openTicketsCount > 0 ? "text-rose-500 animate-pulse" : "text-primary")} />
+              <span>{isRtl ? 'تذاكر الدعم' : 'Support Tickets'}</span>
+              {openTicketsCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black animate-pulse tabular-nums">
+                  {openTicketsCount}
+                </span>
+              )}
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('submissions')}
+              className={cn(
+                "px-3 sm:px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap",
+                activeTab === 'submissions' ? 'bg-card text-foreground shadow-xs border border-border/60' : 'text-muted-foreground hover:text-foreground border border-transparent'
+              )}
+            >
+              <Inbox className={cn("w-3.5 h-3.5 shrink-0", pendingSubmissionsCount > 0 ? "text-rose-500 animate-pulse" : "text-primary")} />
+              <span>{isRtl ? 'النماذج والرسائل' : 'Form Submissions'}</span>
+              {pendingSubmissionsCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black animate-pulse tabular-nums">
+                  {pendingSubmissionsCount}
+                </span>
+              )}
+            </button>
+          </>
+        )}
       </div>
 
       {/* TAB CONTENT 1: ANALYTICS */}
@@ -609,57 +766,119 @@ export function Admin() {
       {/* TAB CONTENT 2: COURSES */}
       {activeTab === 'courses' && (() => {
         const itemsPerPage = 9;
-        const filteredCourses = allCourses.filter(c => 
-          c.title.toLowerCase().includes(courseSearch.toLowerCase()) || 
-          (c.instructor && c.instructor.toLowerCase().includes(courseSearch.toLowerCase())) ||
-          (c.category && c.category.toLowerCase().includes(courseSearch.toLowerCase())) ||
-          (c.subCategory && c.subCategory.toLowerCase().includes(courseSearch.toLowerCase()))
-        );
+        const multiCount = allCourses.filter(c => isMultiChannelCourse(c)).length;
+        const projectsCount = allCourses.filter(c => Boolean(c.isProject)).length;
+        const masterclassesCount = allCourses.filter(c => Boolean(c.isSingleVideo) && !c.isProject).length;
+        const playlistsCount = allCourses.filter(c => !c.isSingleVideo && !c.isProject && !isMultiChannelCourse(c)).length;
+
+        const filteredCourses = allCourses.filter(c => {
+          if (courseTypeFilter === 'multi' && !isMultiChannelCourse(c)) return false;
+          if (courseTypeFilter === 'projects' && !c.isProject) return false;
+          if (courseTypeFilter === 'masterclasses' && (!c.isSingleVideo || c.isProject)) return false;
+          if (courseTypeFilter === 'playlists' && (c.isSingleVideo || c.isProject || isMultiChannelCourse(c))) return false;
+
+          const q = courseSearch.toLowerCase();
+          if (!q) return true;
+          return (
+            c.title.toLowerCase().includes(q) || 
+            (c.instructor && c.instructor.toLowerCase().includes(q)) ||
+            (c.category && c.category.toLowerCase().includes(q)) ||
+            (c.subCategory && c.subCategory.toLowerCase().includes(q)) ||
+            (c.videos || []).some(v => v.channelName?.toLowerCase().includes(q) || v.professorName?.toLowerCase().includes(q))
+          );
+        });
         const totalCoursePages = Math.max(1, Math.ceil(filteredCourses.length / itemsPerPage));
-        const paginatedCourses = filteredCourses.slice((coursePage - 1) * itemsPerPage, coursePage * itemsPerPage);
+        const safeCoursePage = Math.min(coursePage, totalCoursePages);
+        const paginatedCourses = filteredCourses.slice((safeCoursePage - 1) * itemsPerPage, safeCoursePage * itemsPerPage);
 
         return (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-black text-foreground">{t('manage_courses', 'Manage Courses & Masterclasses')}</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Edit syllabus, YouTube playlists, lessons, and real-time YouTube engagement telemetry.</p>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-card/60 border border-border/80 rounded-2xl sm:rounded-3xl p-4 sm:p-5">
+              <div className="min-w-0">
+                <h2 className="text-lg sm:text-2xl font-black text-foreground">
+                  {isRtl ? 'إدارة الدورات وقوائم التشغيل' : t('manage_courses', 'Manage Courses & Masterclasses')}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                  {isRtl
+                    ? 'أنشئ دورة عادية من قناة واحدة، أو قائمة متعددة القنوات لصفحة Skilliq Collection، أو حدّث إحصائيات يوتيوب المباشرة.'
+                    : 'Manage single-channel playlists, Multi-Channel Curated Playlists (Skilliq Collection), lessons & live YouTube telemetry.'}
+                </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 shrink-0">
                 <button 
+                  type="button"
                   onClick={handleSyncAllCoursesStats}
                   disabled={isSyncingAllStats}
-                  className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs cursor-pointer active:scale-98"
+                  className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-xs cursor-pointer active:scale-98"
                   title={isRtl ? 'تحديث المشاهدات والإعجابات والتعليقات والمشتركين لجميع الدورات' : 'Refresh real-time Views, Likes, Comments & Subscribers for all courses'}
                 >
-                  <RefreshCw className={cn("w-3.5 h-3.5", isSyncingAllStats && "animate-spin")} /> 
+                  <RefreshCw className={cn("w-3.5 h-3.5 shrink-0", isSyncingAllStats && "animate-spin")} /> 
                   <span>{isSyncingAllStats ? (isRtl ? 'جاري التحديث...' : 'Syncing Live Stats...') : (isRtl ? 'مزامنة الإحصائيات الحية' : 'Sync All Live Stats')}</span>
                 </button>
 
                 <button 
-                  onClick={() => setEditingItem({ type: 'course' })}
-                  className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
+                  type="button"
+                  onClick={() => setEditingItem({ type: 'course', item: { isMultiChannel: true, isProject: false, isSingleVideo: false, videos: [] } })}
+                  className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 rounded-xl text-xs font-black shadow-xs cursor-pointer active:scale-98"
                 >
-                  <Plus className="w-4 h-4" /> 
-                  <span>{t('add_course', 'Add Course')}</span>
+                  <Layers className="w-4 h-4 shrink-0" /> 
+                  <span>{isRtl ? 'إضافة قائمة متعددة القنوات' : 'Multi-Channel Curated Playlist'}</span>
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={() => setEditingItem({ type: 'course', item: { isProject: false, isSingleVideo: false, isMultiChannel: false, videos: [] } })}
+                  className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
+                >
+                  <Plus className="w-4 h-4 shrink-0" /> 
+                  <span>{isRtl ? 'إضافة دورة جديدة' : 'New Course'}</span>
                 </button>
               </div>
             </div>
             
-            {/* Search Bar */}
-            <div className="relative max-w-md">
-              <Search className="w-4 h-4 text-muted-foreground absolute top-1/2 -translate-y-1/2 start-3.5" />
-              <input 
-                type="text" 
-                placeholder={t('search_courses_admin', 'Search courses by title or instructor...')} 
-                value={courseSearch}
-                onChange={(e) => {
-                  setCourseSearch(e.target.value);
-                  setCoursePage(1);
-                }}
-                className="w-full ps-10 pe-4 py-2.5 bg-card border border-border/80 rounded-2xl text-xs text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none shadow-xs"
-              />
+            {/* Search & Type Filter Bar */}
+            <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3">
+              <div className="relative w-full xl:max-w-md">
+                <Search className="w-4 h-4 text-muted-foreground absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
+                <input 
+                  type="text" 
+                  placeholder={isRtl ? 'ابحث بالعنوان، التصنيف، أو اسم القناة / المعلم...' : 'Search by title, category, or channel / teacher...'} 
+                  value={courseSearch}
+                  onChange={(e) => {
+                    setCourseSearch(e.target.value);
+                    setCoursePage(1);
+                  }}
+                  className="w-full ps-10 pe-4 py-2.5 bg-card border border-border/80 rounded-2xl text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none shadow-xs"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 tabular-nums">
+                {[
+                  { id: 'all', label: isRtl ? 'الكل' : 'All', count: allCourses.length, activeCls: 'bg-foreground text-background' },
+                  { id: 'multi', label: isRtl ? 'متعددة القنوات (Collection)' : 'Multi-Channel (Skilliq Collection)', count: multiCount, activeCls: 'bg-indigo-600 text-white' },
+                  { id: 'playlists', label: isRtl ? 'قوائم التشغيل' : 'Playlists', count: playlistsCount, activeCls: 'bg-primary text-primary-foreground' },
+                  { id: 'projects', label: isRtl ? 'مشاريع عملية' : 'Real Projects', count: projectsCount, activeCls: 'bg-emerald-600 text-white' },
+                  { id: 'masterclasses', label: isRtl ? 'ماستركلاس' : 'Masterclasses', count: masterclassesCount, activeCls: 'bg-purple-600 text-white' }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setCourseTypeFilter(tab.id as any);
+                      setCoursePage(1);
+                    }}
+                    className={cn(
+                      "px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 border",
+                      courseTypeFilter === tab.id
+                        ? cn(tab.activeCls, "border-transparent shadow-xs")
+                        : "bg-card border-border/80 text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                    )}
+                  >
+                    {tab.label} ({tab.count})
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Courses Grid */}
@@ -670,15 +889,17 @@ export function Admin() {
                 const cComments = courseItem.totalComments || (courseItem.videos || []).reduce((s, v) => s + (v.commentCount || 0), 0);
                 const cSubs = courseItem.subscriberCountText || (courseItem.subscriberCount ? formatCompactNumber(courseItem.subscriberCount) : '');
                 const parentPaths = learningPaths.filter(p => (p.courseIds || []).includes(courseItem.id));
+                const isMulti = isMultiChannelCourse(courseItem);
+                const contributorsCount = getCourseContributors(courseItem).length;
 
                 return (
                 <div key={courseItem.id} className="bg-card border border-border/80 rounded-2xl p-4 flex flex-col justify-between shadow-xs hover:shadow-md transition-shadow">
                   <div className="flex items-start gap-3 mb-3">
                     {courseItem.thumbnail?.trim() ? (
-                      <img src={courseItem.thumbnail} alt="" className="w-16 h-16 object-cover rounded-xl bg-muted shrink-0 border border-border/80" />
+                      <img src={courseItem.thumbnail} alt="" className="w-16 h-16 object-cover rounded-xl bg-muted shrink-0 border border-border/80" referrerPolicy="no-referrer" />
                     ) : (
                       <div className="w-16 h-16 rounded-xl bg-muted flex items-center justify-center p-1 text-[10px] text-center text-muted-foreground shrink-0 border border-border/80">
-                        No Image
+                        {isRtl ? 'بدون صورة' : 'No Image'}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -688,12 +909,22 @@ export function Admin() {
                         </h3>
                         {courseItem.isApproved === false && (
                           <span className="px-1.5 py-0.2 rounded text-[9px] uppercase font-bold bg-amber-500/15 text-amber-600 border border-amber-500/30">
-                            {t('pending', 'Pending')}
+                            {isRtl ? 'قيد المراجعة' : t('pending', 'Pending')}
+                          </span>
+                        )}
+                        {isMulti && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9.5px] uppercase font-black bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                            <Layers className="w-2.5 h-2.5 shrink-0" />
+                            <span>
+                              {isRtl
+                                ? `Skilliq Collection (${contributorsCount})`
+                                : `Skilliq Collection (${contributorsCount})`}
+                            </span>
                           </span>
                         )}
                         {courseItem.isProject && (
                           <span className="px-1.5 py-0.5 rounded-md text-[9.5px] uppercase font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                            {isRtl ? 'مشروع عملي (Project)' : 'Real Project'}
+                            {isRtl ? 'مشروع عملي' : 'Real Project'}
                           </span>
                         )}
                         {parentPaths.length > 0 && (
@@ -718,8 +949,12 @@ export function Admin() {
                         )}
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          {courseItem.isSingleVideo ? 'Masterclass' : 'Playlist'} • {courseItem.videos?.length || 0} videos
+                        <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
+                          {courseItem.isSingleVideo
+                            ? (isRtl ? 'ماستركلاس' : 'Masterclass')
+                            : isMulti
+                              ? (isRtl ? 'قائمة متعددة القنوات' : 'Multi-Channel')
+                              : (isRtl ? 'قائمة تشغيل' : 'Playlist')} · {courseItem.videos?.length || 0} {isRtl ? 'فيديو' : 'videos'}
                         </span>
                         {courseItem.category && (
                           <span className="px-1.5 py-0.2 rounded-md text-[9.5px] font-bold bg-muted text-foreground border border-border/70">
@@ -736,20 +971,20 @@ export function Admin() {
                   </div>
 
                   {/* Live YouTube Stats Strip inside Admin Course Card */}
-                  <div className="grid grid-cols-4 gap-1.5 py-2 px-2.5 mb-2.5 rounded-xl bg-muted/40 border border-border/60 text-[10px] font-bold">
-                    <div className="flex items-center gap-1 text-foreground truncate" title="Creator Subscribers">
+                  <div className="grid grid-cols-4 gap-1.5 py-2 px-2.5 mb-2.5 rounded-xl bg-muted/40 border border-border/60 text-[10px] font-bold tabular-nums">
+                    <div className="flex items-center gap-1 text-foreground truncate" title={isRtl ? 'المشتركون' : 'Creator Subscribers'}>
                       <Users className="w-3 h-3 text-red-500 shrink-0" />
                       <span className="truncate">{cSubs || '—'}</span>
                     </div>
-                    <div className="flex items-center gap-1 text-foreground truncate" title="Total Views">
+                    <div className="flex items-center gap-1 text-foreground truncate" title={isRtl ? 'المشاهدات' : 'Total Views'}>
                       <Eye className="w-3 h-3 text-primary shrink-0" />
                       <span className="truncate">{formatCompactNumber(cViews)}</span>
                     </div>
-                    <div className="flex items-center gap-1 text-foreground truncate" title="Total Likes">
+                    <div className="flex items-center gap-1 text-foreground truncate" title={isRtl ? 'الإعجابات' : 'Total Likes'}>
                       <ThumbsUp className="w-3 h-3 text-emerald-500 shrink-0" />
                       <span className="truncate">{formatCompactNumber(cLikes)}</span>
                     </div>
-                    <div className="flex items-center gap-1 text-foreground truncate" title="Total Comments">
+                    <div className="flex items-center gap-1 text-foreground truncate" title={isRtl ? 'التعليقات' : 'Total Comments'}>
                       <MessageSquare className="w-3 h-3 text-amber-500 shrink-0" />
                       <span className="truncate">{formatCompactNumber(cComments)}</span>
                     </div>
@@ -759,15 +994,22 @@ export function Admin() {
                     <button 
                       onClick={() => setEditingItem({ type: 'course', item: courseItem })}
                       className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors cursor-pointer"
-                      title="Edit Course"
+                      title={isRtl ? 'تعديل الدورة' : 'Edit Course'}
                     >
                       <Edit className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => setActiveTab('quizzes')}
+                      className="p-1.5 rounded-lg text-indigo-500 hover:bg-indigo-500/10 transition-colors cursor-pointer"
+                      title={isRtl ? 'إدارة الاختبارات وصلاحيات ظهور الأدوات التفاعلية' : 'Manage Course Quizzes & Interactive Tools'}
+                    >
+                      <Award className="w-4 h-4" />
                     </button>
                     {isAdmin && (
                       <button 
                         onClick={() => setDeleteDialog({ type: 'course', id: courseItem.id, title: courseItem.title })} 
                         className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
-                        title="Delete Course"
+                        title={isRtl ? 'حذف الدورة' : 'Delete Course'}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -778,25 +1020,44 @@ export function Admin() {
               })}
             </div>
 
+            {paginatedCourses.length === 0 && (
+              <div className="p-8 text-center rounded-2xl bg-card border border-dashed border-border/80 space-y-3">
+                <Layers className="w-8 h-8 text-primary/60 mx-auto" />
+                <p className="text-sm font-bold text-foreground">
+                  {isRtl ? 'لا توجد دورات مطابقة في هذا القسم' : 'No matching courses in this filter'}
+                </p>
+                {courseTypeFilter === 'multi' && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingItem({ type: 'course', item: { isMultiChannel: true, isProject: false, isSingleVideo: false, videos: [] } })}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer"
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span>{isRtl ? 'إنشاء أول قائمة متعددة القنوات' : 'Create First Multi-Channel Curated Playlist'}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Pagination Controls */}
             {totalCoursePages > 1 && (
-              <div className="flex items-center justify-center gap-2 mt-6">
+              <div className="flex items-center justify-center gap-2 mt-6 tabular-nums">
                 <button 
                   onClick={() => setCoursePage(p => Math.max(1, p - 1))}
-                  disabled={coursePage === 1}
-                  className="px-3 py-1.5 bg-card border border-border/80 hover:bg-muted rounded-xl disabled:opacity-40 text-xs font-bold"
+                  disabled={safeCoursePage === 1}
+                  className="px-3 py-1.5 bg-card border border-border/80 hover:bg-muted rounded-xl disabled:opacity-40 text-xs font-bold cursor-pointer"
                 >
-                  {t('previous', 'Previous')}
+                  {isRtl ? 'السابق' : t('previous', 'Previous')}
                 </button>
                 <span className="text-xs font-medium text-muted-foreground px-2">
-                  {t('page', 'Page')} {coursePage} {t('of', 'of')} {totalCoursePages}
+                  {isRtl ? `صفحة ${safeCoursePage} من ${totalCoursePages}` : `${t('page', 'Page')} ${safeCoursePage} ${t('of', 'of')} ${totalCoursePages}`}
                 </span>
                 <button 
                   onClick={() => setCoursePage(p => Math.min(totalCoursePages, p + 1))}
-                  disabled={coursePage === totalCoursePages}
-                  className="px-3 py-1.5 bg-card border border-border/80 hover:bg-muted rounded-xl disabled:opacity-40 text-xs font-bold"
+                  disabled={safeCoursePage === totalCoursePages}
+                  className="px-3 py-1.5 bg-card border border-border/80 hover:bg-muted rounded-xl disabled:opacity-40 text-xs font-bold cursor-pointer"
                 >
-                  {t('next', 'Next')}
+                  {isRtl ? 'التالي' : t('next', 'Next')}
                 </button>
               </div>
             )}
@@ -865,7 +1126,7 @@ export function Admin() {
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 lg:pb-0">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   onClick={() => { setBookCategoryFilter('all'); setBookPage(1); }}
                   className={cn(
@@ -1055,23 +1316,25 @@ export function Admin() {
       {/* TAB CONTENT 4: PUSH NOTIF (Announcements & Alerts) */}
       {activeTab === 'notifications' && isAdmin && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-foreground flex items-center gap-2">
-                <Bell className="w-6 h-6 text-primary" />
-                <span>Push Notifications & Broadcasts</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/60 border border-border/80 rounded-2xl sm:rounded-3xl p-4 sm:p-5">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-2xl font-black text-foreground flex items-center gap-2">
+                <Bell className="w-5 h-5 sm:w-6 sm:h-6 text-primary shrink-0" />
+                <span>{isRtl ? 'إشعارات الدفع والبث المباشر' : 'Push Notifications & Broadcasts'}</span>
               </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Send global announcements, new course popups, and updates to all students in real time.
+              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                {isRtl
+                  ? 'أرسل إشعارات عامة، نوافذ الدورات الجديدة، والتحديثات لجميع الطلاب في الوقت الفعلي.'
+                  : 'Send global announcements, new course popups, and updates to all students in real time.'}
               </p>
             </div>
 
             <button 
               onClick={() => setEditingItem({ type: 'notification' })}
-              className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
+              className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98 shrink-0"
             >
-              <Plus className="w-4 h-4" /> 
-              <span>New Push Notification</span>
+              <Plus className="w-4 h-4 shrink-0" /> 
+              <span>{isRtl ? 'إشعار جديد' : 'New Push Notification'}</span>
             </button>
           </div>
 
@@ -1174,18 +1437,20 @@ export function Admin() {
       {/* TAB CONTENT 5: BANNERS (Ad Banners) */}
       {activeTab === 'banners' && isAdmin && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-foreground flex items-center gap-2">
-                <ImageIcon className="w-6 h-6 text-primary" />
-                <span>Ad & Promotional Banners</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/60 border border-border/80 rounded-2xl sm:rounded-3xl p-4 sm:p-5">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-2xl font-black text-foreground flex items-center gap-2">
+                <ImageIcon className="w-5 h-5 sm:w-6 sm:h-6 text-primary shrink-0" />
+                <span>{isRtl ? 'البانرات الإعلانية والترويجية' : 'Ad & Promotional Banners'}</span>
               </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Manage live hero, catalog, and promo banners rendered across web and mobile.
+              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                {isRtl
+                  ? 'إدارة بانرات الصفحة الرئيسية، الكتالوج، والعروض الترويجية على الويب والهاتف.'
+                  : 'Manage live hero, catalog, and promo banners rendered across web and mobile.'}
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button 
                 onClick={async () => {
                   try {
@@ -1199,17 +1464,17 @@ export function Admin() {
                     alert("Failed to load default banners: " + (e?.message || 'Unknown error'));
                   }
                 }}
-                className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-secondary/80 shadow-xs cursor-pointer active:scale-98"
+                className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground px-3.5 py-2.5 rounded-xl text-xs font-bold hover:bg-secondary/80 shadow-xs cursor-pointer active:scale-98"
                 title="Populate initial demo banners into Firestore"
               >
-                <span>Load Defaults</span>
+                <span>{isRtl ? 'تحميل الافتراضيات' : 'Load Defaults'}</span>
               </button>
               <button 
                 onClick={() => setEditingItem({ type: 'banner' })}
-                className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
+                className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-xs font-bold hover:bg-primary/90 shadow-xs cursor-pointer active:scale-98"
               >
-                <Plus className="w-4 h-4" /> 
-                <span>New Banner</span>
+                <Plus className="w-4 h-4 shrink-0" /> 
+                <span>{isRtl ? 'بانر جديد' : 'New Banner'}</span>
               </button>
             </div>
           </div>
@@ -1459,6 +1724,11 @@ export function Admin() {
       {/* TAB CONTENT 10: SUPPORT TICKETS */}
       {activeTab === 'tickets' && isAdmin && (
         <AdminTickets />
+      )}
+
+      {/* TAB CONTENT 11: INTERACTIVE QUIZZES ENGINE */}
+      {activeTab === 'quizzes' && (
+        <AdminQuizzes />
       )}
 
     </div>

@@ -23,6 +23,7 @@ import { Books } from './pages/Books';
 import { Paths } from './pages/Paths';
 import { Projects } from './pages/Projects';
 import { Masterclasses } from './pages/Masterclasses';
+import { SkilliqCollection } from './pages/SkilliqCollection';
 import { PathDetails } from './pages/PathDetails';
 import { About } from './pages/About';
 import { Copyright } from './pages/Copyright';
@@ -39,6 +40,7 @@ const Leaderboard = lazy(() => import('./pages/Leaderboard').then(m => ({ defaul
 const Creator = lazy(() => import('./pages/Creator').then(m => ({ default: m.Creator })));
 const Community = lazy(() => import('./pages/Community').then(m => ({ default: m.Community })));
 const SupportTickets = lazy(() => import('./pages/SupportTickets').then(m => ({ default: m.SupportTickets })));
+const PublicPortfolio = lazy(() => import('./pages/PublicPortfolio').then(m => ({ default: m.PublicPortfolio })));
 
 export default function App() {
   const { loadContent, language, theme } = useStore();
@@ -90,6 +92,8 @@ export default function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Home />} />
               <Route path="courses" element={<Courses />} />
+              <Route path="collection" element={<SkilliqCollection />} />
+              <Route path="skilliq-collection" element={<SkilliqCollection />} />
               <Route path="books" element={<Books />} />
               <Route path="paths" element={<Paths />} />
               <Route path="projects" element={<Projects />} />
@@ -110,6 +114,9 @@ export default function App() {
               <Route path="community" element={<Community />} />
               <Route path="community/:postId" element={<Community />} />
               <Route path="support" element={<SupportTickets />} />
+              <Route path="p/:username" element={<PublicPortfolio />} />
+              <Route path="portfolio/:username" element={<PublicPortfolio />} />
+              <Route path="portfolio" element={<PublicPortfolio />} />
             </Route>
             <Route path="/course/:courseId" element={<Course />} />
           </Routes>

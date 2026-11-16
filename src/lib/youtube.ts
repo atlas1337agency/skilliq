@@ -195,6 +195,8 @@ export const fetchPlaylistFullData = async (
 
           if (vId && !isPrivateOrDeleted) {
             const det = detailsMap[vId];
+            const vidChannelName = item.snippet?.videoOwnerChannelTitle || item.snippet?.channelTitle || channelName || '';
+            const vidChannelId = item.snippet?.videoOwnerChannelId || item.snippet?.channelId || channelId || '';
             videos.push({
               id: `v_${vId}`,
               title: item.snippet?.title || 'Unknown Title',
@@ -207,6 +209,8 @@ export const fetchPlaylistFullData = async (
               language: '',
               description: item.snippet?.description ? String(item.snippet.description).slice(0, 500) : '',
               resources: [],
+              ...(vidChannelName ? { channelName: vidChannelName } : {}),
+              ...(vidChannelId ? { channelId: vidChannelId } : {}),
             });
           }
         }
@@ -505,8 +509,13 @@ export const syncCourseRealtimeWithYouTube = async (
   let instructorAvatar = course.instructorAvatar || '';
   let instructorUrl = course.instructorUrl || '';
 
-  // Step 1: If course has a playlistId, check for newly added videos by original creator & updated playlist stats
-  if (course.playlistId && !course.isSingleVideo) {
+  const uniqueVideoChannels = new Set(
+    updatedVideos.map((v) => v.channelName?.trim().toLowerCase()).filter(Boolean)
+  );
+  const isMultiChannel = Boolean(course.isMultiChannel) || uniqueVideoChannels.size > 1;
+
+  // Step 1: If course has a playlistId (and is not a curated multi-channel mix), check for newly added videos by original creator & updated playlist stats
+  if (course.playlistId && !course.isSingleVideo && !isMultiChannel) {
     try {
       const plData = await fetchPlaylistFullData(course.playlistId);
       if (plData && Array.isArray(plData.videos) && plData.videos.length > 0) {
@@ -635,23 +644,25 @@ export const syncCourseRealtimeWithYouTube = async (
             formatCompactNumber(liveMeta.subscriberCount || subscriberCount),
         };
 
-        if (liveMeta.subscriberCount && liveMeta.subscriberCount !== subscriberCount) {
-          subscriberCount = liveMeta.subscriberCount;
-          subscriberCountText =
-            liveMeta.subscriberCountText || formatCompactNumber(liveMeta.subscriberCount);
-          hasChanges = true;
-        }
-        if (liveMeta.channelId && !channelId) {
-          channelId = liveMeta.channelId;
-          hasChanges = true;
-        }
-        if (liveMeta.youtubeAvatar && !instructorAvatar) {
-          instructorAvatar = liveMeta.youtubeAvatar;
-          hasChanges = true;
-        }
-        if (liveMeta.youtubeChannelUrl && !instructorUrl) {
-          instructorUrl = liveMeta.youtubeChannelUrl;
-          hasChanges = true;
+        if (!isMultiChannel) {
+          if (liveMeta.subscriberCount && liveMeta.subscriberCount !== subscriberCount) {
+            subscriberCount = liveMeta.subscriberCount;
+            subscriberCountText =
+              liveMeta.subscriberCountText || formatCompactNumber(liveMeta.subscriberCount);
+            hasChanges = true;
+          }
+          if (liveMeta.channelId && !channelId) {
+            channelId = liveMeta.channelId;
+            hasChanges = true;
+          }
+          if (liveMeta.youtubeAvatar && !instructorAvatar) {
+            instructorAvatar = liveMeta.youtubeAvatar;
+            hasChanges = true;
+          }
+          if (liveMeta.youtubeChannelUrl && !instructorUrl) {
+            instructorUrl = liveMeta.youtubeChannelUrl;
+            hasChanges = true;
+          }
         }
 
         updatedVideos = updatedVideos.map((v) => {
@@ -671,6 +682,10 @@ export const syncCourseRealtimeWithYouTube = async (
               viewCount: newViews,
               likeCount: newLikes,
               commentCount: newComments,
+              channelName: v.channelName || liveMeta.youtubeName,
+              channelAvatar: v.channelAvatar || liveMeta.youtubeAvatar,
+              channelUrl: v.channelUrl || liveMeta.youtubeChannelUrl,
+              channelId: v.channelId || liveMeta.channelId,
               duration:
                 v.duration && v.duration !== '00:00'
                   ? v.duration
@@ -869,18 +884,26 @@ export const syncAllCoursesLiveBackground = async (
             courseItem.subscriberCountText ||
             (subscriberCount > 0 ? formatCompactNumber(subscriberCount) : '');
 
+          const isMulti =
+            Boolean(courseItem.isMultiChannel) ||
+            new Set((courseItem.videos || []).map(v => v.channelName?.trim().toLowerCase()).filter(Boolean)).size > 1;
+
           updatedBatch[courseItem.id] = {
             ...courseItem,
             videos: updatedVideos,
-            channelId: meta.channelId || courseItem.channelId,
-            subscriberCount,
-            subscriberCountText,
-            instructorAvatar: courseItem.instructorAvatar?.trim()
+            channelId: isMulti ? courseItem.channelId : (meta.channelId || courseItem.channelId),
+            subscriberCount: isMulti ? courseItem.subscriberCount : subscriberCount,
+            subscriberCountText: isMulti ? courseItem.subscriberCountText : subscriberCountText,
+            instructorAvatar: isMulti
               ? courseItem.instructorAvatar
-              : meta.youtubeAvatar || courseItem.instructorAvatar,
-            instructorUrl: courseItem.instructorUrl?.trim()
+              : (courseItem.instructorAvatar?.trim()
+                  ? courseItem.instructorAvatar
+                  : meta.youtubeAvatar || courseItem.instructorAvatar),
+            instructorUrl: isMulti
               ? courseItem.instructorUrl
-              : meta.youtubeChannelUrl || courseItem.instructorUrl,
+              : (courseItem.instructorUrl?.trim()
+                  ? courseItem.instructorUrl
+                  : meta.youtubeChannelUrl || courseItem.instructorUrl),
             totalViews,
             totalLikes,
             totalComments,

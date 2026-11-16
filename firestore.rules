@@ -2,29 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
-    // Assumed Data Model
+    // Global Default-Deny Catch-All
     // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - uid: string (required, immutable) - The user's ID
-    //   - email: string (required) - The user's email
-    //   - displayName: string (optional) - The user's name
-    //   - photoURL: string (optional) - The user's photo
-    //   - role: string (required) - The user's role ('student', 'publisher', or 'admin')
-    //
-    // Collection: users/{userId}/progress
-    // Document ID: {courseId}
-    // Fields:
-    //   - courseId: string (required, immutable) - The course ID
-    //   - completedVideoIds: list of strings (required) - Completed videos
-    //   - currentVideoId: string (optional) - Current video
-    //   - isCompleted: boolean (required) - Completion status
-    //   - completionDate: string (optional) - Completion date
-    //   - videoTimestamps: map (optional) - Map of videoId to timestamp
-    //
-    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
 
     // ===============================================================
     // Helper Functions
@@ -39,14 +21,20 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email in ["atlas1337agency@gmail.com", "marouananouar02@gmail.com"] ||
+        ((request.auth.token.email_verified == true &&
+          request.auth.token.email in ["atlas1337agency@gmail.com", "marouananouar02@gmail.com"]) ||
           (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
     function isPublisher() {
       return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'publisher';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 300;
     }
 
     function uidUnchanged() {
@@ -57,16 +45,12 @@ service cloud.firestore {
       return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
     }
 
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
-
     function hasOnlyAllowedFields(fields) {
       return request.resource.data.keys().hasOnly(fields);
     }
 
     function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+      return email is string && email.size() <= 320 && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
     function isValidOptionalString(field, minLen, maxLen) {
@@ -77,102 +61,206 @@ service cloud.firestore {
               request.resource.data[field].size() <= maxLen);
     }
 
+    function isValidOptionalNumber(field) {
+      return !(field in request.resource.data) ||
+             request.resource.data[field] == null ||
+             request.resource.data[field] is number;
+    }
+
+    function isValidOptionalBool(field) {
+      return !(field in request.resource.data) ||
+             request.resource.data[field] == null ||
+             request.resource.data[field] is bool;
+    }
+
+    function isValidOptionalList(field, maxLen) {
+      return !(field in request.resource.data) ||
+             request.resource.data[field] == null ||
+             (request.resource.data[field] is list && request.resource.data[field].size() <= maxLen);
+    }
+
+    function isValidOptionalMap(field) {
+      return !(field in request.resource.data) ||
+             request.resource.data[field] == null ||
+             request.resource.data[field] is map;
+    }
+
     // ===============================================================
     // Domain Validators
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt', 'lastSeenAt', 'totalSecondsSpent', 'sessionSecondsSpent', 'visitCount', 'pagesVisitedCount', 'currentPath', 'currentPageLabel', 'deviceType', 'browser', 'recentTrail']) &&
-             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+      return hasOnlyAllowedFields([
+               'uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt',
+               'lastSeenAt', 'totalSecondsSpent', 'sessionSecondsSpent',
+               'visitCount', 'pagesVisitedCount', 'currentPath', 'currentPageLabel',
+               'deviceType', 'browser', 'recentTrail'
+             ]) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() <= 150 &&
              data.email is string && isValidEmail(data.email) &&
-             isValidOptionalString('displayName', 0, 100) &&
+             isValidOptionalString('displayName', 0, 150) &&
              isValidOptionalString('photoURL', 0, 2000) &&
-             data.role in ['student', 'publisher', 'admin', 'blocked'];
+             data.role in ['student', 'publisher', 'admin', 'blocked'] &&
+             isValidOptionalNumber('createdAt') &&
+             isValidOptionalNumber('lastSeenAt') &&
+             isValidOptionalNumber('totalSecondsSpent') &&
+             isValidOptionalNumber('sessionSecondsSpent') &&
+             isValidOptionalNumber('visitCount') &&
+             isValidOptionalNumber('pagesVisitedCount') &&
+             isValidOptionalString('currentPath', 0, 500) &&
+             isValidOptionalString('currentPageLabel', 0, 500) &&
+             isValidOptionalString('deviceType', 0, 50) &&
+             isValidOptionalString('browser', 0, 100) &&
+             isValidOptionalList('recentTrail', 100);
+    }
+
+    function isValidPublicProfile(data) {
+      return hasOnlyAllowedFields([
+               'uid', 'username', 'displayName', 'photoURL', 'email',
+               'headline', 'bio', 'location', 'githubUrl', 'linkedinUrl',
+               'websiteUrl', 'skills', 'xp', 'streak', 'lastActive',
+               'badges', 'favorites', 'updatedAt'
+             ]) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() <= 150 &&
+             isValidOptionalString('username', 0, 100) &&
+             isValidOptionalString('displayName', 0, 150) &&
+             isValidOptionalString('photoURL', 0, 2000) &&
+             isValidOptionalString('email', 0, 320) &&
+             isValidOptionalString('headline', 0, 300) &&
+             isValidOptionalString('bio', 0, 2000) &&
+             isValidOptionalString('location', 0, 150) &&
+             isValidOptionalString('githubUrl', 0, 500) &&
+             isValidOptionalString('linkedinUrl', 0, 500) &&
+             isValidOptionalString('websiteUrl', 0, 500) &&
+             isValidOptionalList('skills', 100) &&
+             isValidOptionalNumber('xp') &&
+             isValidOptionalNumber('streak') &&
+             isValidOptionalString('lastActive', 0, 100) &&
+             isValidOptionalList('badges', 200) &&
+             isValidOptionalList('favorites', 500) &&
+             isValidOptionalString('updatedAt', 0, 100);
     }
 
     function isValidCourseProgress(data) {
-      return hasOnlyAllowedFields(['courseId', 'completedVideoIds', 'currentVideoId', 'isCompleted', 'completionDate', 'videoTimestamps', 'updatedAt']) &&
-             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() < 100 &&
-             data.completedVideoIds is list && data.completedVideoIds.size() <= 1000 &&
-             isValidOptionalString('currentVideoId', 0, 100) &&
+      return hasOnlyAllowedFields([
+               'courseId', 'completedVideoIds', 'currentVideoId',
+               'isCompleted', 'completionDate', 'videoTimestamps', 'updatedAt'
+             ]) &&
+             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 150 &&
+             data.completedVideoIds is list && data.completedVideoIds.size() <= 2000 &&
+             isValidOptionalString('currentVideoId', 0, 150) &&
              data.isCompleted is bool &&
              isValidOptionalString('completionDate', 0, 100) &&
              isValidOptionalString('updatedAt', 0, 100) &&
-             (!('videoTimestamps' in data) || data.videoTimestamps is map);
+             isValidOptionalMap('videoTimestamps');
     }
 
     function isValidNote(data) {
-      return hasOnlyAllowedFields(['id', 'courseId', 'courseTitle', 'videoId', 'videoTitle', 'timestamp', 'title', 'tag', 'text', 'createdAt', 'updatedAt']) &&
-             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 100 &&
-             data.courseTitle is string && data.courseTitle.size() > 0 && data.courseTitle.size() <= 200 &&
-             data.videoId is string && data.videoId.size() > 0 && data.videoId.size() <= 100 &&
-             data.videoTitle is string && data.videoTitle.size() > 0 && data.videoTitle.size() <= 200 &&
+      return hasOnlyAllowedFields([
+               'id', 'courseId', 'courseTitle', 'videoId', 'videoTitle',
+               'timestamp', 'title', 'tag', 'text', 'createdAt', 'updatedAt'
+             ]) &&
+             isValidOptionalString('id', 0, 150) &&
+             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 150 &&
+             data.courseTitle is string && data.courseTitle.size() > 0 && data.courseTitle.size() <= 500 &&
+             data.videoId is string && data.videoId.size() > 0 && data.videoId.size() <= 150 &&
+             data.videoTitle is string && data.videoTitle.size() > 0 && data.videoTitle.size() <= 500 &&
              data.timestamp is number &&
-             isValidOptionalString('title', 0, 200) &&
-             isValidOptionalString('tag', 0, 50) &&
+             isValidOptionalString('title', 0, 300) &&
+             isValidOptionalString('tag', 0, 100) &&
              isValidOptionalString('updatedAt', 0, 100) &&
-             data.text is string && data.text.size() > 0 && data.text.size() <= 10000 &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 20000 &&
              data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 100;
     }
 
     function isValidFavorite(data) {
       return hasOnlyAllowedFields(['id', 'itemId', 'itemType', 'savedAt']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
-             data.itemId is string && data.itemId.size() > 0 && data.itemId.size() <= 120 &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 200 &&
+             data.itemId is string && data.itemId.size() > 0 && data.itemId.size() <= 150 &&
              data.itemType in ['playlist', 'masterclass', 'path', 'book'] &&
-             data.savedAt is number;
+             (data.savedAt is number || (data.savedAt is string && data.savedAt.size() <= 100));
     }
 
     function isValidCourse(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'description', 'instructor', 'professorName', 'youtubeChannelName', 'instructorAvatar', 'instructorUrl', 'channelId', 'subscriberCount', 'subscriberCountText', 'playlistId', 'totalViews', 'totalLikes', 'totalComments', 'lastSyncedAt', 'difficulty', 'thumbnail', 'category', 'subCategory', 'isSingleVideo', 'isProject', 'language', 'resources', 'videos', 'isApproved', 'createdAt']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
-             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
-             data.description is string && data.description.size() <= 10000 &&
-             isValidOptionalString('instructor', 0, 200) &&
-             isValidOptionalString('professorName', 0, 200) &&
-             isValidOptionalString('youtubeChannelName', 0, 200) &&
+      return hasOnlyAllowedFields([
+               'id', 'title', 'description', 'instructor', 'professorName',
+               'youtubeChannelName', 'instructorAvatar', 'instructorUrl', 'channelId',
+               'subscriberCount', 'subscriberCountText', 'playlistId', 'isMultiChannel',
+               'totalViews', 'totalLikes', 'totalComments', 'lastSyncedAt', 'difficulty',
+               'thumbnail', 'category', 'subCategory', 'isSingleVideo', 'isProject',
+               'language', 'resources', 'videos', 'isApproved', 'createdAt',
+               'enableSandbox', 'enableFlashcards', 'enableLessonQuiz', 'enableCourseExam',
+               'sandboxMode', 'flashcardsCategory'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+             data.description is string && data.description.size() <= 20000 &&
+             isValidOptionalString('instructor', 0, 300) &&
+             isValidOptionalString('professorName', 0, 300) &&
+             isValidOptionalString('youtubeChannelName', 0, 300) &&
              isValidOptionalString('instructorAvatar', 0, 2000) &&
              isValidOptionalString('instructorUrl', 0, 2000) &&
              isValidOptionalString('channelId', 0, 150) &&
+             isValidOptionalNumber('subscriberCount') &&
              isValidOptionalString('subscriberCountText', 0, 100) &&
              isValidOptionalString('playlistId', 0, 150) &&
+             isValidOptionalBool('isMultiChannel') &&
+             isValidOptionalNumber('totalViews') &&
+             isValidOptionalNumber('totalLikes') &&
+             isValidOptionalNumber('totalComments') &&
+             isValidOptionalNumber('lastSyncedAt') &&
              isValidOptionalString('difficulty', 0, 50) &&
              data.thumbnail is string && data.thumbnail.size() <= 2000 &&
-             data.category is string && data.category.size() <= 100 &&
-             isValidOptionalString('subCategory', 0, 100) &&
+             data.category is string && data.category.size() <= 150 &&
+             isValidOptionalString('subCategory', 0, 150) &&
              isValidOptionalString('language', 0, 50) &&
-             data.isSingleVideo is bool &&
-             (!('isProject' in data) || data.isProject is bool) &&
-             (!('isApproved' in data) || data.isApproved is bool) &&
-             (!('resources' in data) || (data.resources is list && data.resources.size() <= 200)) &&
+             isValidOptionalBool('isSingleVideo') &&
+             isValidOptionalBool('isProject') &&
+             isValidOptionalBool('isApproved') &&
+             isValidOptionalList('resources', 200) &&
              data.videos is list && data.videos.size() <= 1000 &&
-             (!('createdAt' in data) || data.createdAt is number);
+             isValidOptionalBool('enableSandbox') &&
+             isValidOptionalBool('enableFlashcards') &&
+             isValidOptionalBool('enableLessonQuiz') &&
+             isValidOptionalBool('enableCourseExam') &&
+             isValidOptionalString('sandboxMode', 0, 50) &&
+             isValidOptionalString('flashcardsCategory', 0, 100) &&
+             isValidOptionalNumber('createdAt');
     }
 
     function isValidLearningPath(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'description', 'courseIds', 'icon', 'iconUrl', 'language', 'category', 'isParent', 'parentId', 'childPathIds', 'level', 'specializationField', 'graphicRoadmap', 'createdAt']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
-             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
-             data.description is string && data.description.size() <= 10000 &&
-             data.courseIds is list && data.courseIds.size() <= 200 &&
-             data.icon is string && data.icon.size() <= 50 &&
+      return hasOnlyAllowedFields([
+               'id', 'title', 'description', 'courseIds', 'icon', 'iconUrl',
+               'language', 'category', 'isParent', 'parentId', 'childPathIds',
+               'level', 'specializationField', 'graphicRoadmap', 'createdAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+             data.description is string && data.description.size() <= 20000 &&
+             data.courseIds is list && data.courseIds.size() <= 500 &&
+             isValidOptionalString('icon', 0, 100) &&
              isValidOptionalString('iconUrl', 0, 2000) &&
              isValidOptionalString('language', 0, 50) &&
-             isValidOptionalString('category', 0, 100) &&
-             (!('isParent' in data) || data.isParent == null || data.isParent is bool) &&
-             isValidOptionalString('parentId', 0, 100) &&
-             (!('childPathIds' in data) || data.childPathIds == null || (data.childPathIds is list && data.childPathIds.size() <= 200)) &&
+             isValidOptionalString('category', 0, 150) &&
+             isValidOptionalBool('isParent') &&
+             isValidOptionalString('parentId', 0, 150) &&
+             isValidOptionalList('childPathIds', 200) &&
              isValidOptionalString('level', 0, 50) &&
              isValidOptionalString('specializationField', 0, 200) &&
-             (!('graphicRoadmap' in data) || data.graphicRoadmap == null || data.graphicRoadmap is map) &&
-             (!('createdAt' in data) || data.createdAt == null || data.createdAt is number);
+             isValidOptionalMap('graphicRoadmap') &&
+             isValidOptionalNumber('createdAt');
     }
 
     function isValidNotification(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'titleAr', 'message', 'messageAr', 'type', 'image', 'link', 'linkLogo', 'actionLabel', 'actionLabelAr', 'links', 'isActive', 'createdAt', 'targetUserId', 'targetEmail', 'videoId', 'courseId']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
-             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+      return hasOnlyAllowedFields([
+               'id', 'title', 'titleAr', 'message', 'messageAr', 'type',
+               'image', 'link', 'linkLogo', 'actionLabel', 'actionLabelAr',
+               'links', 'isActive', 'createdAt', 'updatedAt', 'targetUserId',
+               'targetEmail', 'videoId', 'courseId'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
              data.message is string && data.message.size() > 0 && data.message.size() <= 10000 &&
-             isValidOptionalString('titleAr', 0, 200) &&
+             isValidOptionalString('titleAr', 0, 300) &&
              isValidOptionalString('messageAr', 0, 10000) &&
              isValidOptionalString('type', 0, 50) &&
              isValidOptionalString('image', 0, 2000) &&
@@ -180,50 +268,106 @@ service cloud.firestore {
              isValidOptionalString('linkLogo', 0, 2000) &&
              isValidOptionalString('actionLabel', 0, 100) &&
              isValidOptionalString('actionLabelAr', 0, 100) &&
-             (!('links' in data) || (data.links is list && data.links.size() <= 20)) &&
-             isValidOptionalString('targetUserId', 0, 100) &&
-             isValidOptionalString('targetEmail', 0, 200) &&
-             isValidOptionalString('videoId', 0, 100) &&
-             isValidOptionalString('courseId', 0, 100) &&
+             isValidOptionalList('links', 20) &&
+             isValidOptionalString('targetUserId', 0, 150) &&
+             isValidOptionalString('targetEmail', 0, 320) &&
+             isValidOptionalString('videoId', 0, 150) &&
+             isValidOptionalString('courseId', 0, 150) &&
+             isValidOptionalNumber('updatedAt') &&
              data.isActive is bool &&
              data.createdAt is number;
     }
 
     function isValidReport(data) {
-      return (data.type in ['broken_video', 'content_issue', 'general_bug']) &&
-             data.courseId is string && data.courseId.size() > 0 &&
-             data.courseTitle is string && data.courseTitle.size() > 0 &&
-             data.videoId is string && data.videoId.size() > 0 &&
-             data.videoTitle is string && data.videoTitle.size() > 0 &&
-             data.youtubeId is string && data.youtubeId.size() > 0 &&
+      return hasOnlyAllowedFields([
+               'id', 'type', 'courseId', 'courseTitle', 'categoryId',
+               'videoId', 'videoTitle', 'youtubeId', 'userId', 'userName',
+               'userEmail', 'issue', 'details', 'status', 'createdAt',
+               'resolvedAt', 'resolvedBy', 'resolutionNotes'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.type in ['broken_video', 'content_issue', 'general_bug'] &&
+             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 150 &&
+             data.courseTitle is string && data.courseTitle.size() > 0 && data.courseTitle.size() <= 500 &&
+             isValidOptionalString('categoryId', 0, 150) &&
+             data.videoId is string && data.videoId.size() > 0 && data.videoId.size() <= 150 &&
+             data.videoTitle is string && data.videoTitle.size() > 0 && data.videoTitle.size() <= 500 &&
+             data.youtubeId is string && data.youtubeId.size() > 0 && data.youtubeId.size() <= 150 &&
+             isValidOptionalString('userId', 0, 150) &&
+             isValidOptionalString('userName', 0, 200) &&
+             isValidOptionalString('userEmail', 0, 320) &&
+             isValidOptionalString('issue', 0, 300) &&
+             isValidOptionalString('details', 0, 5000) &&
              data.status in ['pending', 'resolved'] &&
-             data.createdAt is number;
+             data.createdAt is number &&
+             isValidOptionalNumber('resolvedAt') &&
+             isValidOptionalString('resolvedBy', 0, 320) &&
+             isValidOptionalString('resolutionNotes', 0, 5000);
+    }
+
+    function isValidFormSubmission(data) {
+      return hasOnlyAllowedFields([
+               'id', 'type', 'status', 'createdAt', 'updatedAt', 'name',
+               'email', 'subject', 'message', 'takedownName', 'takedownEmail',
+               'takedownUrl', 'takedownReason', 'takedownDetails', 'creatorName',
+               'channelUrl', 'notes', 'resolvedAt', 'resolvedBy', 'adminNotes'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.type in ['dmca', 'contact', 'creator'] &&
+             data.status in ['pending', 'reviewed', 'resolved'] &&
+             data.createdAt is number &&
+             isValidOptionalNumber('updatedAt') &&
+             isValidOptionalString('name', 0, 200) &&
+             isValidOptionalString('email', 0, 320) &&
+             isValidOptionalString('subject', 0, 300) &&
+             isValidOptionalString('message', 0, 10000) &&
+             isValidOptionalString('takedownName', 0, 200) &&
+             isValidOptionalString('takedownEmail', 0, 320) &&
+             isValidOptionalString('takedownUrl', 0, 2000) &&
+             isValidOptionalString('takedownReason', 0, 500) &&
+             isValidOptionalString('takedownDetails', 0, 10000) &&
+             isValidOptionalString('creatorName', 0, 200) &&
+             isValidOptionalString('channelUrl', 0, 2000) &&
+             isValidOptionalString('notes', 0, 10000) &&
+             isValidOptionalNumber('resolvedAt') &&
+             isValidOptionalString('resolvedBy', 0, 320) &&
+             isValidOptionalString('adminNotes', 0, 10000);
     }
 
     function isValidBanner(data) {
-      return hasOnlyAllowedFields(['id', 'placement', 'desktopImageUrl', 'mobileImageUrl', 'targetUrl', 'language', 'isActive', 'createdAt']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+      return hasOnlyAllowedFields([
+               'id', 'placement', 'desktopImageUrl', 'mobileImageUrl',
+               'targetUrl', 'language', 'isActive', 'createdAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
              data.placement is string && data.placement.size() > 0 && data.placement.size() <= 100 &&
-             data.desktopImageUrl is string && data.desktopImageUrl.size() > 0 && data.desktopImageUrl.size() <= 2000 &&
-             data.mobileImageUrl is string && data.mobileImageUrl.size() > 0 && data.mobileImageUrl.size() <= 2000 &&
+             data.desktopImageUrl is string && data.desktopImageUrl.size() > 0 && data.desktopImageUrl.size() <= 10000 &&
+             data.mobileImageUrl is string && data.mobileImageUrl.size() > 0 && data.mobileImageUrl.size() <= 10000 &&
              isValidOptionalString('targetUrl', 0, 2000) &&
-             isValidOptionalString('language', 0, 10) &&
+             isValidOptionalString('language', 0, 50) &&
              data.isActive is bool &&
              data.createdAt is number;
     }
 
     function isValidBook(data) {
-      return hasOnlyAllowedFields(['id', 'title', 'author', 'description', 'category', 'subCategory', 'coverImage', 'youtubeUrl', 'youtubeId', 'videoTitle', 'videoThumbnail', 'videoDuration', 'youtubeName', 'youtubeAvatar', 'youtubeChannelUrl', 'youtubeUrlAr', 'youtubeIdAr', 'videoTitleAr', 'videoThumbnailAr', 'videoDurationAr', 'youtubeNameAr', 'youtubeAvatarAr', 'youtubeChannelUrlAr', 'buyUrl', 'buyUrlAr', 'language', 'keyTakeaways', 'isApproved', 'createdAt']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
-             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+      return hasOnlyAllowedFields([
+               'id', 'title', 'author', 'description', 'category', 'subCategory',
+               'coverImage', 'youtubeUrl', 'youtubeId', 'videoTitle', 'videoThumbnail',
+               'videoDuration', 'youtubeName', 'youtubeAvatar', 'youtubeChannelUrl',
+               'youtubeUrlAr', 'youtubeIdAr', 'videoTitleAr', 'videoThumbnailAr',
+               'videoDurationAr', 'youtubeNameAr', 'youtubeAvatarAr', 'youtubeChannelUrlAr',
+               'buyUrl', 'buyUrlAr', 'language', 'keyTakeaways', 'isApproved', 'createdAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
              data.author is string && data.author.size() > 0 && data.author.size() <= 200 &&
              isValidOptionalString('description', 0, 10000) &&
-             data.category is string && data.category.size() <= 100 &&
-             isValidOptionalString('subCategory', 0, 100) &&
+             data.category is string && data.category.size() <= 150 &&
+             isValidOptionalString('subCategory', 0, 150) &&
              isValidOptionalString('coverImage', 0, 2000) &&
              isValidOptionalString('youtubeUrl', 0, 2000) &&
              isValidOptionalString('youtubeId', 0, 100) &&
-             isValidOptionalString('videoTitle', 0, 300) &&
+             isValidOptionalString('videoTitle', 0, 500) &&
              isValidOptionalString('videoThumbnail', 0, 2000) &&
              isValidOptionalString('videoDuration', 0, 50) &&
              isValidOptionalString('youtubeName', 0, 200) &&
@@ -231,7 +375,7 @@ service cloud.firestore {
              isValidOptionalString('youtubeChannelUrl', 0, 2000) &&
              isValidOptionalString('youtubeUrlAr', 0, 2000) &&
              isValidOptionalString('youtubeIdAr', 0, 100) &&
-             isValidOptionalString('videoTitleAr', 0, 300) &&
+             isValidOptionalString('videoTitleAr', 0, 500) &&
              isValidOptionalString('videoThumbnailAr', 0, 2000) &&
              isValidOptionalString('videoDurationAr', 0, 50) &&
              isValidOptionalString('youtubeNameAr', 0, 200) &&
@@ -240,119 +384,340 @@ service cloud.firestore {
              isValidOptionalString('buyUrl', 0, 2000) &&
              isValidOptionalString('buyUrlAr', 0, 2000) &&
              isValidOptionalString('language', 0, 50) &&
-             (!('keyTakeaways' in data) || (data.keyTakeaways is list && data.keyTakeaways.size() <= 40)) &&
-             (!('isApproved' in data) || data.isApproved is bool) &&
-             (!('createdAt' in data) || data.createdAt is number);
+             isValidOptionalList('keyTakeaways', 40) &&
+             isValidOptionalBool('isApproved') &&
+             isValidOptionalNumber('createdAt');
+    }
+
+    function isValidQuiz(data) {
+      return hasOnlyAllowedFields([
+               'id', 'courseId', 'videoId', 'videoTitle', 'title',
+               'description', 'passingScore', 'xpReward', 'questions', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 300 &&
+             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 150 &&
+             isValidOptionalString('videoId', 0, 150) &&
+             isValidOptionalString('videoTitle', 0, 500) &&
+             data.title is map &&
+             data.description is map &&
+             data.passingScore is number &&
+             data.xpReward is number &&
+             data.questions is list && data.questions.size() <= 100 &&
+             isValidOptionalNumber('updatedAt');
+    }
+
+    function isValidCourseFeatures(data) {
+      return hasOnlyAllowedFields([
+               'courseId', 'enableSandbox', 'enableFlashcards',
+               'enableLessonQuiz', 'enableCourseExam', 'sandboxMode',
+               'flashcardsCategory', 'updatedAt'
+             ]) &&
+             data.courseId is string && data.courseId.size() > 0 && data.courseId.size() <= 150 &&
+             isValidOptionalBool('enableSandbox') &&
+             isValidOptionalBool('enableFlashcards') &&
+             isValidOptionalBool('enableLessonQuiz') &&
+             isValidOptionalBool('enableCourseExam') &&
+             isValidOptionalString('sandboxMode', 0, 50) &&
+             isValidOptionalString('flashcardsCategory', 0, 100) &&
+             isValidOptionalNumber('updatedAt');
+    }
+
+    function isValidCommunityPost(data) {
+      return hasOnlyAllowedFields([
+               'id', 'title', 'subtitle', 'paragraph', 'image', 'category',
+               'subCategory', 'language', 'links', 'buttons', 'isPinned',
+               'authorName', 'authorAvatar', 'reactions', 'createdAt', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+             isValidOptionalString('subtitle', 0, 500) &&
+             data.paragraph is string && data.paragraph.size() <= 30000 &&
+             isValidOptionalString('image', 0, 5000) &&
+             data.category is string && data.category.size() <= 150 &&
+             isValidOptionalString('subCategory', 0, 150) &&
+             isValidOptionalString('language', 0, 50) &&
+             isValidOptionalList('links', 50) &&
+             isValidOptionalList('buttons', 50) &&
+             isValidOptionalBool('isPinned') &&
+             isValidOptionalString('authorName', 0, 200) &&
+             isValidOptionalString('authorAvatar', 0, 2000) &&
+             isValidOptionalMap('reactions') &&
+             data.createdAt is number &&
+             isValidOptionalNumber('updatedAt');
+    }
+
+    function isValidCommunityCategories(data) {
+      return hasOnlyAllowedFields(['categories', 'updatedAt']) &&
+             data.categories is list && data.categories.size() <= 200 &&
+             isValidOptionalNumber('updatedAt');
+    }
+
+    function isValidSupportTicket(data) {
+      return hasOnlyAllowedFields([
+               'id', 'ticketNumber', 'userId', 'userName', 'userEmail',
+               'userAvatar', 'subject', 'category', 'priority', 'status',
+               'unreadByAdmin', 'unreadByUser', 'messages', 'createdAt', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             isValidOptionalString('ticketNumber', 0, 50) &&
+             data.userId is string && data.userId.size() > 0 && data.userId.size() <= 150 &&
+             isValidOptionalString('userName', 0, 200) &&
+             isValidOptionalString('userEmail', 0, 320) &&
+             isValidOptionalString('userAvatar', 0, 2000) &&
+             data.subject is string && data.subject.size() > 0 && data.subject.size() <= 500 &&
+             isValidOptionalString('category', 0, 100) &&
+             isValidOptionalString('priority', 0, 50) &&
+             data.status in ['open', 'answered', 'resolved', 'closed'] &&
+             isValidOptionalBool('unreadByAdmin') &&
+             isValidOptionalBool('unreadByUser') &&
+             data.messages is list && data.messages.size() <= 500 &&
+             data.createdAt is number &&
+             isValidOptionalNumber('updatedAt');
+    }
+
+    function isValidUserPresence(data) {
+      return hasOnlyAllowedFields([
+               'id', 'uid', 'isGuest', 'displayName', 'email', 'photoURL',
+               'currentPath', 'currentPageLabel', 'deviceType', 'browser',
+               'totalSecondsSpent', 'sessionSecondsSpent', 'visitCount',
+               'pagesVisitedCount', 'firstVisitAt', 'lastSeenAt', 'recentTrail'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             isValidOptionalString('uid', 0, 150) &&
+             data.isGuest is bool &&
+             isValidOptionalString('displayName', 0, 200) &&
+             isValidOptionalString('email', 0, 320) &&
+             isValidOptionalString('photoURL', 0, 2000) &&
+             isValidOptionalString('currentPath', 0, 500) &&
+             isValidOptionalString('currentPageLabel', 0, 500) &&
+             isValidOptionalString('deviceType', 0, 50) &&
+             isValidOptionalString('browser', 0, 100) &&
+             isValidOptionalNumber('totalSecondsSpent') &&
+             isValidOptionalNumber('sessionSecondsSpent') &&
+             isValidOptionalNumber('visitCount') &&
+             isValidOptionalNumber('pagesVisitedCount') &&
+             isValidOptionalNumber('firstVisitAt') &&
+             isValidOptionalNumber('lastSeenAt') &&
+             isValidOptionalList('recentTrail', 100);
+    }
+
+    function isValidPlatformMovement(data) {
+      return hasOnlyAllowedFields([
+               'id', 'visitorId', 'uid', 'isGuest', 'userName', 'userEmail',
+               'userAvatar', 'actionType', 'path', 'pageTitle', 'detail',
+               'deviceType', 'browser', 'timestamp'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 150 &&
+             data.visitorId is string && data.visitorId.size() > 0 && data.visitorId.size() <= 150 &&
+             isValidOptionalString('uid', 0, 150) &&
+             data.isGuest is bool &&
+             isValidOptionalString('userName', 0, 200) &&
+             isValidOptionalString('userEmail', 0, 320) &&
+             isValidOptionalString('userAvatar', 0, 2000) &&
+             isValidOptionalString('actionType', 0, 100) &&
+             isValidOptionalString('path', 0, 500) &&
+             isValidOptionalString('pageTitle', 0, 500) &&
+             isValidOptionalString('detail', 0, 1000) &&
+             isValidOptionalString('deviceType', 0, 50) &&
+             isValidOptionalString('browser', 0, 100) &&
+             data.timestamp is number;
+    }
+
+    function isValidStudentProject(data) {
+      return hasOnlyAllowedFields([
+               'id', 'userId', 'userDisplayName', 'userPhotoURL', 'userUsername',
+               'title', 'description', 'category', 'githubUrl', 'liveDemoUrl',
+               'tags', 'thumbnailUrl', 'likesCount', 'likedBy', 'reviewsCount',
+               'avgRating', 'isFeatured', 'createdAt', 'updatedAt'
+             ]) &&
+             isValidOptionalString('id', 0, 150) &&
+             data.userId is string && data.userId.size() > 0 && data.userId.size() <= 150 &&
+             isValidOptionalString('userDisplayName', 0, 200) &&
+             isValidOptionalString('userPhotoURL', 0, 2000) &&
+             isValidOptionalString('userUsername', 0, 100) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+             isValidOptionalString('description', 0, 10000) &&
+             data.category is string && data.category.size() <= 150 &&
+             isValidOptionalString('githubUrl', 0, 2000) &&
+             isValidOptionalString('liveDemoUrl', 0, 2000) &&
+             isValidOptionalList('tags', 30) &&
+             isValidOptionalString('thumbnailUrl', 0, 2000) &&
+             isValidOptionalNumber('likesCount') &&
+             isValidOptionalList('likedBy', 5000) &&
+             isValidOptionalNumber('reviewsCount') &&
+             isValidOptionalNumber('avgRating') &&
+             isValidOptionalBool('isFeatured') &&
+             data.createdAt is number &&
+             isValidOptionalNumber('updatedAt');
+    }
+
+    function isValidPeerReview(data) {
+      return hasOnlyAllowedFields([
+               'id', 'projectId', 'userId', 'userDisplayName',
+               'userPhotoURL', 'userUsername', 'rating', 'feedback', 'createdAt'
+             ]) &&
+             isValidOptionalString('id', 0, 150) &&
+             data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 150 &&
+             data.userId is string && data.userId.size() > 0 && data.userId.size() <= 150 &&
+             isValidOptionalString('userDisplayName', 0, 200) &&
+             isValidOptionalString('userPhotoURL', 0, 2000) &&
+             isValidOptionalString('userUsername', 0, 100) &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.feedback is string && data.feedback.size() > 0 && data.feedback.size() <= 5000 &&
+             data.createdAt is number;
     }
 
     // ===============================================================
-    // Rules
+    // Collection Rules
     // ===============================================================
-    function isValidPublicProfile(data) {
-      return (data.keys().hasAll(['uid', 'xp', 'streak', 'badges']) || !data.keys().hasAll(['uid'])) &&
-             data.uid is string && 
-             data.xp is number &&
-             data.streak is number &&
-             data.badges is list;
-    }
-
     match /publicProfiles/{userId} {
       allow read: if true;
-      allow create: if isOwner(userId) && request.resource.data.uid == userId;
-      allow update: if isOwner(userId) && request.resource.data.uid == userId;
-      allow delete: if isAdmin();
+      allow create: if isValidId(userId) && (isOwner(userId) || isAdmin()) &&
+                       isValidPublicProfile(request.resource.data) &&
+                       request.resource.data.uid == userId;
+      allow update: if isValidId(userId) && (isOwner(userId) || isAdmin()) &&
+                       isValidPublicProfile(request.resource.data) &&
+                       request.resource.data.uid == userId;
+      allow delete: if isValidId(userId) && isAdmin();
     }
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && uidUnchanged() && ((request.resource.data.role == 'student') || isAdmin());
-      allow update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) && uidNotModified() && ((request.resource.data.role == resource.data.role) || isAdmin());
-      allow delete: if isAdmin();
+      allow create: if isValidId(userId) && isOwner(userId) &&
+                       isValidUser(request.resource.data) &&
+                       uidUnchanged() &&
+                       ((request.resource.data.role == 'student') || isAdmin());
+      allow update: if isValidId(userId) && (isOwner(userId) || isAdmin()) &&
+                       isValidUser(request.resource.data) &&
+                       uidNotModified() &&
+                       ((request.resource.data.role == resource.data.role) || isAdmin());
+      allow delete: if isValidId(userId) && isAdmin();
 
       match /progress/{courseId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidCourseProgress(request.resource.data) && request.resource.data.courseId == courseId;
-        allow update: if isOwner(userId) && isValidCourseProgress(request.resource.data) && (request.resource.data.courseId == courseId || request.resource.data.courseId == resource.data.courseId);
-        allow delete: if isOwner(userId) || isAdmin();
+        allow create: if isValidId(courseId) && isOwner(userId) &&
+                         isValidCourseProgress(request.resource.data) &&
+                         request.resource.data.courseId == courseId;
+        allow update: if isValidId(courseId) && isOwner(userId) &&
+                         isValidCourseProgress(request.resource.data) &&
+                         (request.resource.data.courseId == courseId || request.resource.data.courseId == resource.data.courseId);
+        allow delete: if isValidId(courseId) && (isOwner(userId) || isAdmin());
       }
-      
+
       match /notes/{noteId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidNote(request.resource.data);
-        allow update: if isOwner(userId) && isValidNote(request.resource.data);
-        allow delete: if isOwner(userId) || isAdmin();
+        allow create: if isValidId(noteId) && isOwner(userId) && isValidNote(request.resource.data);
+        allow update: if isValidId(noteId) && isOwner(userId) && isValidNote(request.resource.data);
+        allow delete: if isValidId(noteId) && (isOwner(userId) || isAdmin());
       }
 
       match /favorites/{favId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidFavorite(request.resource.data) && request.resource.data.id == favId;
-        allow update: if isOwner(userId) && isValidFavorite(request.resource.data) && request.resource.data.id == favId;
-        allow delete: if isOwner(userId) || isAdmin();
+        allow create: if isValidId(favId) && isOwner(userId) &&
+                         isValidFavorite(request.resource.data) &&
+                         request.resource.data.id == favId;
+        allow update: if isValidId(favId) && isOwner(userId) &&
+                         isValidFavorite(request.resource.data) &&
+                         request.resource.data.id == favId;
+        allow delete: if isValidId(favId) && (isOwner(userId) || isAdmin());
       }
     }
 
     match /courses/{courseId} {
       allow read: if true;
-      allow create: if (isAdmin() || (isPublisher() && request.resource.data.isApproved == false)) && isValidCourse(request.resource.data) && request.resource.data.id == courseId;
-      allow update: if (isAdmin() || (
-        isAuthenticated() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'videos',
-          'totalViews',
-          'totalLikes',
-          'totalComments',
-          'subscriberCount',
-          'subscriberCountText',
-          'channelId',
-          'instructorAvatar',
-          'instructorUrl',
-          'lastSyncedAt'
-        ])
-      )) && isValidCourse(request.resource.data) && request.resource.data.id == resource.data.id;
-      allow delete: if isAdmin();
+      allow create: if isValidId(courseId) &&
+                       (isAdmin() || (isPublisher() && request.resource.data.isApproved == false)) &&
+                       isValidCourse(request.resource.data) &&
+                       request.resource.data.id == courseId;
+      allow update: if isValidId(courseId) &&
+                       isValidCourse(request.resource.data) &&
+                       request.resource.data.id == resource.data.id &&
+                       (isAdmin() ||
+                        (isPublisher() && resource.data.isApproved == false && request.resource.data.isApproved == false) ||
+                        (isAuthenticated() &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                           'videos',
+                           'totalViews',
+                           'totalLikes',
+                           'totalComments',
+                           'subscriberCount',
+                           'subscriberCountText',
+                           'channelId',
+                           'instructorAvatar',
+                           'instructorUrl',
+                           'lastSyncedAt'
+                         ])));
+      allow delete: if isValidId(courseId) && isAdmin();
     }
 
     match /books/{bookId} {
       allow read: if true;
-      allow create: if (isAdmin() || isPublisher()) && isValidBook(request.resource.data) && request.resource.data.id == bookId;
-      allow update: if (isAdmin() || isPublisher()) && isValidBook(request.resource.data) && request.resource.data.id == resource.data.id;
-      allow delete: if isAdmin() || isPublisher();
+      allow create: if isValidId(bookId) && (isAdmin() || isPublisher()) &&
+                       isValidBook(request.resource.data) &&
+                       request.resource.data.id == bookId;
+      allow update: if isValidId(bookId) && (isAdmin() || isPublisher()) &&
+                       isValidBook(request.resource.data) &&
+                       request.resource.data.id == resource.data.id;
+      allow delete: if isValidId(bookId) && (isAdmin() || isPublisher());
     }
 
     match /learningPaths/{pathId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidLearningPath(request.resource.data) && request.resource.data.id == pathId;
-      allow update: if isAdmin() && isValidLearningPath(request.resource.data) && (request.resource.data.id == resource.data.id || request.resource.data.id == pathId);
-      allow delete: if isAdmin();
+      allow create: if isValidId(pathId) && isAdmin() &&
+                       isValidLearningPath(request.resource.data) &&
+                       request.resource.data.id == pathId;
+      allow update: if isValidId(pathId) && isAdmin() &&
+                       isValidLearningPath(request.resource.data) &&
+                       (request.resource.data.id == resource.data.id || request.resource.data.id == pathId);
+      allow delete: if isValidId(pathId) && isAdmin();
     }
 
     match /notifications/{notificationId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidNotification(request.resource.data) && request.resource.data.id == notificationId;
-      allow update: if isAdmin() && isValidNotification(request.resource.data) && request.resource.data.id == resource.data.id;
-      allow delete: if isAdmin();
+      allow create: if isValidId(notificationId) && isAdmin() &&
+                       isValidNotification(request.resource.data) &&
+                       request.resource.data.id == notificationId;
+      allow update: if isValidId(notificationId) && isAdmin() &&
+                       isValidNotification(request.resource.data) &&
+                       request.resource.data.id == resource.data.id;
+      allow delete: if isValidId(notificationId) && isAdmin();
     }
 
     match /banners/{bannerId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidBanner(request.resource.data) && request.resource.data.id == bannerId;
-      allow update: if isAdmin() && isValidBanner(request.resource.data) && request.resource.data.id == resource.data.id;
-      allow delete: if isAdmin();
+      allow create: if isValidId(bannerId) && isAdmin() &&
+                       isValidBanner(request.resource.data) &&
+                       request.resource.data.id == bannerId;
+      allow update: if isValidId(bannerId) && isAdmin() &&
+                       isValidBanner(request.resource.data) &&
+                       request.resource.data.id == resource.data.id;
+      allow delete: if isValidId(bannerId) && isAdmin();
     }
 
     match /reports/{reportId} {
       allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if isValidReport(request.resource.data) && request.resource.data.id == reportId;
-      allow update, delete: if isAdmin();
+      allow create: if isValidId(reportId) &&
+                       isValidReport(request.resource.data) &&
+                       request.resource.data.id == reportId &&
+                       request.resource.data.status == 'pending' &&
+                       ((isAuthenticated() && request.resource.data.userId == request.auth.uid) ||
+                        (!isAuthenticated() && request.resource.data.userId == 'guest'));
+      allow update: if isValidId(reportId) && isAdmin() &&
+                       isValidReport(request.resource.data) &&
+                       request.resource.data.id == resource.data.id;
+      allow delete: if isValidId(reportId) && isAdmin();
     }
 
     match /form_submissions/{submissionId} {
       allow read: if isAdmin();
-      allow create: if request.resource.data.id == submissionId &&
-        request.resource.data.type in ['dmca', 'contact', 'creator'] &&
-        request.resource.data.status == 'pending' &&
-        request.resource.data.createdAt is number;
-      allow update, delete: if isAdmin();
+      allow create: if isValidId(submissionId) &&
+                       isValidFormSubmission(request.resource.data) &&
+                       request.resource.data.id == submissionId &&
+                       request.resource.data.status == 'pending';
+      allow update: if isValidId(submissionId) && isAdmin() &&
+                       isValidFormSubmission(request.resource.data) &&
+                       request.resource.data.id == resource.data.id;
+      allow delete: if isValidId(submissionId) && isAdmin();
     }
 
     match /system_backups/{backupId} {
@@ -361,36 +726,114 @@ service cloud.firestore {
 
     match /community_posts/{postId} {
       allow read: if isAuthenticated();
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin() || (
-        isAuthenticated() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
-      );
+      allow create: if isValidId(postId) && isAdmin() &&
+                       isValidCommunityPost(request.resource.data) &&
+                       request.resource.data.id == postId;
+      allow update: if isValidId(postId) &&
+                       isValidCommunityPost(request.resource.data) &&
+                       ((isAdmin() && request.resource.data.id == resource.data.id) ||
+                        (isAuthenticated() &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])));
+      allow delete: if isValidId(postId) && isAdmin();
     }
 
     match /community_categories/{catId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow create, update: if isValidId(catId) && isAdmin() && isValidCommunityCategories(request.resource.data);
+      allow delete: if isValidId(catId) && isAdmin();
     }
 
     match /support_tickets/{ticketId} {
       allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId);
-      allow delete: if isAdmin();
+      allow create: if isValidId(ticketId) && isAuthenticated() &&
+                       isValidSupportTicket(request.resource.data) &&
+                       request.resource.data.id == ticketId &&
+                       request.resource.data.userId == request.auth.uid;
+      allow update: if isValidId(ticketId) &&
+                       isValidSupportTicket(request.resource.data) &&
+                       request.resource.data.id == resource.data.id &&
+                       (isAdmin() ||
+                        (isAuthenticated() &&
+                         resource.data.userId == request.auth.uid &&
+                         request.resource.data.userId == resource.data.userId));
+      allow delete: if isValidId(ticketId) && isAdmin();
     }
 
     match /user_presence/{presenceId} {
       allow read: if isAdmin() || (isAuthenticated() && presenceId == request.auth.uid);
-      allow create, update: if request.resource.data.id == presenceId &&
-        (isAdmin() || (isAuthenticated() && presenceId == request.auth.uid) || presenceId.matches('^anon_.*'));
-      allow delete: if isAdmin();
+      allow create, update: if isValidId(presenceId) &&
+                               isValidUserPresence(request.resource.data) &&
+                               request.resource.data.id == presenceId &&
+                               (isAdmin() ||
+                                (isAuthenticated() && presenceId == request.auth.uid) ||
+                                (presenceId.matches('^(guest|anon)_[a-zA-Z0-9_\\-]+$') &&
+                                 request.resource.data.isGuest == true &&
+                                 request.resource.data.uid == null));
+      allow delete: if isValidId(presenceId) && isAdmin();
     }
 
     match /platform_movements/{movementId} {
       allow read: if isAdmin();
-      allow create: if request.resource.data.id == movementId && request.resource.data.timestamp is number;
-      allow update, delete: if isAdmin();
+      allow create: if isValidId(movementId) &&
+                       isValidPlatformMovement(request.resource.data) &&
+                       request.resource.data.id == movementId &&
+                       (isAdmin() ||
+                        (isAuthenticated() && (request.resource.data.uid == request.auth.uid || request.resource.data.uid == null)) ||
+                        (!isAuthenticated() && request.resource.data.isGuest == true && request.resource.data.uid == null));
+      allow update, delete: if isValidId(movementId) && isAdmin();
+    }
+
+    match /student_projects/{projectId} {
+      allow read: if true;
+      allow create: if isValidId(projectId) && isAuthenticated() &&
+                       isValidStudentProject(request.resource.data) &&
+                       request.resource.data.userId == request.auth.uid;
+      allow update: if isValidId(projectId) &&
+                       isValidStudentProject(request.resource.data) &&
+                       (isAdmin() ||
+                        (isAuthenticated() &&
+                         ((resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId) ||
+                          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                            'reviewsCount', 'avgRating', 'likesCount', 'likedBy', 'updatedAt'
+                          ]))));
+      allow delete: if isValidId(projectId) &&
+                       (isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid));
+
+      match /reviews/{reviewId} {
+        allow read: if true;
+        allow create: if isValidId(reviewId) && isAuthenticated() &&
+                         isValidPeerReview(request.resource.data) &&
+                         request.resource.data.userId == request.auth.uid &&
+                         request.resource.data.projectId == projectId &&
+                         exists(/databases/$(database)/documents/student_projects/$(projectId));
+        allow update: if isValidId(reviewId) &&
+                         isValidPeerReview(request.resource.data) &&
+                         (isAdmin() ||
+                          (isAuthenticated() &&
+                           resource.data.userId == request.auth.uid &&
+                           request.resource.data.userId == resource.data.userId));
+        allow delete: if isValidId(reviewId) &&
+                         (isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid));
+      }
+    }
+
+    match /course_quizzes/{quizId} {
+      allow read: if true;
+      allow create: if isValidId(quizId) && isAdmin() &&
+                       isValidQuiz(request.resource.data) &&
+                       request.resource.data.id == quizId;
+      allow update: if isValidId(quizId) && isAdmin() &&
+                       isValidQuiz(request.resource.data) &&
+                       request.resource.data.id == resource.data.id;
+      allow delete: if isValidId(quizId) && isAdmin();
+    }
+
+    match /course_features/{courseId} {
+      allow read: if true;
+      allow create, update: if isValidId(courseId) && isAdmin() &&
+                               isValidCourseFeatures(request.resource.data) &&
+                               request.resource.data.courseId == courseId;
+      allow delete: if isValidId(courseId) && isAdmin();
     }
   }
 }

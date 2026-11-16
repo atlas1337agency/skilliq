@@ -165,20 +165,28 @@ export function Verify() {
                     <span className="font-bold text-foreground">SkilliQ & ATLAS 1337</span>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1.5 border-t border-border/40">
-                    <span className="text-muted-foreground flex items-center gap-1.5">
+                  <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/40">
+                    <span className="text-muted-foreground flex items-center gap-1.5 shrink-0">
                       <GraduationCap className="w-3.5 h-3.5 text-amber-500" />
-                      <span>{isRtl ? 'أستاذ الدورة' : 'Course Professor'}</span>
+                      <span>
+                        {matchedEducator.isMultiChannel
+                          ? (isRtl ? 'الهيئة التعليمية' : 'Curriculum Faculty')
+                          : (isRtl ? 'أستاذ الدورة' : 'Course Professor')}
+                      </span>
                     </span>
-                    <span className="font-bold text-foreground">{matchedEducator.professorName}</span>
+                    <span className="font-bold text-foreground text-end">{matchedEducator.professorName}</span>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1.5 border-t border-border/40">
-                    <span className="text-muted-foreground flex items-center gap-1.5">
+                  <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/40">
+                    <span className="text-muted-foreground flex items-center gap-1.5 shrink-0">
                       <Youtube className="w-3.5 h-3.5 text-red-500" />
-                      <span>{isRtl ? 'قناة يوتيوب الرسمية' : 'YouTube Channel'}</span>
+                      <span>
+                        {matchedEducator.isMultiChannel
+                          ? (isRtl ? 'القنوات المشاركة' : 'Featured Channels')
+                          : (isRtl ? 'قناة يوتيوب الرسمية' : 'YouTube Channel')}
+                      </span>
                     </span>
-                    <span className="font-bold text-foreground">{matchedEducator.youtubeChannelName}</span>
+                    <span className="font-bold text-foreground text-end">{matchedEducator.youtubeChannelName}</span>
                   </div>
 
                   <div className="flex items-center justify-between pt-1.5 border-t border-border/40">

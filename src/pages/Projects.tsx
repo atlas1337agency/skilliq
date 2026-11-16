@@ -33,6 +33,7 @@ import { ScrollingText } from '../components/ScrollingText';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { ShareCourseButton } from '../components/ShareCourseButton';
 import { SEO } from '../components/SEO';
+import { StudentProjectShowcase } from '../components/StudentProjectShowcase';
 import { formatCompactNumber } from '../lib/youtube';
 import {
   buildDeduplicatedCategories,
@@ -44,7 +45,8 @@ import {
   isMasterclassCourse,
   isProjectCertificateEligible,
   normalizeSubCategory,
-  getCoursePath
+  getCoursePath,
+  resolveCourseEducator
 } from '../lib/courseUtils';
 
 type FormatFilter = 'all' | 'playlist' | 'masterclass';
@@ -55,9 +57,12 @@ export function Projects() {
   const { user, courses, progress, favorites, setIsAuthModalOpen, language, isContentLoading, hasLoadedFromDb } = useStore();
   const isRtl = language === 'ar' || i18n.language === 'ar';
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') || searchParams.get('q') || '';
   const initialCategory = searchParams.get('category') || 'All';
+  const initialTab = searchParams.get('tab') === 'showcase' ? 'showcase' : 'roadmaps';
+
+  const [mainTab, setMainTab] = useState<'roadmaps' | 'showcase'>(initialTab);
 
   // Filter states
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
@@ -147,12 +152,16 @@ export function Projects() {
         selectedSubCategory === 'All' ||
         (c.subCategory && normalizeSubCategory(c.subCategory).toLowerCase() === normalizeSubCategory(selectedSubCategory).toLowerCase());
 
+      const q = searchQuery.toLowerCase();
       const matchQuery =
         !searchQuery.trim() ||
-        c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.instructor?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.subCategory?.toLowerCase().includes(searchQuery.toLowerCase());
+        c.title.toLowerCase().includes(q) ||
+        c.description?.toLowerCase().includes(q) ||
+        c.instructor?.toLowerCase().includes(q) ||
+        c.subCategory?.toLowerCase().includes(q) ||
+        (c.videos || []).some(
+          v => v.channelName?.toLowerCase().includes(q) || v.professorName?.toLowerCase().includes(q)
+        );
 
       return matchCat && matchSub && matchQuery;
     });
@@ -243,8 +252,61 @@ export function Projects() {
         ]}
       />
 
-      {/* HERO BANNER */}
-      <div className="relative mb-8 sm:mb-12 overflow-hidden rounded-3xl p-6 sm:p-10 md:p-12 bg-gradient-to-br from-card via-card/90 to-emerald-500/10 border border-border shadow-sm">
+      {/* PRIMARY TAB SWITCHER: ROADMAPS vs STUDENT SHOWCASE */}
+      <div className="flex items-center gap-2 mb-8 bg-card/85 backdrop-blur-md p-1.5 rounded-2xl border border-border/80 w-fit max-w-full overflow-x-auto shadow-xs">
+        <button
+          type="button"
+          onClick={() => {
+            setMainTab('roadmaps');
+            setSearchParams(prev => {
+              prev.delete('tab');
+              return prev;
+            });
+          }}
+          className={cn(
+            'px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 border',
+            mainTab === 'roadmaps'
+              ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Code2 className="w-4 h-4" />
+          <span>{isRtl ? 'مسارات ومناهج المشاريع العملية' : 'Project Roadmaps & Builds'}</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-black/15 text-[10px]">
+            {baseProjects.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setMainTab('showcase');
+            setSearchParams(prev => {
+              prev.set('tab', 'showcase');
+              return prev;
+            });
+          }}
+          className={cn(
+            'px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 border relative',
+            mainTab === 'showcase'
+              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Rocket className="w-4 h-4" />
+          <span>{isRtl ? 'معرض مشاريع الطلاب وتقييم الأقران' : 'Student Showcase & Peer Reviews'}</span>
+          <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider animate-pulse">
+            NEW
+          </span>
+        </button>
+      </div>
+
+      {mainTab === 'showcase' ? (
+        <StudentProjectShowcase />
+      ) : (
+        <>
+          {/* HERO BANNER */}
+          <div className="relative mb-8 sm:mb-12 overflow-hidden rounded-3xl p-6 sm:p-10 md:p-12 bg-gradient-to-br from-card via-card/90 to-emerald-500/10 border border-border shadow-sm">
         <div className="absolute top-0 end-0 -mt-10 -me-10 w-72 h-72 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
 
         <div className="relative z-10 max-w-3xl">
@@ -803,9 +865,20 @@ export function Projects() {
                               </>
                             )}
                           </div>
-                          <div className="font-medium text-foreground max-w-[55%] truncate flex items-center gap-1.5">
-                            <ScrollingText>{project.instructor}</ScrollingText>
-                          </div>
+                          {(() => {
+                            const educator = resolveCourseEducator(project);
+                            const contributorCount = educator.contributors?.length || 0;
+                            return (
+                              <div className="font-medium text-foreground max-w-[58%] truncate flex items-center gap-1.5">
+                                <ScrollingText>{educator.youtubeChannelName}</ScrollingText>
+                                {educator.isMultiChannel && contributorCount > 1 && (
+                                  <span className="shrink-0 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                                    {contributorCount} {isRtl ? 'قنوات' : 'Channels'}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
 
                         {(() => {
@@ -1026,6 +1099,8 @@ export function Projects() {
           </div>
         )}
       </AnimatePresence>
+        </>
+      )}
     </div>
   );
 }

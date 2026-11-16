@@ -434,10 +434,21 @@ export function matchCourseFromCertificateId(certId: string, allCourses: Course[
   return null;
 }
 
+export interface CourseContributor {
+  name: string;
+  professorName: string;
+  avatar?: string;
+  url?: string;
+  channelId?: string;
+  videoCount: number;
+}
+
 export interface CourseEducatorInfo {
   professorName: string;
   youtubeChannelName: string;
   youtubeHandle?: string;
+  isMultiChannel?: boolean;
+  contributors?: CourseContributor[];
 }
 
 const KNOWN_EDUCATORS: Record<string, { professorName: string; youtubeChannelName: string }> = {
@@ -478,22 +489,143 @@ const KNOWN_EDUCATORS: Record<string, { professorName: string; youtubeChannelNam
 function formatProfessorPrefix(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return 'Prof. Course Educator';
-  if (/^(prof\.?|professor|dr\.?|mr\.?|أ\.|الأستاذ|د\.)\s/i.test(trimmed)) {
+  if (/^(prof\.?|professor|dr\.?|mr\.?|أ\.|الأستاذ|د\.|skilliq)/i.test(trimmed)) {
     return trimmed.replace(/^professor\s+/i, 'Prof. ');
   }
   return `Prof. ${trimmed}`;
 }
 
 /**
+ * Extracts all unique contributing YouTube channels / teachers across a course's videos.
+ * Falls back cleanly to the single course-level instructor when videos don't carry per-video channel info.
+ */
+export function getCourseContributors(course?: Partial<Course> | null): CourseContributor[] {
+  if (!course) return [];
+
+  const fallbackChannel = (course.youtubeChannelName || course.instructor || '').trim();
+  const videos = Array.isArray(course.videos) ? course.videos : [];
+  const map = new Map<string, CourseContributor>();
+
+  for (const vid of videos) {
+    const chName = (vid.channelName || fallbackChannel).trim();
+    if (!chName) continue;
+    const key = chName.toLowerCase();
+    const known = KNOWN_EDUCATORS[key];
+    const resolvedProf = vid.professorName?.trim()
+      ? formatProfessorPrefix(vid.professorName)
+      : known
+      ? known.professorName
+      : formatProfessorPrefix(chName);
+
+    const existing = map.get(key);
+    if (existing) {
+      existing.videoCount += 1;
+      if (!existing.avatar && vid.channelAvatar?.trim()) {
+        existing.avatar = vid.channelAvatar.trim();
+      }
+      if (!existing.url && vid.channelUrl?.trim()) {
+        existing.url = vid.channelUrl.trim();
+      }
+      if (!existing.channelId && vid.channelId?.trim()) {
+        existing.channelId = vid.channelId.trim();
+      }
+    } else {
+      map.set(key, {
+        name: known ? known.youtubeChannelName : chName,
+        professorName: resolvedProf,
+        avatar: vid.channelAvatar?.trim() || (chName.toLowerCase() === fallbackChannel.toLowerCase() ? course.instructorAvatar?.trim() : undefined),
+        url: vid.channelUrl?.trim() || (chName.toLowerCase() === fallbackChannel.toLowerCase() ? course.instructorUrl?.trim() : undefined),
+        channelId: vid.channelId?.trim() || (chName.toLowerCase() === fallbackChannel.toLowerCase() ? course.channelId?.trim() : undefined),
+        videoCount: 1,
+      });
+    }
+  }
+
+  if (map.size === 0 && fallbackChannel) {
+    const key = fallbackChannel.toLowerCase();
+    const known = KNOWN_EDUCATORS[key];
+    map.set(key, {
+      name: known ? known.youtubeChannelName : fallbackChannel,
+      professorName: course.professorName?.trim()
+        ? formatProfessorPrefix(course.professorName)
+        : known
+        ? known.professorName
+        : formatProfessorPrefix(fallbackChannel),
+      avatar: course.instructorAvatar?.trim(),
+      url: course.instructorUrl?.trim(),
+      channelId: course.channelId?.trim(),
+      videoCount: videos.length || 1,
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.videoCount - a.videoCount);
+}
+
+/**
+ * Formats a list of contributing channels into a clean display label (used on cards and certificates).
+ */
+export function formatContributorsSummary(contributors: CourseContributor[], maxVisible = 3): string {
+  if (!contributors || contributors.length === 0) return 'SkilliQ Curated Channels';
+  if (contributors.length === 1) return contributors[0].name;
+  if (contributors.length === 2) return `${contributors[0].name} & ${contributors[1].name}`;
+  if (contributors.length <= maxVisible) {
+    const head = contributors.slice(0, -1).map(c => c.name).join(', ');
+    return `${head} & ${contributors[contributors.length - 1].name}`;
+  }
+  const shown = contributors.slice(0, Math.max(2, maxVisible - 1)).map(c => c.name).join(', ');
+  const restCount = contributors.length - Math.max(2, maxVisible - 1);
+  return `${shown} + ${restCount} More`;
+}
+
+/**
+ * Checks whether a course combines lessons from multiple YouTube channels / teachers.
+ */
+export function isMultiChannelCourse(course?: Partial<Course> | null): boolean {
+  if (!course) return false;
+  if (course.isMultiChannel) return true;
+  return getCourseContributors(course).length > 1;
+}
+
+/**
  * Resolves the Professor (Teacher Name) and Official YouTube Channel Name for any course
- * so certificates can properly honor and credit the educator.
+ * (including Multi-Channel Curated Playlists) so certificates and player views properly credit all educators.
  */
 export function resolveCourseEducator(course?: Partial<Course> | null): CourseEducatorInfo {
   if (!course) {
     return {
       professorName: 'Prof. Brad Traversy',
       youtubeChannelName: 'Traversy Media',
-      youtubeHandle: '@TraversyMedia'
+      youtubeHandle: '@TraversyMedia',
+      isMultiChannel: false,
+      contributors: []
+    };
+  }
+
+  const contributors = getCourseContributors(course);
+  const multiChannel = Boolean(course.isMultiChannel) || contributors.length > 1;
+
+  if (multiChannel && contributors.length > 0) {
+    const customProf = course.professorName?.trim();
+    const professorName = customProf
+      ? formatProfessorPrefix(customProf)
+      : 'SkilliQ Curated Faculty';
+
+    const customChannelLabel = course.youtubeChannelName?.trim();
+    const isJustSingleContributorName =
+      customChannelLabel &&
+      contributors.length > 1 &&
+      contributors.some(c => c.name.toLowerCase() === customChannelLabel.toLowerCase());
+
+    const youtubeChannelName =
+      customChannelLabel && !isJustSingleContributorName
+        ? customChannelLabel
+        : formatContributorsSummary(contributors, 3);
+
+    return {
+      professorName,
+      youtubeChannelName,
+      isMultiChannel: true,
+      contributors
     };
   }
 
@@ -524,7 +656,9 @@ export function resolveCourseEducator(course?: Partial<Course> | null): CourseEd
   return {
     professorName,
     youtubeChannelName,
-    youtubeHandle
+    youtubeHandle,
+    isMultiChannel: false,
+    contributors
   };
 }
 

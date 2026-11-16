@@ -13,6 +13,10 @@ import { addOrUpdateCourse } from '../lib/firestoreContent';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { ShareCourseButton } from '../components/ShareCourseButton';
 import { AuthModal } from '../components/AuthModal';
+import { InteractiveQuizModal } from '../components/InteractiveQuizModal';
+import { FlashcardsModal } from '../components/FlashcardsModal';
+import { CodeTerminalSandboxModal } from '../components/CodeTerminalSandboxModal';
+import { fetchCourseFeatures, isFeatureEnabledForCourse, CourseFeaturesConfig } from '../lib/courseFeatures';
 import { useFocusTimer } from '../store/useFocusTimer';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, setDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
@@ -78,6 +82,14 @@ export function Course() {
   const [notes, setNotes] = useState<any[]>([]);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Interactive Learning Engine States
+  const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
+  const [quizVideoTarget, setQuizVideoTarget] = useState<{ id?: string; title?: string } | null>(null);
+  const [isFlashcardsModalOpen, setIsFlashcardsModalOpen] = useState(false);
+  const [isSandboxModalOpen, setIsSandboxModalOpen] = useState(false);
+  const [sandboxInitialMode, setSandboxInitialMode] = useState<'terminal' | 'frontend' | 'python'>('terminal');
+
   const [isLiveSyncing, setIsLiveSyncing] = useState(false);
   const [liveStats, setLiveStats] = useState<{
     viewCount: number;
@@ -120,6 +132,29 @@ export function Course() {
     ? courseVideos.findIndex(v => v.id === courseProgress.currentVideoId)
     : 0;
   const currentVideo = courseVideos[currentVideoIndex];
+
+  // Admin-controlled interactive learning features visibility per course
+  const [courseFeatures, setCourseFeatures] = useState<CourseFeaturesConfig | null>(null);
+
+  useEffect(() => {
+    if (!resolvedCourseId) return;
+    fetchCourseFeatures(resolvedCourseId).then((feat) => {
+      if (feat) setCourseFeatures(feat);
+    });
+  }, [resolvedCourseId]);
+
+  const featuresLookupMap = useMemo(() => {
+    if (!courseFeatures) return undefined;
+    const map: Record<string, CourseFeaturesConfig> = {};
+    if (resolvedCourseId) map[resolvedCourseId] = courseFeatures;
+    if (course?.id) map[course.id] = courseFeatures;
+    return map;
+  }, [courseFeatures, resolvedCourseId, course?.id]);
+
+  const isSandboxEnabled = useMemo(() => isFeatureEnabledForCourse(course, 'sandbox', featuresLookupMap), [course, featuresLookupMap]);
+  const isFlashcardsEnabled = useMemo(() => isFeatureEnabledForCourse(course, 'flashcards', featuresLookupMap), [course, featuresLookupMap]);
+  const isLessonQuizEnabled = useMemo(() => isFeatureEnabledForCourse(course, 'lessonQuiz', featuresLookupMap), [course, featuresLookupMap]);
+  const isCourseExamEnabled = useMemo(() => isFeatureEnabledForCourse(course, 'courseExam', featuresLookupMap), [course, featuresLookupMap]);
 
   // Capture start time once when video changes to prevent reload loop during playback
   if (currentVideo && loadedVideoIdRef.current !== currentVideo.id) {
@@ -172,23 +207,29 @@ export function Course() {
     };
   }, [currentVideo?.id, cleanVideoId, isPlaylistType]);
 
-  // Reliable Back button handler that works across direct entry, history, masterclasses, and courses
+  // Reliable Back button handler that works across direct entry, iframe history, focus mode, masterclasses, and courses
   const handleBack = (e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
+    setIsFocusMode(false);
     // Exit fullscreen / focus mode first if active
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     }
     const fallbackRoute = course?.isSingleVideo ? '/masterclasses' : '/courses';
+    const currentPath = location.pathname;
     const historyIdx = window.history?.state?.idx;
 
     if (typeof historyIdx === 'number' && historyIdx > 0) {
       navigate(-1);
-    } else if (location.key && location.key !== 'default') {
-      navigate(-1);
+      // Safety net: if YouTube iframe / sandboxed history swallowed history.go(-1), force fallback route
+      setTimeout(() => {
+        if (window.location.pathname === currentPath) {
+          navigate(fallbackRoute, { replace: true });
+        }
+      }, 120);
     } else {
       navigate(fallbackRoute);
     }
@@ -932,13 +973,22 @@ export function Course() {
                   {course.title}
                 </h1>
                 <p className="text-xs sm:text-sm font-semibold text-muted-foreground mb-4">
-                  {language === 'ar' ? 'المدرب:' : 'Instructor:'}{' '}
-                  <Link
-                    to={`/creator/${encodeURIComponent(course.instructor || '')}`}
-                    className="text-foreground hover:text-primary underline-offset-2 hover:underline font-bold"
-                  >
-                    {course.instructor}
-                  </Link>{' '}
+                  {educatorInfo.isMultiChannel && educatorInfo.contributors && educatorInfo.contributors.length > 1 ? (
+                    <>
+                      {language === 'ar' ? 'المدربون المشاركون:' : 'Teachers:'}{' '}
+                      <span className="text-foreground font-bold">{educatorInfo.youtubeChannelName}</span>
+                    </>
+                  ) : (
+                    <>
+                      {language === 'ar' ? 'المدرب:' : 'Instructor:'}{' '}
+                      <Link
+                        to={`/creator/${encodeURIComponent(course.instructor || '')}`}
+                        className="text-foreground hover:text-primary underline-offset-2 hover:underline font-bold"
+                      >
+                        {course.instructor}
+                      </Link>
+                    </>
+                  )}{' '}
                   · {courseVideos.length} {language === 'ar' ? 'درس' : 'Lessons'} · 100% Free
                 </p>
                 <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed line-clamp-4">
@@ -972,6 +1022,9 @@ export function Course() {
                 {courseVideos.map((v, vIdx) => (
                   <li key={`syllabus-${v.id || v.youtubeId || vIdx}-${vIdx}`} className="truncate py-1 border-b border-border/40 last:border-none">
                     <span className="font-medium">{v.title}</span>
+                    {v.channelName ? (
+                      <span className="text-primary font-semibold ms-2 text-[11px]">· {v.channelName}</span>
+                    ) : null}
                     {v.duration ? <span className="text-muted-foreground ms-2">({v.duration})</span> : null}
                   </li>
                 ))}
@@ -1140,38 +1193,114 @@ export function Course() {
     <div
       ref={containerRef}
       className={cn(
-        "h-[100dvh] w-full bg-background overflow-hidden relative",
+        "w-full max-w-full bg-background relative",
         isFocusMode
           ? isFocusNotesOpen
-            ? "fixed inset-0 z-[100] flex flex-col lg:grid lg:grid-cols-[1fr_360px] bg-black"
-            : "fixed inset-0 z-[100] flex flex-col bg-black"
-          : "flex flex-col lg:grid lg:grid-cols-[1fr_340px]"
+            ? "fixed inset-0 z-[100] h-[100dvh] overflow-hidden flex flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_360px] bg-black"
+            : "fixed inset-0 z-[100] h-[100dvh] overflow-hidden flex flex-col bg-black"
+          : "min-h-[100dvh] lg:h-[100dvh] lg:overflow-hidden flex flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_310px] xl:grid-cols-[minmax(0,1fr)_340px]"
       )}
     >
       {courseSeoNode}
       {/* Main Content Area */}
-      <div className={cn("flex flex-col flex-1 min-h-0 overflow-y-auto w-full", isFocusMode ? "bg-black" : "bg-background")}>
+      <div
+        className={cn(
+          "flex flex-col min-w-0 w-full max-w-full",
+          isFocusMode
+            ? "flex-1 min-h-0 overflow-hidden bg-black"
+            : "lg:h-full lg:flex-1 lg:min-h-0 lg:overflow-y-auto overflow-x-clip bg-background"
+        )}
+      >
         {/* Top Bar (Hidden in Focus Mode) */}
         {!isFocusMode && (
-          <div className="h-16 flex-shrink-0 flex items-center justify-between px-4 sm:px-6 bg-card border-b border-border z-20 sticky top-0">
+          <div className="min-h-14 sm:h-16 flex-shrink-0 flex items-center justify-between gap-1.5 sm:gap-3 px-2.5 sm:px-6 bg-card border-b border-border z-30 sticky top-0 w-full max-w-full">
             <button
               type="button"
               onClick={handleBack}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all group cursor-pointer active:scale-95"
+              className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all group cursor-pointer active:scale-95 shrink-0"
+              title={language === 'ar' ? 'الرجوع إلى صفحة الدورات' : 'Back to courses'}
             >
-              <ArrowLeft className="w-5 h-5 rtl:rotate-180 transition-transform group-hover:-translate-x-0.5 rtl:group-hover:translate-x-0.5" />
-              <span className="font-bold text-sm">{t('back', language === 'ar' ? 'رجوع' : 'Back')}</span>
+              <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 rtl:rotate-180 transition-transform group-hover:-translate-x-0.5 rtl:group-hover:translate-x-0.5 shrink-0" />
+              <span className="font-bold text-xs sm:text-sm hidden sm:inline">{t('back', language === 'ar' ? 'رجوع' : 'Back')}</span>
             </button>
-            <h2 className="font-semibold hidden md:block truncate max-w-md px-3">{course.title}</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 max-w-full">
+              {/* Interactive Code & Terminal Sandbox (Only shown if Admin enabled for this course) */}
+              {isSandboxEnabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cat = (course.category || '').toLowerCase();
+                    if (cat.includes('cyber') || cat.includes('linux') || cat.includes('security')) {
+                      setSandboxInitialMode('terminal');
+                    } else if (cat.includes('python') || cat.includes('ai') || cat.includes('data')) {
+                      setSandboxInitialMode('python');
+                    } else {
+                      setSandboxInitialMode('frontend');
+                    }
+                    setIsSandboxModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-slate-800 text-emerald-400 border border-slate-700 hover:border-emerald-500/50 shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+                  title={language === 'ar' ? 'محرر ومحاكي الأكواد والطرفية المدمج' : 'Interactive Code Sandbox & Terminal'}
+                >
+                  <Code className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden xl:inline">{language === 'ar' ? 'الطرفية / Sandbox' : 'Terminal / Sandbox'}</span>
+                  <span className="hidden sm:inline xl:hidden text-[11px]">{language === 'ar' ? 'الطرفية' : 'Sandbox'}</span>
+                </button>
+              )}
+
+              {/* Flashcards Spaced Repetition (Only shown if Admin enabled for this course) */}
+              {isFlashcardsEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setIsFlashcardsModalOpen(true)}
+                  className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+                  title={language === 'ar' ? 'بطاقات المراجعة السريعة والتكرار المتباعد' : 'Smart Flashcards (Spaced Repetition)'}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="hidden md:inline">{language === 'ar' ? 'بطاقات المراجعة' : 'Flashcards'}</span>
+                </button>
+              )}
+
+              {/* Lesson Quiz (Only shown if Admin enabled for this course and on a video) */}
+              {isLessonQuizEnabled && currentVideo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuizVideoTarget({ id: currentVideo.id, title: currentVideo.title });
+                    setIsQuizModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-xs font-bold bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+                  title={language === 'ar' ? 'اختبار سريع لهذا الدرس' : 'Quick Lesson Quiz'}
+                >
+                  <Award className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="hidden md:inline">{language === 'ar' ? 'اختبار الدرس' : 'Lesson Quiz'}</span>
+                </button>
+              )}
+
+              {/* Course Quiz / Exam (Only shown if Admin enabled for this course) */}
+              {isCourseExamEnabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuizVideoTarget(null);
+                    setIsQuizModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-bold bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600/20 shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+                  title={language === 'ar' ? 'اختبار التحصيل والكفاءة للدورة' : 'Course Exam & Certification Quiz'}
+                >
+                  <Award className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span className="hidden md:inline">{language === 'ar' ? 'اختبار الكورس' : 'Course Exam'}</span>
+                </button>
+              )}
+
               <ShareCourseButton course={course} variant="button" size="sm" />
               {/* Focus & Coffee Break Timer with In-Video Custom Time Popover */}
-              <div className="relative">
+              <div className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsFocusTimerMenuOpen(prev => !prev)}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs sm:text-sm cursor-pointer transition-all active:scale-95 shadow-xs",
+                    "flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl font-bold text-xs cursor-pointer transition-all active:scale-95 shadow-xs shrink-0",
                     isFocusRunning 
                       ? focusMode === 'break'
                         ? "bg-amber-500 text-slate-950 shadow-xs font-black ring-1 ring-amber-400"
@@ -1180,11 +1309,16 @@ export function Course() {
                   )}
                   title={language === 'ar' ? 'مؤقت التركيز والاستراحة المخصص' : 'Custom Focus & Coffee Break Timer'}
                 >
-                  {focusMode === 'break' ? <Coffee className="w-4 h-4 text-amber-500" /> : <Timer className="w-4 h-4" />}
-                  <span className="font-mono tabular-nums">
+                  {focusMode === 'break' ? <Coffee className="w-3.5 h-3.5 text-amber-500 shrink-0" /> : <Timer className="w-3.5 h-3.5 shrink-0" />}
+                  <span className="font-mono tabular-nums text-xs">
                     {isFocusRunning
                       ? `${Math.floor(focusTimeLeft / 60)}:${(focusTimeLeft % 60).toString().padStart(2, '0')}`
-                      : (language === 'ar' ? 'مؤقت التركيز' : 'Focus Timer')}
+                      : (
+                        <>
+                          <span className="hidden sm:inline">{language === 'ar' ? 'مؤقت التركيز' : 'Focus Timer'}</span>
+                          <span className="sm:hidden">{language === 'ar' ? 'مؤقت' : 'Timer'}</span>
+                        </>
+                      )}
                   </span>
                 </button>
 
@@ -1345,17 +1479,25 @@ export function Course() {
               <button 
                 type="button"
                 onClick={toggleFocusMode}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-bold text-xs sm:text-sm cursor-pointer"
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-bold text-xs shrink-0 cursor-pointer active:scale-95"
+                title={t('focus_mode')}
               >
-                <Maximize className="w-4 h-4" />
-                <span>{t('focus_mode')}</span>
+                <Maximize className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="hidden sm:inline">{t('focus_mode')}</span>
               </button>
             </div>
           </div>
         )}
 
         {/* Video Section */}
-        <div className={cn("flex-none lg:flex-1 shrink-0 flex flex-col", isFocusMode ? "p-0" : "p-3 md:p-6 gap-3 md:gap-4")}>
+        <div
+          className={cn(
+            "w-full max-w-full min-w-0 flex flex-col",
+            isFocusMode
+              ? "flex-1 min-h-0 p-0"
+              : "flex-none shrink-0 p-2.5 sm:p-4 lg:p-6 gap-3 md:gap-4"
+          )}
+        >
           {/* Recent Admin Fix Banner */}
           {!isFocusMode && currentVideo && notifications.some(n => (n.type === 'video_fixed' || n.title?.includes('Fixed')) && ((n as any).videoId === currentVideo.id || n.link?.includes(currentVideo.id) || (n as any).courseId === course.id)) && (
             <div className="flex items-center gap-2.5 px-4 py-2.5 bg-emerald-500/15 border border-emerald-500/30 rounded-2xl text-emerald-600 dark:text-emerald-400 text-xs font-bold shadow-xs animate-in fade-in duration-300">
@@ -1373,10 +1515,22 @@ export function Course() {
             </div>
           )}
 
-          <div className={cn("relative w-full flex flex-col bg-black", isFocusMode ? "h-full" : "aspect-video rounded-xl overflow-hidden")}>
+          <div
+            className={cn(
+              "relative w-full flex flex-col bg-black",
+              isFocusMode
+                ? "flex-1 min-h-0 h-full"
+                : "shrink-0 rounded-xl overflow-hidden shadow-md"
+            )}
+          >
             {currentVideo ? (
               <>
-                <div className="flex-1 relative bg-black flex flex-col group">
+                <div
+                  className={cn(
+                    "relative w-full bg-black group",
+                    isFocusMode ? "flex-1 min-h-0" : "aspect-video shrink-0"
+                  )}
+                >
                   {/* YouTube Player */}
                   <div className="absolute inset-0 w-full h-full">
                     <YouTube
@@ -1390,8 +1544,8 @@ export function Course() {
                         console.error("YouTube Player Error", e.data);
                         setHasError(true);
                       }}
-                      className="absolute inset-0 w-full h-full"
-                      iframeClassName="w-full h-full"
+                      className="w-full h-full"
+                      iframeClassName="w-full h-full block"
                     />
 
                     {/* Proactive Broken Video Overlay when YouTube errors */}
@@ -1600,15 +1754,20 @@ export function Course() {
                       onClick={(e) => { e.stopPropagation(); openReportModal(); }}
                       disabled={isReporting || (currentVideo && reportedVideos[currentVideo.id])}
                       className={cn(
-                        "px-2.5 py-1 font-bold rounded-lg text-[11px] shadow transition-colors cursor-pointer",
+                        "px-2 sm:px-2.5 py-1 font-bold rounded-lg text-[10px] sm:text-[11px] shadow transition-colors cursor-pointer shrink-0",
                         (currentVideo && reportedVideos[currentVideo.id])
                           ? "bg-amber-500 text-white cursor-default" 
                           : "bg-red-500 hover:bg-red-600 text-white active:scale-98"
                       )}
                     >
                       {(currentVideo && reportedVideos[currentVideo.id]) 
-                        ? (language === 'ar' ? 'البلاغ قيد المراجعة' : 'Report not solved yet') 
-                        : (language === 'ar' ? 'إبلاغ عن فيديو معطل' : 'Report Broken Video')}
+                        ? (language === 'ar' ? 'قيد المراجعة' : 'Report Pending') 
+                        : (
+                          <>
+                            <span className="hidden sm:inline">{language === 'ar' ? 'إبلاغ عن فيديو معطل' : 'Report Broken Video'}</span>
+                            <span className="sm:hidden">{language === 'ar' ? 'إبلاغ' : 'Report'}</span>
+                          </>
+                        )}
                     </button>
                     
                     {progressPercentage >= 95 || (courseProgress && currentVideo && courseProgress.completedVideoIds.includes(currentVideo.id)) ? (
@@ -1650,7 +1809,7 @@ export function Course() {
                 </div>
               </>
             ) : (
-              <div className="text-white text-center p-6 flex-1 flex flex-col items-center justify-center z-20">
+              <div className={cn("text-white text-center p-6 flex flex-col items-center justify-center z-20", isFocusMode ? "flex-1" : "aspect-video")}>
                 <h2 className="text-2xl font-bold mb-4">{t('congratulations')}</h2>
                 <p className="mb-6">{t('course_completed_msg')}</p>
                 {canEarnCertificate ? (
@@ -1743,10 +1902,10 @@ export function Course() {
                 </div>
               )}
 
-              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                <div>
-                  <h1 className="text-[22px] font-bold text-foreground mb-2">{currentVideo.title}</h1>
-                  <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
+              <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 sm:gap-4 w-full max-w-full min-w-0 overflow-hidden">
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-[19px] sm:text-[22px] font-bold text-foreground mb-2 break-words leading-tight">{currentVideo.title}</h1>
+                  <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-muted-foreground flex-wrap">
                     <span>Video {currentVideoIndex + 1} of {courseVideos.length}</span>
                     <span>•</span>
                     <span>{formatTime(duration) !== '00:00' ? formatTime(duration) : (currentVideo.duration || '15:00')}</span>
@@ -1762,12 +1921,12 @@ export function Course() {
                 </div>
 
                 {/* Real-Time YouTube Metrics Bar (Views, Likes, Comments — synced silently in background) */}
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0 max-w-full">
                   <div
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border shadow-2xs text-xs font-bold text-foreground"
+                    className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-card border border-border shadow-2xs text-xs font-bold text-foreground"
                     title={`${formatFullNumber(liveStats.viewCount || currentVideo.viewCount || course.totalViews)} Real YouTube Views`}
                   >
-                    <Eye className="w-3.5 h-3.5 text-primary" />
+                    <Eye className="w-3.5 h-3.5 text-primary shrink-0" />
                     <span>{formatCompactNumber(liveStats.viewCount || currentVideo.viewCount || course.totalViews)}</span>
                     <span className="text-muted-foreground font-medium text-[11px]">
                       {language === 'ar' ? 'مشاهدة' : 'views'}
@@ -1775,10 +1934,10 @@ export function Course() {
                   </div>
 
                   <div
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border shadow-2xs text-xs font-bold text-foreground"
+                    className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-card border border-border shadow-2xs text-xs font-bold text-foreground"
                     title={`${formatFullNumber(liveStats.likeCount || currentVideo.likeCount || course.totalLikes)} Real YouTube Likes`}
                   >
-                    <ThumbsUp className="w-3.5 h-3.5 text-emerald-500" />
+                    <ThumbsUp className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                     <span>{formatCompactNumber(liveStats.likeCount || currentVideo.likeCount || course.totalLikes)}</span>
                     <span className="text-muted-foreground font-medium text-[11px]">
                       {language === 'ar' ? 'إعجاب' : 'likes'}
@@ -1786,10 +1945,10 @@ export function Course() {
                   </div>
 
                   <div
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border shadow-2xs text-xs font-bold text-foreground"
+                    className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-card border border-border shadow-2xs text-xs font-bold text-foreground"
                     title={`${formatFullNumber(liveStats.commentCount || currentVideo.commentCount || course.totalComments)} Real YouTube Comments`}
                   >
-                    <MessageSquare className="w-3.5 h-3.5 text-amber-500" />
+                    <MessageSquare className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                     <span>{formatCompactNumber(liveStats.commentCount || currentVideo.commentCount || course.totalComments)}</span>
                     <span className="text-muted-foreground font-medium text-[11px]">
                       {language === 'ar' ? 'تعليق' : 'comments'}
@@ -1798,133 +1957,207 @@ export function Course() {
                 </div>
               </div>
 
-              {/* Channel Info — Responsive across Mobile, Tablet, and Laptop with tight Verified Badge */}
-              <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 p-4 sm:p-5 bg-card rounded-2xl border border-border shadow-2xs">
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <Link
-                    to={`/creator/${encodeURIComponent(course.instructor || '')}`}
-                    className="shrink-0 group relative"
-                  >
-                    {course.instructorAvatar?.trim() ? (
-                      <img
-                        src={course.instructorAvatar}
-                        alt={course.instructor}
-                        className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-border group-hover:border-primary transition-colors"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-muted flex items-center justify-center border border-border">
-                        <Youtube className="w-6 h-6 text-muted-foreground" />
+              {/* Channel Info — Supports Single & Multi-Channel Curated Playlists */}
+              {(() => {
+                const isMulti = Boolean(educatorInfo.isMultiChannel && educatorInfo.contributors && educatorInfo.contributors.length > 1);
+                const activeChannelName = (currentVideo.channelName || course.instructor || '').trim();
+                const activeContributor = educatorInfo.contributors?.find(
+                  c => c.name.toLowerCase() === activeChannelName.toLowerCase()
+                );
+                const displayAvatar = currentVideo.channelAvatar?.trim() || activeContributor?.avatar || course.instructorAvatar?.trim() || '';
+                const displayUrl = currentVideo.channelUrl?.trim() || activeContributor?.url || course.instructorUrl;
+                const displayTeacherTitle = currentVideo.professorName?.trim()
+                  ? currentVideo.professorName.trim()
+                  : isMulti && activeContributor
+                  ? activeContributor.professorName
+                  : educatorInfo.professorName;
+                const creatorLinkTarget = `/creator/${encodeURIComponent(activeChannelName || course.instructor || '')}`;
+
+                return (
+                  <div className="flex flex-col gap-4 p-4 sm:p-5 bg-card rounded-2xl border border-border shadow-2xs w-full max-w-full min-w-0 overflow-hidden">
+                    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <Link
+                          to={creatorLinkTarget}
+                          className="shrink-0 group relative"
+                        >
+                          {displayAvatar ? (
+                            <img
+                              src={displayAvatar}
+                              alt={activeChannelName}
+                              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-border group-hover:border-primary transition-colors"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-muted flex items-center justify-center border border-border">
+                              <Youtube className="w-6 h-6 text-muted-foreground" />
+                            </div>
+                          )}
+                        </Link>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="inline-flex items-center gap-1.5 max-w-full">
+                            <Link
+                              to={creatorLinkTarget}
+                              className="font-extrabold text-foreground hover:text-primary transition-colors text-base sm:text-lg truncate"
+                            >
+                              {displayTeacherTitle}
+                            </Link>
+                            <span
+                              className="inline-flex items-center justify-center shrink-0"
+                              title={language === 'ar' ? 'مدرب موثق' : 'Verified Creator'}
+                            >
+                              <BadgeCheck className="w-5 h-5 text-white fill-[#1D9BF0] shrink-0" />
+                            </span>
+                            {isMulti && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 shrink-0">
+                                {language === 'ar' ? 'معلم هذا الدرس' : 'Lesson Teacher'}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                            <span className="inline-flex items-center gap-1.5 min-w-0">
+                              <Youtube className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                              <span className="truncate">
+                                {language === 'ar' ? 'قناة يوتيوب:' : 'YouTube Channel:'}{' '}
+                                <strong className="text-foreground font-semibold">
+                                  {isMulti ? (activeChannelName || educatorInfo.youtubeChannelName) : educatorInfo.youtubeChannelName}
+                                </strong>
+                              </span>
+                            </span>
+
+                            {!isMulti && (liveStats.subscriberCountText || course.subscriberCountText || liveStats.subscriberCount > 0 || (course.subscriberCount && course.subscriberCount > 0)) && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-bold text-[11px] shrink-0">
+                                <Users className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {liveStats.subscriberCountText ||
+                                    course.subscriberCountText ||
+                                    formatCompactNumber(liveStats.subscriberCount || course.subscriberCount)}{' '}
+                                  {language === 'ar' ? 'مشترك' : 'subscribers'}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-2.5 pt-3 xl:pt-0 border-t xl:border-t-0 border-border/60 shrink-0">
+                        <div className="col-span-1 flex">
+                          <FavoriteButton
+                            itemId={course.id}
+                            itemType={isMasterclass ? 'masterclass' : 'playlist'}
+                            variant="pill"
+                            size="md"
+                            className="w-full sm:w-auto justify-center"
+                          />
+                        </div>
+
+                        <div className="col-span-1 flex">
+                          <ShareCourseButton
+                            course={course}
+                            variant="button"
+                            size="md"
+                            className="w-full sm:w-auto rounded-full px-4 py-2"
+                          />
+                        </div>
+
+                        <Link 
+                          to={creatorLinkTarget}
+                          className="col-span-1 px-4 py-2 bg-primary/10 text-primary border border-primary/20 rounded-full font-bold text-xs sm:text-sm hover:bg-primary hover:text-primary-foreground transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
+                        >
+                          <span>{language === 'ar' ? 'المزيد من الدروس' : 'See more lessons'}</span>
+                          <ChevronRight className="w-4 h-4 rtl:rotate-180 shrink-0" />
+                        </Link>
+
+                        {displayUrl && (
+                          <a 
+                            href={displayUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="col-span-1 px-5 py-2 bg-[#FF0000] text-white rounded-full font-bold text-xs sm:text-sm hover:bg-[#D90000] transition-all flex items-center justify-center gap-2 whitespace-nowrap shadow-xs active:scale-95"
+                          >
+                            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path
+                                d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
+                                fill="#FFFFFF"
+                              />
+                              <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#FF0000" />
+                            </svg>
+                            <span>{t('subscribe')}</span>
+                          </a>
+                        )}
+
+                        <button
+                          onClick={openReportModal}
+                          className={cn(
+                            "px-3.5 py-2 rounded-full border border-border/80 hover:border-red-500/40 hover:bg-red-500/10 text-muted-foreground hover:text-red-500 text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap",
+                            displayUrl ? "col-span-1" : "col-span-2 sm:col-span-1"
+                          )}
+                          title={language === 'ar' ? 'إبلاغ عن مشكلة في الفيديو' : 'Report an issue with this lesson'}
+                        >
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span>
+                            {language === 'ar' ? 'إبلاغ عن مشكلة' : 'Report Issue'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* All Contributing Teachers Strip for Multi-Channel Curated Playlists */}
+                    {isMulti && educatorInfo.contributors && (
+                      <div className="pt-3 border-t border-border/60 flex flex-col gap-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                            <Users className="w-3.5 h-3.5 text-primary" />
+                            <span>
+                              {language === 'ar'
+                                ? `جميع الأساتذة والقنوات في هذه الدورة (${educatorInfo.contributors.length})`
+                                : `All Teachers & Channels in This Playlist (${educatorInfo.contributors.length})`}
+                            </span>
+                          </span>
+                          <span className="text-[10px] font-semibold text-primary">
+                            {language === 'ar' ? 'مشمولون في الشهادة' : 'Credited on Certificate'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {educatorInfo.contributors.map((contrib) => {
+                            const isCurrentTeacher =
+                              activeChannelName.toLowerCase() === contrib.name.toLowerCase();
+                            return (
+                              <Link
+                                key={contrib.name}
+                                to={`/creator/${encodeURIComponent(contrib.name)}`}
+                                className={cn(
+                                  "inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all",
+                                  isCurrentTeacher
+                                    ? "bg-primary/10 border-primary/40 text-foreground shadow-2xs"
+                                    : "bg-muted/40 border-border/70 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                )}
+                              >
+                                {contrib.avatar ? (
+                                  <img
+                                    src={contrib.avatar}
+                                    alt={contrib.name}
+                                    className="w-5 h-5 rounded-full object-cover shrink-0"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <Youtube className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                                )}
+                                <span className="font-bold text-foreground">{contrib.name}</span>
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-background/80 border border-border/60 text-muted-foreground">
+                                  {contrib.videoCount} {language === 'ar' ? 'دروس' : contrib.videoCount === 1 ? 'lesson' : 'lessons'}
+                                </span>
+                              </Link>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
-                  </Link>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="inline-flex items-center gap-1.5 max-w-full">
-                      <Link
-                        to={`/creator/${encodeURIComponent(course.instructor || '')}`}
-                        className="font-extrabold text-foreground hover:text-primary transition-colors text-base sm:text-lg truncate"
-                      >
-                        {educatorInfo.professorName}
-                      </Link>
-                      <span
-                        className="inline-flex items-center justify-center shrink-0"
-                        title={language === 'ar' ? 'مدرب موثق' : 'Verified Creator'}
-                      >
-                        <BadgeCheck className="w-5 h-5 text-white fill-[#1D9BF0] shrink-0" />
-                      </span>
-                    </div>
-
-                    <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
-                      <span className="inline-flex items-center gap-1.5 min-w-0">
-                        <Youtube className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                        <span className="truncate">
-                          {language === 'ar' ? 'قناة يوتيوب:' : 'YouTube Channel:'}{' '}
-                          <strong className="text-foreground font-semibold">{educatorInfo.youtubeChannelName}</strong>
-                        </span>
-                      </span>
-
-                      {(liveStats.subscriberCountText || course.subscriberCountText || liveStats.subscriberCount > 0 || (course.subscriberCount && course.subscriberCount > 0)) && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-bold text-[11px] shrink-0">
-                          <Users className="w-3 h-3 shrink-0" />
-                          <span>
-                            {liveStats.subscriberCountText ||
-                              course.subscriberCountText ||
-                              formatCompactNumber(liveStats.subscriberCount || course.subscriberCount)}{' '}
-                            {language === 'ar' ? 'مشترك' : 'subscribers'}
-                          </span>
-                        </span>
-                      )}
-                    </div>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-2.5 pt-3 xl:pt-0 border-t xl:border-t-0 border-border/60 shrink-0">
-                  <div className="col-span-1 flex">
-                    <FavoriteButton
-                      itemId={course.id}
-                      itemType={isMasterclass ? 'masterclass' : 'playlist'}
-                      variant="pill"
-                      size="md"
-                      className="w-full sm:w-auto justify-center"
-                    />
-                  </div>
-
-                  <div className="col-span-1 flex">
-                    <ShareCourseButton
-                      course={course}
-                      variant="button"
-                      size="md"
-                      className="w-full sm:w-auto rounded-full px-4 py-2"
-                    />
-                  </div>
-
-                  <Link 
-                    to={`/creator/${encodeURIComponent(course.instructor || '')}`}
-                    className="col-span-1 px-4 py-2 bg-primary/10 text-primary border border-primary/20 rounded-full font-bold text-xs sm:text-sm hover:bg-primary hover:text-primary-foreground transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
-                  >
-                    <span>{language === 'ar' ? 'المزيد من الدروس' : 'See more lessons'}</span>
-                    <ChevronRight className="w-4 h-4 rtl:rotate-180 shrink-0" />
-                  </Link>
-
-                  {course.instructorUrl && (
-                    <a 
-                      href={course.instructorUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="col-span-1 px-5 py-2 bg-[#FF0000] text-white rounded-full font-bold text-xs sm:text-sm hover:bg-[#D90000] transition-all flex items-center justify-center gap-2 whitespace-nowrap shadow-xs active:scale-95"
-                    >
-                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path
-                          d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
-                          fill="#FFFFFF"
-                        />
-                        <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#FF0000" />
-                      </svg>
-                      <span>{t('subscribe')}</span>
-                    </a>
-                  )}
-
-                  <button
-                    onClick={openReportModal}
-                    className={cn(
-                      "px-3.5 py-2 rounded-full border border-border/80 hover:border-red-500/40 hover:bg-red-500/10 text-muted-foreground hover:text-red-500 text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap",
-                      course.instructorUrl ? "col-span-1" : "col-span-2 sm:col-span-1"
-                    )}
-                    title={language === 'ar' ? 'إبلاغ عن مشكلة في الفيديو' : 'Report an issue with this lesson'}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                    <span>
-                      {language === 'ar' ? 'إبلاغ عن مشكلة' : 'Report Issue'}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-2 text-muted-foreground text-[15px] leading-relaxed">
-                <span className="font-semibold text-foreground">Course Overview: </span>
-                {course.description}
-              </div>
+                );
+              })()}
 
               {currentVideo.description && (
                  <div className="mt-2 bg-muted/40 p-4 rounded-xl border border-border/50">
@@ -1981,12 +2214,12 @@ export function Course() {
 
       {/* Sidebar Playlist / Notes (Also available in Focus Mode when Notes panel is open) */}
       <div className={cn(
-        "w-full flex flex-col bg-card border-s border-border transition-all duration-150 relative",
+        "w-full flex flex-col bg-card border-t lg:border-t-0 lg:border-s border-border transition-all duration-150 relative",
         isFocusMode
           ? isFocusNotesOpen
             ? "flex h-[44vh] lg:h-full lg:overflow-hidden z-30 shadow-2xl"
             : "hidden"
-          : "flex h-[40vh] lg:h-full lg:overflow-hidden"
+          : "flex flex-1 lg:flex-none lg:h-full lg:overflow-hidden min-h-[380px] lg:min-h-0"
       )}>
         <div className="flex border-b border-border shrink-0">
           <button 
@@ -2018,23 +2251,59 @@ export function Course() {
               </div>
               {canEarnCertificate ? (
                 courseProgress.isCompleted ? (
-                  <Link
-                    to={`/certificate/${course.id}`}
-                    className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
-                  >
-                    <Award className="w-4 h-4" />
-                    <span>{language === 'ar' ? 'عرض وتحميل الشهادة الرسمية' : 'View & Download Certificate'}</span>
-                  </Link>
+                  <div className="space-y-1.5">
+                    <Link
+                      to={`/certificate/${course.id}`}
+                      className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                    >
+                      <Award className="w-4 h-4" />
+                      <span>{language === 'ar' ? 'عرض وتحميل الشهادة الرسمية' : 'View & Download Certificate'}</span>
+                    </Link>
+                    {(isCourseExamEnabled || isLessonQuizEnabled) && (
+                      <button
+                        type="button"
+                        onClick={() => setIsQuizModalOpen(true)}
+                        className="w-full py-1.5 px-3 rounded-xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-indigo-500/20 transition-all cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>{language === 'ar' ? 'اختبار التحصيل والكفاءة (+XP)' : 'Take Mastery Quiz (+XP)'}</span>
+                      </button>
+                    )}
+                  </div>
                 ) : (
-                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                    <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                    <span>{language === 'ar' ? 'أكمل جميع دروس القائمة للحصول على الشهادة' : 'Complete all playlist lessons to unlock certificate'}</span>
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span>{language === 'ar' ? 'أكمل جميع دروس القائمة للحصول على الشهادة' : 'Complete all playlist lessons to unlock certificate'}</span>
+                    </div>
+                    {(isCourseExamEnabled || isLessonQuizEnabled) && (
+                      <button
+                        type="button"
+                        onClick={() => setIsQuizModalOpen(true)}
+                        className="w-full py-1.5 px-3 rounded-xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-indigo-500/20 transition-all cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>{language === 'ar' ? 'اختبر معلوماتك الآن (+100 XP)' : 'Practice Course Quiz (+100 XP)'}</span>
+                      </button>
+                    )}
                   </div>
                 )
               ) : (
-                <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                  <PlayCircle className="w-3.5 h-3.5 text-primary shrink-0" />
-                  <span>{language === 'ar' ? 'جلسة ماستركلاس (الشهادات مخصصة لقوائم التشغيل والمسارات)' : 'Masterclass session (Certificates are for Playlists & Paths)'}</span>
+                <div className="space-y-1.5">
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                    <PlayCircle className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span>{language === 'ar' ? 'جلسة ماستركلاس (الشهادات مخصصة لقوائم التشغيل والمسارات)' : 'Masterclass session (Certificates are for Playlists & Paths)'}</span>
+                  </div>
+                  {(isCourseExamEnabled || isLessonQuizEnabled) && (
+                    <button
+                      type="button"
+                      onClick={() => setIsQuizModalOpen(true)}
+                      className="w-full py-1.5 px-3 rounded-xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-indigo-500/20 transition-all cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>{language === 'ar' ? 'اختبار تحصيل الماستركلاس (+XP)' : 'Test Your Knowledge (+XP)'}</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -2110,12 +2379,11 @@ export function Course() {
               const isLocked = index > 0 && !courseProgress.completedVideoIds.includes(courseVideos[index - 1].id);
 
               return (
-                <button
+                <div
                   key={`video-lesson-${video.id || video.youtubeId || index}-${index}`}
-                  disabled={isLocked}
                   onClick={() => !isLocked && setCurrentVideo(course.id, video.id)}
                   className={cn(
-                    "w-full text-start flex items-start gap-3 p-4 border-b border-border transition-colors",
+                    "w-full text-start flex items-start gap-3 p-4 border-b border-border transition-colors group/item",
                     isCurrent ? "bg-[#F0F7FF] dark:bg-primary/10 border-s-4 border-s-primary" : "hover:bg-muted border-s-4 border-s-transparent",
                     isLocked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
                   )}
@@ -2127,13 +2395,35 @@ export function Course() {
                     <div className="text-sm font-semibold mb-1 text-foreground">{video.title}</div>
                     <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-1.5">
                       <span>{video.duration}</span>
+                      {video.channelName && educatorInfo.isMultiChannel ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/10 text-primary font-semibold text-[10px]">
+                          {video.channelAvatar ? (
+                            <img src={video.channelAvatar} alt={video.channelName} className="w-3 h-3 rounded-full object-cover" referrerPolicy="no-referrer" />
+                          ) : null}
+                          <span>{video.channelName}</span>
+                        </span>
+                      ) : null}
                       {(video.viewCount && video.viewCount > 0) ? (
                         <span>• {formatCompactNumber(video.viewCount)} {language === 'ar' ? 'مشاهدة' : 'views'}</span>
                       ) : null}
                       {isCompleted ? <span>• Completed</span> : isCurrent ? <span>• Playing {Math.round((currentTime/duration)*100 || 0)}%</span> : null}
                     </div>
                   </div>
-                  <div className="ms-auto mt-0.5">
+                  <div className="flex items-center gap-2 ms-auto mt-0.5 shrink-0">
+                    {isLessonQuizEnabled && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQuizVideoTarget({ id: video.id, title: video.title });
+                          setIsQuizModalOpen(true);
+                        }}
+                        className="opacity-70 group-hover/item:opacity-100 p-1 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-all cursor-pointer"
+                        title={language === 'ar' ? `اختبار هذا الدرس: ${video.title}` : `Quiz for this lesson: ${video.title}`}
+                      >
+                        <Award className="w-4 h-4" />
+                      </button>
+                    )}
                     {isCompleted ? (
                       <span className="text-[#10B981] font-bold text-sm">✔</span>
                     ) : isCurrent ? (
@@ -2144,7 +2434,7 @@ export function Course() {
                       <div className="w-4 h-4 rounded-full border-2 border-muted-foreground" />
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -2746,6 +3036,45 @@ export function Course() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Interactive Quiz Engine Modal */}
+      <InteractiveQuizModal
+        isOpen={isQuizModalOpen}
+        onClose={() => {
+          setIsQuizModalOpen(false);
+          setQuizVideoTarget(null);
+        }}
+        courseId={course.id}
+        courseTitle={course.title}
+        courseCategory={course.category}
+        videoId={quizVideoTarget?.id}
+        videoTitle={quizVideoTarget?.title}
+        onQuizPassed={(score) => {
+          // If course is not completed yet, can auto-complete on passing exam
+          if (canEarnCertificate && !courseProgress.isCompleted) {
+            completeCourse(course.id);
+          }
+        }}
+      />
+
+      {/* Smart Flashcards Modal */}
+      <FlashcardsModal
+        isOpen={isFlashcardsModalOpen}
+        onClose={() => setIsFlashcardsModalOpen(false)}
+        initialCategory={
+          (course.category || '').toLowerCase().includes('cyber') ? 'security' :
+          (course.category || '').toLowerCase().includes('linux') ? 'linux' :
+          (course.category || '').toLowerCase().includes('net') ? 'networking' :
+          (course.category || '').toLowerCase().includes('web') ? 'web' : 'all'
+        }
+      />
+
+      {/* Code Sandbox & Terminal Simulator Modal */}
+      <CodeTerminalSandboxModal
+        isOpen={isSandboxModalOpen}
+        onClose={() => setIsSandboxModalOpen(false)}
+        initialMode={sandboxInitialMode}
+      />
     </div>
   );
 }

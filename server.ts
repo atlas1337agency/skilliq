@@ -7,6 +7,13 @@ import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
 
+process.on('uncaughtException', (err) => {
+  console.error('Process uncaughtException:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Process unhandledRejection:', reason);
+});
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -2602,6 +2609,8 @@ Level: "${currentLevel}"`;
                 item.snippet?.title === 'Private video' || item.snippet?.title === 'Deleted video';
               if (vId && !isPrivateOrDeleted) {
                 const det = detailsMap[vId];
+                const vidChannelName = item.snippet?.videoOwnerChannelTitle || item.snippet?.channelTitle || channelName || '';
+                const vidChannelId = item.snippet?.videoOwnerChannelId || item.snippet?.channelId || channelId || '';
                 videos.push({
                   id: `v_${vId}`,
                   title: item.snippet?.title || 'Unknown Title',
@@ -2614,6 +2623,8 @@ Level: "${currentLevel}"`;
                   language: '',
                   description: item.snippet?.description ? String(item.snippet.description).slice(0, 600) : '',
                   resources: [],
+                  ...(vidChannelName ? { channelName: vidChannelName } : {}),
+                  ...(vidChannelId ? { channelId: vidChannelId } : {}),
                 });
               }
             }
@@ -3152,7 +3163,8 @@ ${urlsXml.join('\n')}
     const vite = await createViteServer({
       server: { 
         middlewareMode: true,
-        hmr: false 
+        hmr: false,
+        ws: false,
       },
       appType: "spa",
     });
@@ -3165,9 +3177,34 @@ ${urlsXml.join('\n')}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Server] Port ${PORT} currently busy, retrying in 1.5s...`);
+      setTimeout(() => {
+        try {
+          server.close();
+        } catch (_) {}
+        server.listen(PORT, "0.0.0.0");
+      }, 1500);
+    } else {
+      console.error('[Server Error]:', err);
+    }
+  });
+
+  const handleTermination = () => {
+    try {
+      server.close(() => process.exit(0));
+    } catch (_) {
+      process.exit(0);
+    }
+  };
+
+  process.on('SIGTERM', handleTermination);
+  process.on('SIGINT', handleTermination);
 }
 
 startServer();

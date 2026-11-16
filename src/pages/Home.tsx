@@ -16,6 +16,7 @@ import { PopularCoursesSection } from '../components/PopularCoursesSection';
 import { OurNetworkSection } from '../components/OurNetworkSection';
 import { PopularMasterclassesSection } from '../components/PopularMasterclassesSection';
 import { PopularProjectsSection } from '../components/PopularProjectsSection';
+import { SkilliqCollectionSection } from '../components/SkilliqCollectionSection';
 
 const iconMap: Record<string, any> = {
   Code,
@@ -612,6 +613,9 @@ export function Home() {
 
         {/* Popular Courses & Playlists Section */}
         <PopularCoursesSection />
+
+        {/* Skilliq Collection (Multi-Channel Curated Playlists) Section */}
+        <SkilliqCollectionSection />
 
         {/* Our Network Section */}
         <OurNetworkSection />

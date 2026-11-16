@@ -7,7 +7,9 @@ import {
   Plus, 
   Trash2, 
   ChevronLeft, 
-  ChevronRight, 
+  ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Loader2, 
   AlertCircle, 
   Sparkles, 
@@ -61,9 +63,10 @@ import {
 } from '../lib/youtube';
 import { useTranslation } from 'react-i18next';
 import { cn, filterByLanguage } from '../lib/utils';
-import { normalizeCategory, normalizeSubCategory, isMasterclassCourse } from '../lib/courseUtils';
+import { normalizeCategory, normalizeSubCategory, isMasterclassCourse, getCourseContributors, formatContributorsSummary } from '../lib/courseUtils';
 import { BookCoverVisual, AmazonIcon, RichFormattedText, FormattedInlineText } from './BookVideoModal';
 import { PathGraphicRoadmap } from './PathGraphicRoadmap';
+import { saveCourseFeatures } from '../lib/courseFeatures';
 
 const POPULAR_BOOK_CATEGORIES = [
   'Software Engineering',
@@ -321,6 +324,10 @@ export function AdminForms({
       isApproved: isAdmin ? true : false,
       createdAt: Date.now(),
       ...(type === 'course' && itemToEdit ? itemToEdit : {}),
+      isMultiChannel:
+        type === 'course' && itemToEdit
+          ? Boolean(itemToEdit.isMultiChannel) || getCourseContributors(itemToEdit).length > 1
+          : false,
     };
   });
 
@@ -657,6 +664,9 @@ export function AdminForms({
   const [isImporting, setIsImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<{type: 'error'|'success', text: string} | null>(null);
   const [playlistUrlInput, setPlaylistUrlInput] = useState('');
+  const [showBatchImport, setShowBatchImport] = useState(() => Boolean(type === 'course' && itemToEdit?.isMultiChannel && !itemToEdit?.id));
+  const [batchUrlsText, setBatchUrlsText] = useState('');
+  const [isBatchImporting, setIsBatchImporting] = useState(false);
 
   // YouTube API Key Configuration for Vercel / Client
   const [apiKeyInput, setApiKeyInput] = useState(() => getYouTubeApiKey());
@@ -690,7 +700,60 @@ export function AdminForms({
     setCourse({ ...course, videos: newVideos });
   };
 
-  // Smart Auto-Import YouTube Playlist OR Single Video (with Real Views, Likes, Comments, Channel Subscribers & Auto-Sync Playlist ID)
+  // Move video lesson up/down in curriculum order
+  const handleMoveVideo = (idx: number, direction: -1 | 1) => {
+    const targetIdx = idx + direction;
+    const current = [...(course.videos || [])];
+    if (targetIdx < 0 || targetIdx >= current.length) return;
+    const [moved] = current.splice(idx, 1);
+    current.splice(targetIdx, 0, moved);
+    setCourse(prev => ({ ...prev, videos: current }));
+  };
+
+  // Helper to compute updated multi-channel course summary whenever videos change
+  const applyChannelSummaryToCourseState = (prev: Partial<Course>, updatedVids: Video[]) => {
+    const contributors = getCourseContributors({ ...prev, videos: updatedVids });
+    const isMulti = contributors.length > 1;
+    const summaryLabel = contributors.length > 0 ? formatContributorsSummary(contributors, 3) : '';
+    const firstChannel = contributors[0];
+
+    let nextInstructor = prev.instructor || '';
+    let nextYoutubeChannelName = prev.youtubeChannelName || '';
+
+    if (isMulti) {
+      // Automatically display combined teachers on course cards unless admin typed a completely custom label
+      const prevMatchesSingleChannel =
+        !nextInstructor.trim() ||
+        contributors.some(c => c.name.toLowerCase() === nextInstructor.trim().toLowerCase()) ||
+        nextInstructor.includes('&') ||
+        nextInstructor.includes('+');
+      if (prevMatchesSingleChannel) {
+        nextInstructor = summaryLabel;
+      }
+      const prevYtMatchesSingle =
+        !nextYoutubeChannelName.trim() ||
+        contributors.some(c => c.name.toLowerCase() === nextYoutubeChannelName.trim().toLowerCase()) ||
+        nextYoutubeChannelName.includes('&') ||
+        nextYoutubeChannelName.includes('+');
+      if (prevYtMatchesSingle) {
+        nextYoutubeChannelName = summaryLabel;
+      }
+    } else if (firstChannel) {
+      if (!nextInstructor.trim()) nextInstructor = firstChannel.name;
+      if (!nextYoutubeChannelName.trim()) nextYoutubeChannelName = firstChannel.name;
+    }
+
+    const resolvedMulti = Boolean(prev.isMultiChannel) || isMulti;
+
+    return {
+      isMultiChannel: resolvedMulti,
+      playlistId: resolvedMulti ? '' : prev.playlistId,
+      instructor: nextInstructor,
+      youtubeChannelName: nextYoutubeChannelName,
+    };
+  };
+
+  // Smart Auto-Import YouTube Playlist OR Single Video (with Real Views, Likes, Comments, Channel Subscribers & Multi-Channel Support)
   const handleImportPlaylist = async (overrideKey?: string, overrideUrl?: string) => {
     const rawTarget = (overrideUrl !== undefined ? overrideUrl : playlistUrlInput).trim();
     if (!rawTarget) return;
@@ -708,7 +771,7 @@ export function AdminForms({
 
     setIsImporting(true);
     try {
-      // Case A: User pasted a Single Video URL into the 1-Click Importer (e.g. for a Masterclass or single lesson)
+      // Case A: User pasted a Single Video URL into the 1-Click Importer (great for building custom multi-channel playlists lesson by lesson)
       if (!playlistId && singleVideoId) {
         const meta = await fetchFullYoutubeVideoMetadata(singleVideoId, keyToUse);
         if (!meta) {
@@ -726,6 +789,10 @@ export function AdminForms({
           language: course.language || 'English',
           description: meta.description || '',
           resources: [],
+          channelName: meta.youtubeName || '',
+          channelAvatar: meta.youtubeAvatar || '',
+          channelUrl: meta.youtubeChannelUrl || '',
+          channelId: meta.channelId || '',
         };
         const existingIds = new Set((course.videos || []).map(v => v.youtubeId).filter(Boolean));
         const newVids = existingIds.has(singleVideoId)
@@ -738,29 +805,31 @@ export function AdminForms({
         const subCount = meta.subscriberCount || course.subscriberCount || 0;
         const subText = meta.subscriberCountText || course.subscriberCountText || (subCount > 0 ? formatCompactNumber(subCount) : '');
 
-        setCourse(prev => ({
-          ...prev,
-          title: prev.title?.trim() ? prev.title : (meta.videoTitle || prev.title),
-          description: prev.description?.trim() ? prev.description : (meta.description ? meta.description.slice(0, 500) : prev.description),
-          thumbnail: prev.thumbnail?.trim() ? prev.thumbnail : `https://img.youtube.com/vi/${singleVideoId}/maxresdefault.jpg`,
-          videos: newVids,
-          instructor: meta.youtubeName || prev.instructor,
-          youtubeChannelName: meta.youtubeName || prev.youtubeChannelName || prev.instructor,
-          instructorAvatar: meta.youtubeAvatar || prev.instructorAvatar,
-          instructorUrl: meta.youtubeChannelUrl || prev.instructorUrl,
-          channelId: meta.channelId || prev.channelId,
-          subscriberCount: subCount,
-          subscriberCountText: subText,
-          totalViews,
-          totalLikes,
-          totalComments,
-          lastSyncedAt: Date.now()
-        }));
+        setCourse(prev => {
+          const channelPatch = applyChannelSummaryToCourseState(prev, newVids);
+          return {
+            ...prev,
+            ...channelPatch,
+            title: prev.title?.trim() ? prev.title : (meta.videoTitle || prev.title),
+            description: prev.description?.trim() ? prev.description : (meta.description ? meta.description.slice(0, 500) : prev.description),
+            thumbnail: prev.thumbnail?.trim() ? prev.thumbnail : `https://img.youtube.com/vi/${singleVideoId}/maxresdefault.jpg`,
+            videos: newVids,
+            instructorAvatar: prev.instructorAvatar?.trim() ? prev.instructorAvatar : (meta.youtubeAvatar || prev.instructorAvatar),
+            instructorUrl: prev.instructorUrl?.trim() ? prev.instructorUrl : (meta.youtubeChannelUrl || prev.instructorUrl),
+            channelId: prev.channelId || meta.channelId,
+            subscriberCount: subCount,
+            subscriberCountText: subText,
+            totalViews,
+            totalLikes,
+            totalComments,
+            lastSyncedAt: Date.now()
+          };
+        });
 
         setPlaylistUrlInput('');
         setImportMessage({
           type: 'success',
-          text: `Imported video "${meta.videoTitle}" with Live Stats (${formatCompactNumber(totalViews)} views • ${formatCompactNumber(totalLikes)} likes • ${formatCompactNumber(totalComments)} comments${subText ? ` • ${subText} subscribers` : ''})!`
+          text: `Added "${meta.videoTitle}" (${meta.youtubeName}) with Live Stats (${formatCompactNumber(totalViews)} views • ${formatCompactNumber(totalLikes)} likes)!`
         });
         return;
       }
@@ -772,12 +841,16 @@ export function AdminForms({
       if (!importedVideos || importedVideos.length === 0) {
         setImportMessage({ type: 'error', text: 'No videos found in playlist, or the playlist is private/unlisted.' });
       } else {
-        // Auto-apply current course language
-        if (course.language) {
-          importedVideos.forEach(v => v.language = course.language);
-        }
+        // Auto-apply current course language & per-video channel info
+        importedVideos.forEach(v => {
+          if (course.language) v.language = course.language;
+          if (!v.channelName && fullData.channelName) v.channelName = fullData.channelName;
+          if (!v.channelAvatar && fullData.channelAvatar) v.channelAvatar = fullData.channelAvatar;
+          if (!v.channelUrl && fullData.channelUrl) v.channelUrl = fullData.channelUrl;
+          if (!v.channelId && fullData.channelId) v.channelId = fullData.channelId;
+        });
 
-        // Merge with existing videos by youtubeId so re-importing updates real stats
+        // Merge with existing videos by youtubeId so re-importing updates real stats or merges multiple playlists cleanly
         const importedByYtId = new Map<string, Video>();
         importedVideos.forEach(v => {
           if (v.youtubeId) importedByYtId.set(v.youtubeId, v);
@@ -785,7 +858,7 @@ export function AdminForms({
         const existingIds = new Set((course.videos || []).map(v => v.youtubeId).filter(Boolean));
         const updatedExisting = (course.videos || []).map(ev => {
           const fresh = ev.youtubeId ? importedByYtId.get(ev.youtubeId) : undefined;
-          return fresh ? { ...ev, ...fresh, title: ev.title || fresh.title } : ev;
+          return fresh ? { ...ev, ...fresh, title: ev.title || fresh.title, channelName: ev.channelName || fresh.channelName } : ev;
         });
         const uniqueNew = importedVideos.filter(v => !v.youtubeId || !existingIds.has(v.youtubeId));
         const newVids = [...updatedExisting, ...uniqueNew];
@@ -806,6 +879,9 @@ export function AdminForms({
               viewCount: firstVideoMeta.viewCount || newVids[0].viewCount || 0,
               likeCount: firstVideoMeta.likeCount || newVids[0].likeCount || 0,
               commentCount: firstVideoMeta.commentCount || newVids[0].commentCount || 0,
+              channelName: newVids[0].channelName || firstVideoMeta.youtubeName || '',
+              channelAvatar: newVids[0].channelAvatar || firstVideoMeta.youtubeAvatar || '',
+              channelUrl: newVids[0].channelUrl || firstVideoMeta.youtubeChannelUrl || '',
               duration: (newVids[0].duration && newVids[0].duration !== '00:00') ? newVids[0].duration : (firstVideoMeta.videoDuration || '15:00'),
             };
           }
@@ -817,30 +893,32 @@ export function AdminForms({
         const subCount = fullData.subscriberCount || firstVideoMeta?.subscriberCount || course.subscriberCount || 0;
         const subText = fullData.subscriberCountText || firstVideoMeta?.subscriberCountText || course.subscriberCountText || (subCount > 0 ? formatCompactNumber(subCount) : '');
 
-        setCourse(prev => ({
-          ...prev,
-          playlistId: playlistId!,
-          title: prev.title?.trim() ? prev.title : (fullData.playlistTitle || newVids[0]?.title || prev.title),
-          description: prev.description?.trim() ? prev.description : (fullData.playlistDescription || firstVideoMeta?.description?.slice(0, 500) || prev.description),
-          thumbnail: newThumbnail,
-          videos: newVids,
-          instructor: fullData.channelName || firstVideoMeta?.youtubeName || prev.instructor,
-          youtubeChannelName: fullData.channelName || firstVideoMeta?.youtubeName || prev.youtubeChannelName || prev.instructor,
-          instructorAvatar: fullData.channelAvatar || firstVideoMeta?.youtubeAvatar || prev.instructorAvatar,
-          instructorUrl: fullData.channelUrl || firstVideoMeta?.youtubeChannelUrl || prev.instructorUrl,
-          channelId: fullData.channelId || firstVideoMeta?.channelId || prev.channelId,
-          subscriberCount: subCount,
-          subscriberCountText: subText,
-          totalViews,
-          totalLikes,
-          totalComments,
-          lastSyncedAt: Date.now()
-        }));
+        setCourse(prev => {
+          const channelPatch = applyChannelSummaryToCourseState(prev, newVids);
+          return {
+            ...prev,
+            playlistId: channelPatch.isMultiChannel ? '' : playlistId!,
+            ...channelPatch,
+            title: prev.title?.trim() ? prev.title : (fullData.playlistTitle || newVids[0]?.title || prev.title),
+            description: prev.description?.trim() ? prev.description : (fullData.playlistDescription || firstVideoMeta?.description?.slice(0, 500) || prev.description),
+            thumbnail: newThumbnail,
+            videos: newVids,
+            instructorAvatar: prev.instructorAvatar?.trim() ? prev.instructorAvatar : (fullData.channelAvatar || firstVideoMeta?.youtubeAvatar || prev.instructorAvatar),
+            instructorUrl: prev.instructorUrl?.trim() ? prev.instructorUrl : (fullData.channelUrl || firstVideoMeta?.youtubeChannelUrl || prev.instructorUrl),
+            channelId: prev.channelId || fullData.channelId || firstVideoMeta?.channelId,
+            subscriberCount: subCount,
+            subscriberCountText: subText,
+            totalViews,
+            totalLikes,
+            totalComments,
+            lastSyncedAt: Date.now()
+          };
+        });
         
         setPlaylistUrlInput('');
         setImportMessage({ 
           type: 'success', 
-          text: `Imported ${importedVideos.length} videos with Live YouTube Stats (${formatCompactNumber(totalViews)} views • ${formatCompactNumber(totalLikes)} likes • ${formatCompactNumber(totalComments)} comments${subText ? ` • ${subText} subscribers` : ''}) & Auto-Sync enabled!` 
+          text: `Imported ${importedVideos.length} videos (${fullData.channelName || 'YouTube'}) with Live Stats (${formatCompactNumber(totalViews)} views • ${formatCompactNumber(totalLikes)} likes)!` 
         });
       }
     } catch (err: any) {
@@ -851,6 +929,109 @@ export function AdminForms({
       }
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  // Batch Multi-Channel Importer: paste multiple YouTube video or playlist URLs (one per line) from different channels
+  const handleBatchImportLinks = async () => {
+    const lines = batchUrlsText
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return;
+
+    const keyToUse = apiKeyInput.trim() || getYouTubeApiKey();
+    setIsBatchImporting(true);
+    setImportMessage(null);
+
+    let workingVideos = [...(course.videos || [])];
+    const existingIds = new Set(workingVideos.map(v => v.youtubeId).filter(Boolean));
+    let addedCount = 0;
+
+    try {
+      for (const line of lines) {
+        const plId = extractPlaylistId(line);
+        if (plId && line.includes('list=')) {
+          try {
+            const fullData = await fetchPlaylistFullData(plId, keyToUse);
+            for (const pv of fullData.videos || []) {
+              if (!pv.youtubeId || existingIds.has(pv.youtubeId)) continue;
+              existingIds.add(pv.youtubeId);
+              workingVideos.push({
+                ...pv,
+                language: course.language || pv.language || 'English',
+                channelName: pv.channelName || fullData.channelName || '',
+                channelAvatar: pv.channelAvatar || fullData.channelAvatar || '',
+                channelUrl: pv.channelUrl || fullData.channelUrl || '',
+                channelId: pv.channelId || fullData.channelId || '',
+              });
+              addedCount++;
+            }
+          } catch {}
+          continue;
+        }
+
+        const vidId = extractYoutubeVideoId(line);
+        if (vidId && !existingIds.has(vidId)) {
+          try {
+            const meta = await fetchFullYoutubeVideoMetadata(vidId, keyToUse);
+            existingIds.add(vidId);
+            workingVideos.push({
+              id: `v_${vidId}`,
+              title: meta?.videoTitle || 'Video Lesson',
+              youtubeId: vidId,
+              duration: meta?.videoDuration || '15:00',
+              viewCount: meta?.viewCount || 0,
+              likeCount: meta?.likeCount || 0,
+              commentCount: meta?.commentCount || 0,
+              language: course.language || 'English',
+              description: meta?.description || '',
+              resources: [],
+              channelName: meta?.youtubeName || '',
+              channelAvatar: meta?.youtubeAvatar || '',
+              channelUrl: meta?.youtubeChannelUrl || '',
+              channelId: meta?.channelId || '',
+            });
+            addedCount++;
+          } catch {}
+        }
+      }
+
+      if (addedCount === 0) {
+        setImportMessage({ type: 'error', text: 'No new valid YouTube links found (or all videos are already in the playlist).' });
+      } else {
+        const totalViews = workingVideos.reduce((acc, v) => acc + (v.viewCount || 0), 0);
+        const totalLikes = workingVideos.reduce((acc, v) => acc + (v.likeCount || 0), 0);
+        const totalComments = workingVideos.reduce((acc, v) => acc + (v.commentCount || 0), 0);
+        const firstYtId = workingVideos[0]?.youtubeId;
+
+        setCourse(prev => {
+          const channelPatch = applyChannelSummaryToCourseState(prev, workingVideos);
+          const firstContributor = getCourseContributors({ ...prev, videos: workingVideos })[0];
+          return {
+            ...prev,
+            ...channelPatch,
+            thumbnail: prev.thumbnail?.trim() ? prev.thumbnail : (firstYtId ? `https://img.youtube.com/vi/${firstYtId}/maxresdefault.jpg` : prev.thumbnail),
+            instructorAvatar: prev.instructorAvatar?.trim() ? prev.instructorAvatar : (firstContributor?.avatar || prev.instructorAvatar),
+            instructorUrl: prev.instructorUrl?.trim() ? prev.instructorUrl : (firstContributor?.url || prev.instructorUrl),
+            videos: workingVideos,
+            totalViews,
+            totalLikes,
+            totalComments,
+            lastSyncedAt: Date.now()
+          };
+        });
+
+        const uniqueChannelsCount = getCourseContributors({ ...course, videos: workingVideos }).length;
+        setBatchUrlsText('');
+        setShowBatchImport(false);
+        setImportMessage({
+          type: 'success',
+          text: `Imported ${addedCount} videos across ${uniqueChannelsCount} YouTube channel${uniqueChannelsCount > 1 ? 's' : ''}!`
+        });
+      }
+    } finally {
+      setIsBatchImporting(false);
     }
   };
 
@@ -877,22 +1058,26 @@ export function AdminForms({
           viewCount: meta.viewCount || currentVids[idx].viewCount || 0,
           likeCount: meta.likeCount || currentVids[idx].likeCount || 0,
           commentCount: meta.commentCount || currentVids[idx].commentCount || 0,
+          channelName: currentVids[idx].channelName?.trim() ? currentVids[idx].channelName : (meta.youtubeName || ''),
+          channelAvatar: currentVids[idx].channelAvatar?.trim() ? currentVids[idx].channelAvatar : (meta.youtubeAvatar || ''),
+          channelUrl: currentVids[idx].channelUrl?.trim() ? currentVids[idx].channelUrl : (meta.youtubeChannelUrl || ''),
+          channelId: currentVids[idx].channelId || meta.channelId || '',
         };
 
         const totalViews = currentVids.reduce((acc, v) => acc + (v.viewCount || 0), 0);
         const totalLikes = currentVids.reduce((acc, v) => acc + (v.likeCount || 0), 0);
         const totalComments = currentVids.reduce((acc, v) => acc + (v.commentCount || 0), 0);
+        const channelPatch = applyChannelSummaryToCourseState(prev, currentVids);
 
         return {
           ...prev,
+          ...channelPatch,
           title: prev.title?.trim() ? prev.title : (idx === 0 ? meta.videoTitle : prev.title),
           description: prev.description?.trim() ? prev.description : (idx === 0 && meta.description ? meta.description.slice(0, 400) : prev.description),
           thumbnail: prev.thumbnail?.trim() ? prev.thumbnail : `https://img.youtube.com/vi/${cleanId}/maxresdefault.jpg`,
-          instructor: prev.instructor?.trim() ? prev.instructor : (meta.youtubeName || prev.instructor),
-          youtubeChannelName: prev.youtubeChannelName?.trim() ? prev.youtubeChannelName : (meta.youtubeName || prev.instructor),
           instructorAvatar: prev.instructorAvatar?.trim() ? prev.instructorAvatar : (meta.youtubeAvatar || prev.instructorAvatar),
           instructorUrl: prev.instructorUrl?.trim() ? prev.instructorUrl : (meta.youtubeChannelUrl || prev.instructorUrl),
-          channelId: meta.channelId || prev.channelId,
+          channelId: prev.channelId || meta.channelId,
           subscriberCount: meta.subscriberCount || prev.subscriberCount || 0,
           subscriberCountText: meta.subscriberCountText || prev.subscriberCountText || (meta.subscriberCount ? formatCompactNumber(meta.subscriberCount) : ''),
           videos: currentVids,
@@ -954,6 +1139,10 @@ export function AdminForms({
       cleanCourse.isSingleVideo = !!cleanCourse.isSingleVideo;
       cleanCourse.isProject = !!cleanCourse.isProject;
       cleanCourse.isApproved = cleanCourse.isApproved !== false;
+      cleanCourse.enableSandbox = Boolean(course.enableSandbox);
+      cleanCourse.enableFlashcards = Boolean(course.enableFlashcards);
+      cleanCourse.enableLessonQuiz = Boolean(course.enableLessonQuiz);
+      cleanCourse.enableCourseExam = Boolean(course.enableCourseExam);
       cleanCourse.videos = Array.isArray(cleanCourse.videos) ? cleanCourse.videos : [];
       cleanCourse.resources = Array.isArray(cleanCourse.resources) ? cleanCourse.resources : [];
       // Guarantee high timestamp for newly created courses so they are always at the top of the list
@@ -1010,8 +1199,27 @@ export function AdminForms({
         cleanCourse.totalComments = cleanCourse.videos.reduce((acc: number, v: any) => acc + (v.commentCount || 0), 0);
         cleanCourse.lastSyncedAt = Date.now();
       }
+
+      const detectedContributors = getCourseContributors(cleanCourse);
+      cleanCourse.isMultiChannel = Boolean(cleanCourse.isMultiChannel) || detectedContributors.length > 1;
+      if (cleanCourse.isMultiChannel) {
+        cleanCourse.playlistId = '';
+        if (!cleanCourse.instructor?.trim() && detectedContributors.length > 0) {
+          cleanCourse.instructor = formatContributorsSummary(detectedContributors, 3);
+        }
+      }
       
       await addOrUpdateCourse(cleanCourse as Course);
+      try {
+        await saveCourseFeatures(cleanCourse.id, {
+          enableSandbox: cleanCourse.enableSandbox,
+          enableFlashcards: cleanCourse.enableFlashcards,
+          enableLessonQuiz: cleanCourse.enableLessonQuiz,
+          enableCourseExam: cleanCourse.enableCourseExam,
+        });
+      } catch (e) {
+        console.warn("Could not save course_features doc:", e);
+      }
       await loadContent();
       onClose();
     } catch (err: any) {
@@ -1431,8 +1639,23 @@ export function AdminForms({
         {/* FIXED HEADER */}
         <div className="px-4 py-3.5 sm:p-5 border-b border-border/80 bg-muted/30 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
-              {type === 'course' || type === 'book' ? <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" /> : type === 'path' ? <MapIcon className="w-4 h-4 sm:w-5 sm:h-5" /> : type === 'notification' ? <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" /> : <Plus className="w-4 h-4 sm:w-5 sm:h-5" />}
+            <div className={cn(
+              "w-9 h-9 sm:w-11 sm:h-11 rounded-2xl border flex items-center justify-center shrink-0",
+              type === 'course' && course.isMultiChannel
+                ? "bg-indigo-500/10 border-indigo-500/25 text-indigo-600 dark:text-indigo-400"
+                : "bg-primary/10 border-primary/20 text-primary"
+            )}>
+              {type === 'course' && course.isMultiChannel ? (
+                <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
+              ) : type === 'course' || type === 'book' ? (
+                <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
+              ) : type === 'path' ? (
+                <MapIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+              ) : type === 'notification' ? (
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+              ) : (
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+              )}
             </div>
             <div className="min-w-0">
               <h2 className="text-sm sm:text-lg font-black text-foreground tracking-tight truncate">
@@ -1442,18 +1665,32 @@ export function AdminForms({
                       ? 'تعديل المسار التعليمي وخريطة الطريق التفاعلية'
                       : 'إنشاء مسار تعليمي جديد وخريطة طريق تفاعلية'
                     : `${itemToEdit?.id ? 'Edit' : 'Create New'} Learning Path & Interactive Roadmap`
-                  : `${itemToEdit?.id ? 'Edit' : 'Create New'} ${type === 'course' ? (course.isProject ? 'Real Project / Course' : 'Course / Masterclass') : type === 'book' ? 'Book & Video Summary' : type === 'notification' ? 'Push Notification' : 'Ad Banner'}`}
+                  : type === 'course' && course.isMultiChannel
+                    ? language === 'ar'
+                      ? `${itemToEdit?.id ? 'تعديل' : 'إنشاء'} قائمة تشغيل متعددة القنوات (Skilliq Collection)`
+                      : `${itemToEdit?.id ? 'Edit' : 'Create'} Multi-Channel Curated Playlist (Skilliq Collection)`
+                    : type === 'course'
+                      ? language === 'ar'
+                        ? `${itemToEdit?.id ? 'تعديل' : 'إنشاء'} ${course.isProject ? 'مشروع عملي حقيقي' : 'دورة تعليمية / ماستركلاس'}`
+                        : `${itemToEdit?.id ? 'Edit' : 'Create New'} ${course.isProject ? 'Real Project / Course' : 'Course / Masterclass'}`
+                      : `${itemToEdit?.id ? 'Edit' : 'Create New'} ${type === 'book' ? 'Book & Video Summary' : type === 'notification' ? 'Push Notification' : 'Ad Banner'}`}
               </h2>
               <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 line-clamp-1 sm:line-clamp-2">
-                {type === 'course'
-                  ? 'Configure course details, curriculum videos, and instructor profile.'
-                  : type === 'book'
-                    ? 'Add English & Arabic YouTube video links, auto-fetch channel info, and customize cover, author, summary & Amazon buy buttons.'
-                    : type === 'path'
-                      ? language === 'ar'
-                        ? 'رتب الدورات يدوياً، وأضف شرحاً بصرياً وخريطة طريق تفاعلية مع الأدوات والروابط والصور لمساعدة الطلاب دون تشتيت.'
-                        : 'Organize sequential courses manually, build an interactive graphic roadmap, or clear & customize stages, tools, images, and links.'
-                      : 'Manage platform content stored in Firestore.'}
+                {type === 'course' && course.isMultiChannel
+                  ? language === 'ar'
+                    ? 'اجمع فيديوهات وقوائم تشغيل من عدة قنوات ومعلمين في دورة واحدة تظهر في Skilliq Collection وتوثّق الجميع في الشهادة.'
+                    : 'Combine lessons from multiple YouTube channels into one complete course published to Skilliq Collection with shared certificates.'
+                  : type === 'course'
+                    ? language === 'ar'
+                      ? 'أضف تفاصيل الدورة، استورد قائمة يوتيوب أو أضف الدروس، وحدد ملف المحاضر والملفات المرفقة.'
+                      : 'Configure course details, curriculum videos, and instructor profile.'
+                    : type === 'book'
+                      ? 'Add English & Arabic YouTube video links, auto-fetch channel info, and customize cover, author, summary & Amazon buy buttons.'
+                      : type === 'path'
+                        ? language === 'ar'
+                          ? 'رتب الدورات يدوياً، وأضف شرحاً بصرياً وخريطة طريق تفاعلية مع الأدوات والروابط والصور لمساعدة الطلاب دون تشتيت.'
+                          : 'Organize sequential courses manually, build an interactive graphic roadmap, or clear & customize stages, tools, images, and links.'
+                        : 'Manage platform content stored in Firestore.'}
               </p>
             </div>
           </div>
@@ -1543,8 +1780,9 @@ export function AdminForms({
 
         {/* STEP / TAB NAVIGATION (When editing/creating a course) */}
         {type === 'course' && (
-          <div className="px-4 sm:px-6 py-2 border-b border-border/60 bg-card flex items-center gap-1.5 overflow-x-auto shrink-0 text-xs font-bold">
+          <div className="px-3 sm:px-6 py-2.5 border-b border-border/60 bg-card flex items-center gap-1.5 overflow-x-auto sm:flex-wrap no-scrollbar shrink-0 text-xs font-bold">
             <button
+              type="button"
               onClick={() => setCourseStep('basics')}
               className={cn(
                 "px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5",
@@ -1553,10 +1791,11 @@ export function AdminForms({
                   : "bg-muted/50 text-muted-foreground hover:text-foreground"
               )}
             >
-              <span>1. Basics & Details</span>
+              <span>{language === 'ar' ? '1. البيانات والتصنيف' : '1. Basics & Details'}</span>
             </button>
 
             <button
+              type="button"
               onClick={() => setCourseStep('videos')}
               className={cn(
                 "group px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5",
@@ -1566,7 +1805,11 @@ export function AdminForms({
               )}
             >
               <Youtube className={cn("w-3.5 h-3.5 transition-colors", courseStep === 'videos' ? "text-white" : "text-red-500")} />
-              <span>2. Videos & YouTube Playlist</span>
+              <span>
+                {language === 'ar'
+                  ? (course.isMultiChannel ? '2. الدروس وقنوات يوتيوب' : '2. الدروس وقائمة التشغيل')
+                  : (course.isMultiChannel ? '2. Videos & Multi-Channel Links' : '2. Videos & YouTube Playlist')}
+              </span>
               <span
                 className={cn(
                   "text-[10px] font-extrabold font-mono tabular-nums px-1.5 py-0.5 rounded-full border transition-all",
@@ -1580,6 +1823,7 @@ export function AdminForms({
             </button>
 
             <button
+              type="button"
               onClick={() => setCourseStep('instructor')}
               className={cn(
                 "px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5",
@@ -1589,10 +1833,11 @@ export function AdminForms({
               )}
             >
               <User className="w-3.5 h-3.5" />
-              <span>3. Instructor & Thumbnail</span>
+              <span>{language === 'ar' ? '3. المحاضرون والغلاف' : '3. Instructor & Thumbnail'}</span>
             </button>
 
             <button
+              type="button"
               onClick={() => setCourseStep('resources')}
               className={cn(
                 "px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5",
@@ -1602,7 +1847,7 @@ export function AdminForms({
               )}
             >
               <LinkIcon className="w-3.5 h-3.5" />
-              <span>4. Resources</span>
+              <span>{language === 'ar' ? '4. المصادر والملفات' : '4. Resources'}</span>
             </button>
           </div>
         )}
@@ -1625,14 +1870,51 @@ export function AdminForms({
               {/* STEP 1: BASICS */}
               {courseStep === 'basics' && (
                 <div className="space-y-4">
+                  {course.isMultiChannel && (
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 text-xs font-black text-indigo-700 dark:text-indigo-300">
+                          <Layers className="w-4 h-4 shrink-0" />
+                          <span>
+                            {language === 'ar'
+                              ? 'وضع القائمة متعددة القنوات (تُنشر في Skilliq Collection)'
+                              : 'Multi-Channel Curated Playlist Mode (Publishes to Skilliq Collection)'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          {language === 'ar'
+                            ? '1) اكتب عنوان الدورة واختر التصنيف · 2) انتقل للخطوة الثانية وأضف روابط فيديوهات أو قوائم من عدة قنوات · 3) احفظ لتظهر في Skilliq Collection والشهادات.'
+                            : '1) Name & categorize your playlist · 2) Jump to Step 2 and paste single video or playlist links from different channels · 3) Save to publish in Skilliq Collection.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBatchImport(true);
+                          setCourseStep('videos');
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shrink-0 cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <span>{language === 'ar' ? 'الخطوة 2: إضافة روابط يوتيوب' : 'Step 2: Add Multi-Channel Links'}</span>
+                        <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                      </button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="col-span-1 sm:col-span-2">
-                      <label className="block text-xs font-bold text-foreground mb-1">Course Title *</label>
+                      <label className="block text-xs font-bold text-foreground mb-1">
+                        {language === 'ar' ? 'عنوان الدورة *' : 'Course Title *'}
+                      </label>
                       <input 
                         value={course.title || ''} 
                         onChange={e => setCourse({ ...course, title: e.target.value })} 
                         className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
-                        placeholder="e.g. Modern Full-Stack Development with TypeScript" 
+                        placeholder={
+                          course.isMultiChannel
+                            ? (language === 'ar' ? 'مثال: دورة اللغة الإنجليزية A1 المتكاملة (مجمعة من عدة قنوات)' : 'e.g. Complete English A1 Playlist (Multi-Channel Collection)')
+                            : (language === 'ar' ? 'مثال: تطوير الويب الحديث باستخدام TypeScript' : 'e.g. Modern Full-Stack Development with TypeScript')
+                        } 
                       />
                     </div>
 
@@ -1771,39 +2053,49 @@ export function AdminForms({
                     </div>
 
                     <div className="col-span-1 sm:col-span-2">
-                      <label className="block text-xs font-bold text-foreground mb-1">Description</label>
+                      <label className="block text-xs font-bold text-foreground mb-1">
+                        {language === 'ar' ? 'وصف الدورة (Description)' : 'Description'}
+                      </label>
                       <textarea 
                         value={course.description || ''} 
                         onChange={e => setCourse({ ...course, description: e.target.value })} 
                         className="w-full bg-card border border-border/80 rounded-xl p-3 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
                         rows={3} 
-                        placeholder="Provide an overview of what students will learn in this course..."
+                        placeholder={language === 'ar' ? 'اكتب نبذة واضحة عما سيتعلمه الطالب في هذه الدورة...' : 'Provide an overview of what students will learn in this course...'}
                       />
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-foreground mb-1">Audio / Subtitles Language</label>
+                      <label className="block text-xs font-bold text-foreground mb-1">
+                        {language === 'ar' ? 'لغة الشرح / الصوت' : 'Audio / Subtitles Language'}
+                      </label>
                       <select 
                         value={course.language || 'English'} 
                         onChange={e => setCourse({ ...course, language: e.target.value })} 
                         className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
                       >
-                        <option value="English">English</option>
-                        <option value="Arabic">Arabic</option>
-                        <option value="Both">Both (EN & AR)</option>
+                        <option value="English">{language === 'ar' ? 'الإنجليزية (English)' : 'English'}</option>
+                        <option value="Arabic">{language === 'ar' ? 'العربية (Arabic)' : 'Arabic'}</option>
+                        <option value="Both">{language === 'ar' ? 'كلاهما (EN & AR)' : 'Both (EN & AR)'}</option>
                       </select>
                     </div>
 
                     <div className="flex flex-col gap-2.5 self-end sm:pb-2">
-                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-foreground">
-                        <input 
-                          type="checkbox" 
-                          checked={Boolean(course.isSingleVideo)} 
-                          onChange={e => setCourse({ ...course, isSingleVideo: e.target.checked })} 
-                          className="w-4 h-4 rounded text-primary focus:ring-primary" 
-                        />
-                        <span>Is this a Masterclass / Single Long Video? (2h+ Video)</span>
-                      </label>
+                      {!course.isMultiChannel && (
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-foreground bg-muted/40 border border-border/70 px-3 py-2 rounded-xl">
+                          <input 
+                            type="checkbox" 
+                            checked={Boolean(course.isSingleVideo)} 
+                            onChange={e => setCourse({ ...course, isSingleVideo: e.target.checked })} 
+                            className="w-4 h-4 rounded text-primary focus:ring-primary" 
+                          />
+                          <span>
+                            {language === 'ar'
+                              ? 'هل هذا فيديو ماستركلاس طويل؟ (فيديو واحد 2+ ساعة)'
+                              : 'Is this a Masterclass / Single Long Video? (2h+ Video)'}
+                          </span>
+                        </label>
+                      )}
 
                       <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-3 py-2 rounded-xl">
                         <input 
@@ -1834,6 +2126,114 @@ export function AdminForms({
                         />
                       </div>
                     )}
+
+                    {/* Interactive Tools Visibility / الأدوات التفاعلية المتاحة للطلاب في هذا الكورس */}
+                    <div className="col-span-1 sm:col-span-2 p-4 bg-muted/40 rounded-2xl border border-border/80 space-y-3 mt-1">
+                      <div>
+                        <span className="text-xs sm:text-sm font-black text-foreground block">
+                          {language === 'ar' ? 'الأدوات التفاعلية المتاحة للطلاب (Interactive Tools for Students)' : 'Interactive Tools for Students'}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground block mt-0.5">
+                          {language === 'ar'
+                            ? 'حدد ما إذا كنت تريد إظهار الطرفية البرمجية، البطاقات، أو الاختبارات في هذا الكورس. لن تظهر للطلاب إلا إذا تم تفعيلها هنا.'
+                            : 'Choose which interactive tools appear in this course toolbar. Hidden by default unless checked here.'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        {/* Terminal / Sandbox Toggle */}
+                        <label className={cn(
+                          "flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all",
+                          course.enableSandbox
+                            ? "bg-emerald-500/10 border-emerald-500/40 text-foreground shadow-2xs"
+                            : "bg-card border-border/70 hover:bg-muted text-muted-foreground"
+                        )}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(course.enableSandbox)}
+                            onChange={e => setCourse({ ...course, enableSandbox: e.target.checked })}
+                            className="w-4 h-4 mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs font-bold text-foreground block">
+                              💻 {language === 'ar' ? 'محاكي الأكواد والطرفية (Terminal & Sandbox)' : 'Code Sandbox & Terminal'}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block mt-0.5">
+                              {language === 'ar' ? 'مناسب لكورسات البرمجة ولينكس والويب' : 'For coding, dev, & Linux command courses'}
+                            </span>
+                          </div>
+                        </label>
+
+                        {/* Smart Flashcards Toggle */}
+                        <label className={cn(
+                          "flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all",
+                          course.enableFlashcards
+                            ? "bg-amber-500/10 border-amber-500/40 text-foreground shadow-2xs"
+                            : "bg-card border-border/70 hover:bg-muted text-muted-foreground"
+                        )}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(course.enableFlashcards)}
+                            onChange={e => setCourse({ ...course, enableFlashcards: e.target.checked })}
+                            className="w-4 h-4 mt-0.5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs font-bold text-foreground block">
+                              ✨ {language === 'ar' ? 'بطاقات المراجعة الذكية (Flashcards)' : 'Smart Flashcards'}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block mt-0.5">
+                              {language === 'ar' ? 'مراجعة المفاهيم السريعة وكسب نقاط XP' : 'Quick revision cards & XP rewards'}
+                            </span>
+                          </div>
+                        </label>
+
+                        {/* Lesson Quiz Toggle */}
+                        <label className={cn(
+                          "flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all",
+                          course.enableLessonQuiz
+                            ? "bg-primary/10 border-primary/40 text-foreground shadow-2xs"
+                            : "bg-card border-border/70 hover:bg-muted text-muted-foreground"
+                        )}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(course.enableLessonQuiz)}
+                            onChange={e => setCourse({ ...course, enableLessonQuiz: e.target.checked })}
+                            className="w-4 h-4 mt-0.5 rounded text-primary focus:ring-primary cursor-pointer"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs font-bold text-foreground block">
+                              🎖️ {language === 'ar' ? 'اختبارات الدروس (Lesson Quizzes)' : 'Lesson Quizzes'}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block mt-0.5">
+                              {language === 'ar' ? 'زر اختبار الدرس في شريط الفيديو وقائمة الدروس' : 'Quiz button in header & beside each lesson in playlist'}
+                            </span>
+                          </div>
+                        </label>
+
+                        {/* Course Exam Toggle */}
+                        <label className={cn(
+                          "flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all",
+                          course.enableCourseExam
+                            ? "bg-indigo-500/10 border-indigo-500/40 text-foreground shadow-2xs"
+                            : "bg-card border-border/70 hover:bg-muted text-muted-foreground"
+                        )}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(course.enableCourseExam)}
+                            onChange={e => setCourse({ ...course, enableCourseExam: e.target.checked })}
+                            className="w-4 h-4 mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs font-bold text-foreground block">
+                              🏆 {language === 'ar' ? 'اختبار الدورة الشامل (Course Exam)' : 'Course Certification Exam'}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block mt-0.5">
+                              {language === 'ar' ? 'اختبار التحصيل النهائي قبل استلام الشهادة' : 'Final test before earning course certificate'}
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1842,19 +2242,57 @@ export function AdminForms({
               {courseStep === 'videos' && (
                 <div className="space-y-5">
                   {/* SMART YOUTUBE IMPORT BOX */}
-                  <div className="p-4 rounded-2xl bg-gradient-to-r from-red-500/10 via-red-500/5 to-card border border-red-500/20 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Youtube className="w-5 h-5 text-red-500" />
+                  <div className={cn(
+                    "p-4 rounded-2xl border space-y-3",
+                    course.isMultiChannel
+                      ? "bg-gradient-to-r from-indigo-500/10 via-red-500/5 to-card border-indigo-500/25"
+                      : "bg-gradient-to-r from-red-500/10 via-red-500/5 to-card border-red-500/20"
+                  )}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Youtube className="w-5 h-5 text-red-500 shrink-0" />
                         <span className="text-xs font-black text-foreground uppercase tracking-wider">
-                          1-Click YouTube Playlist Importer
+                          {course.isMultiChannel
+                            ? (language === 'ar'
+                              ? 'مستورد القنوات المتعددة (Skilliq Collection)'
+                              : 'Multi-Channel Curated Playlist Importer')
+                            : (language === 'ar'
+                              ? 'استيراد قائمة تشغيل أو فيديو يوتيوب بضغطة واحدة'
+                              : '1-Click YouTube Playlist & Video Importer')}
                         </span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground font-mono">Auto-detects IDs & Durations</span>
+
+                      {Boolean(course.isMultiChannel) && (
+                        <button
+                          type="button"
+                          onClick={() => setShowBatchImport(prev => !prev)}
+                          className={cn(
+                            "text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5",
+                            showBatchImport
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card text-foreground border-border hover:bg-muted"
+                          )}
+                        >
+                          <Layers className="w-3.5 h-3.5 shrink-0" />
+                          <span>
+                            {showBatchImport
+                              ? (language === 'ar' ? 'إخفاء الاستيراد المتعدد' : 'Hide Batch Import')
+                              : (language === 'ar' ? 'لصق عدة روابط دفعة واحدة' : 'Batch Multi-Link Import')}
+                          </span>
+                        </button>
+                      )}
                     </div>
 
-                    <p className="text-xs text-muted-foreground">
-                      Paste any public YouTube Playlist URL (e.g. <code className="bg-muted px-1 py-0.5 rounded text-[10px]">https://www.youtube.com/playlist?list=PL...</code>). All videos, titles, and channel details will be imported automatically!
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {course.isMultiChannel ? (
+                        language === 'ar'
+                          ? <>ألصق رابط قائمة تشغيل (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">list=PL...</code>) أو رابط فيديو فردي (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">watch?v=...</code>). يمكنك دمج دروس وقوائم من <strong>عدة قنوات يوتيوب</strong> في دورة واحدة متكاملة!</>
+                          : <>Paste a YouTube Playlist URL (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">list=PL...</code>) or individual Video URL (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">watch?v=...</code>). Combine playlists and videos from <strong>multiple YouTube channels</strong> into one complete course!</>
+                      ) : (
+                        language === 'ar'
+                          ? <>ألصق رابط قائمة تشغيل يوتيوب (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">list=PL...</code>) أو رابط فيديو فردي (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">watch?v=...</code>) لاستيراد الدروس وإحصائيات القناة تلقائياً.</>
+                          : <>Paste a YouTube Playlist URL (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">list=PL...</code>) or single Video URL (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">watch?v=...</code>) to auto-import lessons, durations &amp; channel metadata.</>
+                      )}
                     </p>
 
                     <div className="flex flex-col sm:flex-row gap-2">
@@ -1869,18 +2307,69 @@ export function AdminForms({
                             handleImportPlaylist(undefined, val.trim());
                           }
                         }} 
-                        placeholder="Paste YouTube Playlist URL, ID, or Video Link here..." 
+                        placeholder={
+                          course.isMultiChannel
+                            ? (language === 'ar' ? 'ألصق رابط قائمة تشغيل أو رابط فيديو من أي قناة يوتيوب...' : 'Paste YouTube Playlist URL or Single Video URL from any channel...')
+                            : (language === 'ar' ? 'ألصق رابط قائمة تشغيل يوتيوب أو رابط الفيديو...' : 'Paste YouTube Playlist URL or Single Video URL...')
+                        } 
                         className="flex-1 bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none" 
                       />
                       <button
+                        type="button"
                         onClick={() => handleImportPlaylist()}
                         disabled={isImporting || !playlistUrlInput.trim()}
-                        className="px-5 py-2.5 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer shadow-xs"
+                        className="px-5 py-2.5 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer shadow-xs shrink-0"
                       >
                         {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                        <span>{isImporting ? 'Importing...' : 'Auto-Import Videos'}</span>
+                        <span>
+                          {isImporting
+                            ? (language === 'ar' ? 'جاري الاستيراد...' : 'Importing...')
+                            : course.isMultiChannel
+                              ? (language === 'ar' ? 'استيراد وإضافة' : 'Import & Append')
+                              : (language === 'ar' ? 'استيراد الدروس' : 'Import Playlist / Video')}
+                        </span>
                       </button>
                     </div>
+
+                    {Boolean(course.isMultiChannel) && showBatchImport && (
+                      <div className="p-3.5 rounded-xl bg-card border border-border/80 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-foreground">
+                            {language === 'ar'
+                              ? 'ألصق عدة روابط فيديوهات أو قوائم يوتيوب (رابط في كل سطر)'
+                              : 'Paste Multiple YouTube Video or Playlist Links (one per line)'}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {language === 'ar' ? 'قناة X، قناة Y، إلخ...' : 'Channel X, Channel Y, etc.'}
+                          </span>
+                        </div>
+                        <textarea
+                          rows={4}
+                          value={batchUrlsText}
+                          onChange={e => setBatchUrlsText(e.target.value)}
+                          placeholder={"https://www.youtube.com/watch?v=VIDEO_FROM_CHANNEL_X\nhttps://www.youtube.com/watch?v=VIDEO_FROM_CHANNEL_Y\nhttps://www.youtube.com/playlist?list=PL_FROM_CHANNEL_Z"}
+                          className="w-full bg-muted/30 border border-border/80 rounded-xl p-3 text-xs font-mono text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                        />
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowBatchImport(false)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted cursor-pointer"
+                          >
+                            {language === 'ar' ? 'إغلاق' : 'Cancel'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleBatchImportLinks}
+                            disabled={isBatchImporting || !batchUrlsText.trim()}
+                            className="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                          >
+                            {isBatchImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                            <span>{isBatchImporting ? (language === 'ar' ? 'جاري استيراد الروابط...' : 'Importing Links...') : (language === 'ar' ? 'استيراد جميع الروابط' : 'Import All Links')}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {importMessage && (
                       <div className={cn(
@@ -1893,14 +2382,16 @@ export function AdminForms({
                     )}
 
                     {/* Live Auto-Sync Linked Playlist ID Badge */}
-                    {course.playlistId && (
+                    {course.playlistId && !course.isMultiChannel && (
                       <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs">
                         <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold">
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: '6s' }} />
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" style={{ animationDuration: '6s' }} />
                           <span>Live Playlist Auto-Sync Active: <code className="font-mono bg-background/80 px-1.5 py-0.5 rounded">{course.playlistId}</code></span>
                         </div>
                         <span className="text-[10px] text-muted-foreground">
-                          New videos added by the creator on YouTube automatically sync into this course
+                          {language === 'ar'
+                            ? 'يتم تحديث أي دروس جديدة تُضاف على يوتيوب تلقائياً'
+                            : 'New videos added by the creator on YouTube automatically sync into this course'}
                         </span>
                       </div>
                     )}
@@ -1913,7 +2404,7 @@ export function AdminForms({
                       const liveSubsText = course.subscriberCountText || (course.subscriberCount ? formatCompactNumber(course.subscriberCount) : '0');
                       return (
                         <div className="p-3 rounded-xl bg-background/80 border border-border/80 flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
+                          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-bold">
                             <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400 bg-red-500/10 px-2.5 py-1 rounded-lg border border-red-500/20">
                               <User className="w-3.5 h-3.5" />
                               <span>{course.instructor || 'Creator'}: {liveSubsText} Followers</span>
@@ -1944,7 +2435,7 @@ export function AdminForms({
                               className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1 cursor-pointer"
                             >
                               <RefreshCw className="w-3 h-3" />
-                              <span>Refresh Live Data</span>
+                              <span>{language === 'ar' ? 'تحديث البيانات المباشرة' : 'Refresh Live Data'}</span>
                             </button>
                           )}
                         </div>
@@ -1952,31 +2443,107 @@ export function AdminForms({
                     })()}
                   </div>
 
+                  {/* CONTRIBUTING TEACHERS / CHANNELS IN THIS PLAYLIST */}
+                  {(() => {
+                    const contributors = getCourseContributors(course);
+                    const isMarkedCollection = Boolean(course.isMultiChannel);
+                    if (contributors.length === 0 && !isMarkedCollection) return null;
+                    return (
+                      <div className={cn(
+                        "p-3.5 rounded-2xl border space-y-2",
+                        isMarkedCollection
+                          ? "bg-indigo-500/5 border-indigo-500/25"
+                          : "bg-card border-border/80"
+                      )}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs font-black text-foreground">
+                            <Users className="w-4 h-4 text-primary shrink-0" />
+                            <span>
+                              {isMarkedCollection
+                                ? `Multi-Channel Curated Playlist · Skilliq Collection (${contributors.length} ${contributors.length === 1 ? 'Channel' : 'Teachers / Channels'})`
+                                : (language === 'ar' ? 'القناة / المعلم المكتشف' : 'Channel / Teacher Detected')}
+                            </span>
+                          </div>
+                          {isMarkedCollection && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                              {language === 'ar' ? 'يظهر في Skilliq Collection والشهادة' : 'Shown in Skilliq Collection & Certificate'}
+                            </span>
+                          )}
+                        </div>
+                        {contributors.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {contributors.map((contrib) => (
+                              <div
+                                key={contrib.name}
+                                className="inline-flex items-center gap-2 px-2.5 py-1 rounded-xl bg-card border border-border/80 text-xs"
+                              >
+                                {contrib.avatar ? (
+                                  <img
+                                    src={contrib.avatar}
+                                    alt={contrib.name}
+                                    className="w-5 h-5 rounded-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <Youtube className="w-3.5 h-3.5 text-red-500" />
+                                )}
+                                <span className="font-bold text-foreground">{contrib.name}</span>
+                                <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md">
+                                  {contrib.videoCount} {contrib.videoCount === 1 ? 'lesson' : 'lessons'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* VIDEOS LIST HEADER */}
-                  <div className="flex items-center justify-between pt-2">
-                    <div>
-                      <h3 className="text-sm font-black text-foreground">Course Curriculum ({course.videos?.length || 0} Videos)</h3>
-                      <p className="text-[11px] text-muted-foreground">Paste any YouTube link or ID — real views, likes, comments & duration are fetched automatically.</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-black text-foreground">
+                        {language === 'ar'
+                          ? `محتوى الدورة (${course.videos?.length || 0} درس)`
+                          : `Course Curriculum (${course.videos?.length || 0} Videos)`}
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground">
+                        {language === 'ar'
+                          ? 'ألصق أي رابط فيديو يوتيوب أو معرفه ليتم جلب المشاهدات، الإعجابات، المدة، واسم القناة تلقائياً.'
+                          : 'Paste any YouTube link or ID — real views, likes, comments, duration & channel teacher are fetched automatically.'}
+                      </p>
                     </div>
 
                     <button
+                      type="button"
                       onClick={handleAddVideo}
-                      className="px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center gap-1.5 shadow-xs hover:bg-primary/90 transition-all cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs hover:bg-primary/90 transition-all cursor-pointer shrink-0 self-start sm:self-center"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Add Video</span>
+                      <span>{language === 'ar' ? 'إضافة درس' : 'Add Video'}</span>
                     </button>
                   </div>
 
                   {/* VIDEOS LIST */}
                   <div className="space-y-3">
                     {course.videos?.map((vid, idx) => (
-                      <div key={idx} className="p-3.5 sm:p-4 rounded-xl bg-card border border-border/80 shadow-xs space-y-2">
+                      <div key={idx} className="p-3.5 sm:p-4 rounded-xl bg-card border border-border/80 shadow-xs space-y-2.5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-xs font-black px-2 py-0.5 rounded-md bg-muted text-foreground">
                               Lesson #{idx + 1}
                             </span>
+
+                            {vid.channelName && (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full border border-primary/20">
+                                {vid.channelAvatar ? (
+                                  <img src={vid.channelAvatar} alt={vid.channelName} className="w-3.5 h-3.5 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <Youtube className="w-3 h-3 text-red-500" />
+                                )}
+                                <span>{vid.channelName}</span>
+                              </span>
+                            )}
 
                             {(vid.viewCount || vid.likeCount || vid.commentCount) ? (
                               <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground bg-muted/50 px-2.5 py-0.5 rounded-full border border-border/60">
@@ -1998,13 +2565,31 @@ export function AdminForms({
                             ) : null}
                           </div>
 
-                          <div className="flex items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleMoveVideo(idx, -1)}
+                              disabled={idx === 0}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 cursor-pointer"
+                              title="Move lesson up"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveVideo(idx, 1)}
+                              disabled={idx === (course.videos?.length || 1) - 1}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 cursor-pointer"
+                              title="Move lesson down"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
                             {vid.youtubeId && (
                               <button
                                 type="button"
                                 onClick={() => handleFetchSingleVideoRealtime(idx, vid.youtubeId)}
                                 className="px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                title="Fetch real title, duration, views, likes & comments from YouTube"
+                                title="Fetch real title, duration, channel, views, likes & comments from YouTube"
                               >
                                 <RefreshCw className="w-3 h-3" />
                                 <span>Sync Real Stats</span>
@@ -2023,10 +2608,15 @@ export function AdminForms({
                               </a>
                             )}
                             <button
+                              type="button"
                               onClick={() => {
                                 const newVids = [...(course.videos || [])];
                                 newVids.splice(idx, 1);
-                                setCourse({ ...course, videos: newVids });
+                                setCourse(prev => ({
+                                  ...prev,
+                                  ...applyChannelSummaryToCourseState(prev, newVids),
+                                  videos: newVids
+                                }));
                               }}
                               className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg cursor-pointer"
                             >
@@ -2077,7 +2667,7 @@ export function AdminForms({
                                   handleFetchSingleVideoRealtime(idx, extracted);
                                 }
                               }} 
-                              placeholder="YouTube Video ID or full watch URL (auto-fetches real stats) *" 
+                              placeholder="YouTube Video ID or full watch URL (auto-fetches real stats & channel) *" 
                               className="w-full bg-muted/30 border border-border/80 rounded-lg px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary focus:outline-none font-mono" 
                             />
                           </div>
@@ -2095,6 +2685,36 @@ export function AdminForms({
                               <option value="English">English</option>
                               <option value="Arabic">Arabic</option>
                             </select>
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <input
+                              value={vid.channelName || ''}
+                              onChange={e => {
+                                const newVids = [...(course.videos || [])];
+                                newVids[idx].channelName = e.target.value;
+                                setCourse(prev => ({
+                                  ...prev,
+                                  ...applyChannelSummaryToCourseState(prev, newVids),
+                                  videos: newVids
+                                }));
+                              }}
+                              placeholder="YouTube Channel / Teacher for this lesson (auto-fetched)"
+                              className="w-full bg-muted/30 border border-border/80 rounded-lg px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <input
+                              value={vid.professorName || ''}
+                              onChange={e => {
+                                const newVids = [...(course.videos || [])];
+                                newVids[idx].professorName = e.target.value;
+                                setCourse({ ...course, videos: newVids });
+                              }}
+                              placeholder="Teacher Display Name (Optional)"
+                              className="w-full bg-muted/30 border border-border/80 rounded-lg px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary focus:outline-none"
+                            />
                           </div>
                         </div>
                       </div>
@@ -2180,24 +2800,52 @@ export function AdminForms({
                       </button>
                     </div>
 
+                    {(() => {
+                      const contributors = getCourseContributors(course);
+                      if (contributors.length <= 1) return null;
+                      return (
+                        <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/25 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-black text-primary flex items-center gap-1.5">
+                              <Users className="w-4 h-4" />
+                              <span>Multi-Channel Curated Playlist ({contributors.length} Teachers)</span>
+                            </span>
+                            <span className="text-[10px] font-semibold text-muted-foreground">
+                              Auto-linked to Certificate
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            Certificate will automatically credit <strong>{formatContributorsSummary(contributors, 3)}</strong> under Featured Channels, and show <strong>{course.professorName?.trim() || 'SkilliQ Curated Faculty'}</strong> as the Faculty Signature (leave Professor blank to use Curated Faculty).
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {contributors.map(c => (
+                              <span key={c.name} className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-card border border-border text-foreground">
+                                {c.name} ({c.videoCount})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <span className="text-[11px] font-semibold text-muted-foreground block mb-1">YouTube Channel / Instructor Name</span>
+                        <span className="text-[11px] font-semibold text-muted-foreground block mb-1">YouTube Channel / Instructor Label</span>
                         <input 
                           value={course.instructor || ''} 
-                          onChange={e => setCourse({ ...course, instructor: e.target.value, youtubeChannelName: course.youtubeChannelName || e.target.value })} 
+                          onChange={e => setCourse({ ...course, instructor: e.target.value, youtubeChannelName: e.target.value })} 
                           className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground" 
-                          placeholder="e.g. Traversy Media / Elzero Web School" 
+                          placeholder="e.g. Traversy Media / Channel X & Channel Y" 
                         />
                       </div>
 
                       <div>
-                        <span className="text-[11px] font-semibold text-muted-foreground block mb-1">Professor / Teacher Name (for Certificate)</span>
+                        <span className="text-[11px] font-semibold text-muted-foreground block mb-1">Professor / Faculty Name (for Certificate)</span>
                         <input 
                           value={course.professorName || ''} 
                           onChange={e => setCourse({ ...course, professorName: e.target.value })} 
                           className="w-full bg-card border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-foreground" 
-                          placeholder="e.g. Prof. Brad Traversy / Prof. Osama Elzero" 
+                          placeholder={getCourseContributors(course).length > 1 ? 'Leave blank for SkilliQ Curated Faculty' : 'e.g. Prof. Brad Traversy'} 
                         />
                       </div>
 
@@ -5260,16 +5908,16 @@ export function AdminForms({
         </div>
 
         {/* STICKY ACTION FOOTER */}
-        <div className="p-4 sm:p-5 border-t border-border/80 bg-card flex items-center justify-between gap-3 shrink-0">
+        <div className="p-3.5 sm:p-5 border-t border-border/80 bg-card flex flex-wrap items-center justify-between gap-2.5 shrink-0">
           <button 
             type="button" 
             onClick={onClose} 
-            className="px-4 py-2 sm:py-2.5 rounded-xl border border-border/80 bg-card hover:bg-muted text-foreground text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-98"
+            className="px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-border/80 bg-card hover:bg-muted text-foreground text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-98"
           >
             {language === 'ar' ? 'إلغاء' : 'Cancel'}
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {type === 'course' && courseStep !== 'basics' && (
               <button
                 type="button"
@@ -5278,9 +5926,9 @@ export function AdminForms({
                   else if (courseStep === 'instructor') setCourseStep('videos');
                   else if (courseStep === 'videos') setCourseStep('basics');
                 }}
-                className="px-3.5 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition-all cursor-pointer"
+                className="px-3 sm:px-3.5 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition-all cursor-pointer"
               >
-                {language === 'ar' ? 'الخطوة السابقة' : 'Previous Step'}
+                {language === 'ar' ? 'السابق' : 'Previous Step'}
               </button>
             )}
 
@@ -5292,9 +5940,9 @@ export function AdminForms({
                   else if (courseStep === 'videos') setCourseStep('instructor');
                   else if (courseStep === 'instructor') setCourseStep('resources');
                 }}
-                className="px-4 py-2 rounded-xl bg-secondary text-secondary-foreground text-xs font-bold hover:bg-secondary/90 transition-all cursor-pointer"
+                className="px-3.5 sm:px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground border border-border/70 text-xs font-bold transition-all cursor-pointer"
               >
-                {language === 'ar' ? 'الخطوة التالية' : 'Next Step'}
+                {language === 'ar' ? 'التالي' : 'Next Step'}
               </button>
             ) : null}
 
@@ -5320,7 +5968,7 @@ export function AdminForms({
                   else if (pathStep === 'roadmap') setPathStep('toolkit');
                   else if (pathStep === 'toolkit') setPathStep('preview');
                 }}
-                className="px-4 py-2 rounded-xl bg-secondary text-secondary-foreground text-xs font-bold hover:bg-secondary/90 transition-all cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground border border-border/70 text-xs font-bold transition-all cursor-pointer"
               >
                 {language === 'ar' ? 'الخطوة التالية' : 'Next Step'}
               </button>
@@ -5336,7 +5984,12 @@ export function AdminForms({
                 else if (type === 'notification') handleSaveNotification();
                 else if (type === 'banner') handleSaveBanner();
               }} 
-              className="px-5 py-2 sm:py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 active:scale-98"
+              className={cn(
+                "px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 active:scale-98",
+                type === 'course' && course.isMultiChannel
+                  ? "bg-indigo-600 hover:bg-indigo-700 text-white"
+                  : "bg-primary hover:bg-primary/90 text-primary-foreground"
+              )}
             >
               {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               <span>
@@ -5344,15 +5997,25 @@ export function AdminForms({
                   ? language === 'ar'
                     ? 'جاري الحفظ...'
                     : 'Saving...'
-                  : type === 'course'
-                    ? 'Save & Publish Course'
-                    : type === 'book'
-                      ? 'Save & Publish Book'
-                      : type === 'path'
+                  : type === 'course' && course.isMultiChannel
+                    ? language === 'ar'
+                      ? 'حفظ ونشر في Skilliq Collection'
+                      : 'Save & Publish to Skilliq Collection'
+                    : type === 'course'
+                      ? language === 'ar'
+                        ? 'حفظ ونشر الدورة'
+                        : 'Save & Publish Course'
+                      : type === 'book'
                         ? language === 'ar'
-                          ? 'حفظ ونشر المسار التعليمي'
-                          : 'Save & Publish Path'
-                        : 'Save Changes'}
+                          ? 'حفظ ونشر الكتاب'
+                          : 'Save & Publish Book'
+                        : type === 'path'
+                          ? language === 'ar'
+                            ? 'حفظ ونشر المسار التعليمي'
+                            : 'Save & Publish Path'
+                          : language === 'ar'
+                            ? 'حفظ التغييرات'
+                            : 'Save Changes'}
               </span>
             </button>
           </div>
